@@ -1,0 +1,13 @@
+services:
+  meridian:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - meridian_data:/data
+    environment:
+      MERIDIAN_SIGNING_KEY: ${MERIDIAN_SIGNING_KEY:?MERIDIAN_SIGNING_KEY is required}
+    restart: unless-stopped
+
+volumes:
+  meridian_data:

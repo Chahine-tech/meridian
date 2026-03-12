@@ -1,0 +1,18 @@
+# Rust
+/target/
+Cargo.lock
+
+# Data
+/data/
+
+# SDK
+sdk/node_modules/
+sdk/dist/
+sdk/bun.lock
+
+# Env
+.env
+*.env
+
+# OS
+.DS_Store
