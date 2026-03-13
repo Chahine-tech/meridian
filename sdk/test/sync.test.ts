@@ -135,7 +135,7 @@ describe("parseToken", () => {
       namespace: "my-room",
       client_id: 42,
       expires_at: Date.now() + 3_600_000,
-      permissions: { read: true, write: true, admin: false },
+      permissions: { read: ["*"], write: ["*"], admin: false },
     });
     const claims = await Effect.runPromise(parseToken(token));
     expect(claims.namespace).toBe("my-room");
@@ -157,7 +157,7 @@ describe("parseToken", () => {
       namespace: "ns",
       client_id: 1,
       expires_at: Date.now() + 3_600_000,
-      permissions: { read: true, write: false, admin: false },
+      permissions: { read: ["*"], write: [], admin: false },
     });
     const claims = await Effect.runPromise(parseToken(token));
     const result = await Effect.runPromise(checkTokenExpiry(claims));
@@ -169,7 +169,7 @@ describe("parseToken", () => {
       namespace: "ns",
       client_id: 1,
       expires_at: 1,
-      permissions: { read: true, write: false, admin: false },
+      permissions: { read: ["*"], write: [], admin: false },
     });
     const claims = await Effect.runPromise(parseToken(token));
     const err = await Effect.runPromise(checkTokenExpiry(claims).pipe(Effect.flip));

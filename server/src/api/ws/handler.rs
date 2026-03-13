@@ -33,6 +33,8 @@ pub trait WsState: Clone + Send + Sync + 'static {
     fn subscriptions(&self) -> &Arc<SubscriptionManager>;
 }
 
+use crate::auth::claims::TokenClaims;
+
 // ---------------------------------------------------------------------------
 // WebSocket upgrade handler
 // ---------------------------------------------------------------------------
@@ -53,24 +55,21 @@ pub async fn ws_upgrade_handler<S>(
 where
     S: WsState,
 {
-    if claims.namespace != ns {
-        return axum::http::StatusCode::FORBIDDEN.into_response();
-    }
-    if !claims.can_read() {
+    if claims.namespace != ns || !claims.can_read() {
         return axum::http::StatusCode::FORBIDDEN.into_response();
     }
 
     let client_id = claims.client_id;
     info!(ns, client_id, "WebSocket upgrade");
 
-    ws.on_upgrade(move |socket| handle_socket(socket, ns, client_id, state))
+    ws.on_upgrade(move |socket| handle_socket(socket, ns, client_id, claims, state))
 }
 
 // ---------------------------------------------------------------------------
 // Per-connection loop
 // ---------------------------------------------------------------------------
 
-async fn handle_socket<S: WsState>(mut socket: WebSocket, ns: String, client_id: u64, state: S) {
+async fn handle_socket<S: WsState>(mut socket: WebSocket, ns: String, client_id: u64, claims: TokenClaims, state: S) {
     // Subscribe to namespace broadcast channel.
     let mut broadcast_rx = state.subscriptions().subscribe(&ns);
 
@@ -90,7 +89,7 @@ async fn handle_socket<S: WsState>(mut socket: WebSocket, ns: String, client_id:
                         break;
                     }
                     Some(Ok(msg)) => {
-                        if !handle_client_message(&mut socket, &state, &ns, client_id, msg, &mut op_seq).await {
+                        if !handle_client_message(&mut socket, &state, &ns, client_id, &claims, msg, &mut op_seq).await {
                             break;
                         }
                     }
@@ -133,6 +132,7 @@ async fn handle_client_message<S: WsState>(
     state: &S,
     ns: &str,
     client_id: u64,
+    claims: &TokenClaims,
     msg: Message,
     seq: &mut u64,
 ) -> bool {
@@ -166,6 +166,11 @@ async fn handle_client_message<S: WsState>(
         }
 
         ClientMsg::Op { crdt_id, op_bytes } => {
+            if !claims.can_write_key(&crdt_id) {
+                send_error(socket, 403, "insufficient permissions for key").await;
+                return true;
+            }
+
             let op: CrdtOp = match rmp_serde::decode::from_slice(&op_bytes) {
                 Ok(o) => o,
                 Err(e) => {
@@ -205,6 +210,11 @@ async fn handle_client_message<S: WsState>(
         }
 
         ClientMsg::Sync { crdt_id, since_vc } => {
+            if !claims.can_read_key(&crdt_id) {
+                send_error(socket, 403, "insufficient permissions for key").await;
+                return true;
+            }
+
             let vc = match rmp_serde::decode::from_slice(&since_vc) {
                 Ok(v) => v,
                 Err(_) => {

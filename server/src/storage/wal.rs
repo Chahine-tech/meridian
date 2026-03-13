@@ -41,6 +41,8 @@ pub struct Wal {
     /// Monotonic counter; wrapped in std::sync::Mutex because the lock is
     /// never held across an `.await` point.
     next_seq: Mutex<u64>,
+    /// Last compacted sequence number — entries < this are gone.
+    checkpoint_seq: Mutex<u64>,
 }
 
 impl Wal {
@@ -58,11 +60,18 @@ impl Wal {
             .map(|k| Self::key_to_seq(&k))
             .unwrap_or(0);
 
-        debug!(last_seq = last, "WAL opened");
+        // Restore checkpoint_seq from a persisted meta key if present.
+        let checkpoint = tree
+            .get(b"_checkpoint")?
+            .and_then(|v| v.as_ref().try_into().ok().map(u64::from_be_bytes))
+            .unwrap_or(0);
+
+        debug!(last_seq = last, checkpoint_seq = checkpoint, "WAL opened");
 
         Ok(Self {
             tree,
             next_seq: Mutex::new(last + 1),
+            checkpoint_seq: Mutex::new(checkpoint),
         })
     }
 
@@ -123,6 +132,18 @@ impl Wal {
             .lock()
             .expect("WAL mutex poisoned")
             .saturating_sub(1)
+    }
+
+    /// The last compacted sequence number (entries < this have been removed).
+    pub fn checkpoint_seq(&self) -> u64 {
+        *self.checkpoint_seq.lock().expect("WAL mutex poisoned")
+    }
+
+    /// Persist the new checkpoint sequence number.
+    pub fn set_checkpoint_seq(&self, seq: u64) {
+        *self.checkpoint_seq.lock().expect("WAL mutex poisoned") = seq;
+        // Persist so we survive restarts.
+        let _ = self.tree.insert(b"_checkpoint", &seq.to_be_bytes());
     }
 
     // -- helpers --

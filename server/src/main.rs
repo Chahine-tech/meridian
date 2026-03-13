@@ -10,7 +10,7 @@ use meridian_server::{
     api::ws::SubscriptionManager,
     auth::TokenSigner,
     storage::SledStore,
-    tasks::{run_presence_gc, run_snapshot_flusher},
+    tasks::{run_presence_gc, run_snapshot_flusher, run_wal_compactor},
     AppState,
 };
 
@@ -91,6 +91,11 @@ async fn main() -> anyhow::Result<()> {
         cancel.clone(),
     ));
 
+    let compact_handle = tokio::spawn(run_wal_compactor(
+        Arc::clone(&store),
+        cancel.clone(),
+    ));
+
     // ----- HTTP server -----
     let router = build_router(state);
     let listener = TcpListener::bind(&config.bind).await?;
@@ -108,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     // Wait for background tasks to finish their final flush/gc tick.
-    let _ = tokio::join!(gc_handle, flush_handle);
+    let _ = tokio::join!(gc_handle, flush_handle, compact_handle);
 
     info!("Meridian stopped cleanly");
     Ok(())

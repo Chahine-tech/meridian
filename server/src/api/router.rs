@@ -11,6 +11,7 @@ use crate::auth::{auth_middleware, TokenSigner};
 
 use super::handlers::{
     crdt::{get_crdt, get_sync, post_op},
+    history::get_history,
     tokens::issue_token,
     AppStateExt,
 };
@@ -37,6 +38,7 @@ where
         .route("/v1/namespaces/{ns}/crdts/{id}", get(get_crdt::<S>))
         .route("/v1/namespaces/{ns}/crdts/{id}/ops", post(post_op::<S>))
         .route("/v1/namespaces/{ns}/crdts/{id}/sync", get(get_sync::<S>))
+        .route("/v1/namespaces/{ns}/crdts/{id}/history", get(get_history::<S>))
         // Token issuance (admin only)
         .route("/v1/namespaces/{ns}/tokens", post(issue_token::<S>))
         // WebSocket

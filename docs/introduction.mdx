@@ -5,6 +5,8 @@ description: Self-hosted real-time CRDT store. No locks, no merge conflicts.
 
 Meridian is a self-hosted alternative to Liveblocks and PartyKit. Concurrent updates from multiple clients converge automatically using CRDTs — no operational transforms, no conflict resolution code on your end.
 
+Sub-millisecond merge latency on a single node. Deltas are broadcast over WebSocket as soon as an op is applied — no polling, no round-trips.
+
 ## What it is
 
 - **Server**: Rust binary, single file, no external dependencies. Stores state in an embedded sled database.

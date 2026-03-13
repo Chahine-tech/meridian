@@ -70,3 +70,28 @@ interface PresenceEntry<T> {
 ## TTL behavior
 
 Entries expire when `now > expiresAtMs`. Call `heartbeat()` periodically to keep the entry alive. `value()` always filters out expired entries before returning.
+
+## Server restart behavior
+
+Presence is **ephemeral by design** — entries are stored in sled but the TTL clock is wall-time based. When the server restarts:
+
+- All presence entries that were already expired remain expired.
+- Entries that were still live will **appear missing** for connected clients until clients re-heartbeat.
+- Clients receive a fresh empty state on reconnect, then repopulate as they send heartbeats.
+
+This is expected behavior. To handle it gracefully, send a `heartbeat()` immediately after the WebSocket connects (or reconnects):
+
+```ts
+const room = client.presence("pr:room-123");
+
+client.waitForConnected().then(() => {
+  room.heartbeat({ status: "online" }, 30_000);
+});
+
+// And refresh periodically
+setInterval(() => room.heartbeat({ status: "online" }, 30_000), 10_000);
+```
+
+<Note>
+  There is no server-side "grace period" after restart. If your use case requires durable presence (e.g., last-seen timestamps), use a `LwwRegister` instead — it persists across restarts.
+</Note>

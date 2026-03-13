@@ -23,9 +23,11 @@ pub struct IssueTokenRequest {
 
 #[derive(Deserialize)]
 pub struct PermissionsDto {
-    pub read: bool,
-    pub write: bool,
-    pub admin: bool,
+    /// Glob patterns for readable keys. `["*"]` = all keys. Omit = no read access.
+    pub read: Option<Vec<String>>,
+    /// Glob patterns for writable keys. `["*"]` = all keys. Omit = no write access.
+    pub write: Option<Vec<String>>,
+    pub admin: Option<bool>,
 }
 
 /// Issue a new token for `client_id` in the caller's namespace.
@@ -44,9 +46,9 @@ pub async fn issue_token<S: AppStateExt>(
     }
 
     let perms = req.permissions.map(|p| Permissions {
-        read: p.read,
-        write: p.write,
-        admin: p.admin,
+        read: p.read.unwrap_or_else(|| vec!["*".into()]),
+        write: p.write.unwrap_or_else(|| vec!["*".into()]),
+        admin: p.admin.unwrap_or(false),
     }).unwrap_or_else(Permissions::read_write);
 
     let new_claims = TokenClaims::new(

@@ -30,7 +30,7 @@ pub async fn get_crdt<S: AppStateExt>(
     ClaimsExt(claims): ClaimsExt,
     State(state): State<S>,
 ) -> Response {
-    if !claims.can_read() || claims.namespace != ns {
+    if claims.namespace != ns || !claims.can_read_key(&id) {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -58,7 +58,7 @@ pub async fn post_op<S: AppStateExt>(
     State(state): State<S>,
     body: axum::body::Bytes,
 ) -> Response {
-    if !claims.can_write() || claims.namespace != ns {
+    if claims.namespace != ns || !claims.can_write_key(&id) {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -151,7 +151,7 @@ pub async fn get_sync<S: AppStateExt>(
     ClaimsExt(claims): ClaimsExt,
     State(state): State<S>,
 ) -> Response {
-    if !claims.can_read() || claims.namespace != ns {
+    if claims.namespace != ns || !claims.can_read_key(&id) {
         return StatusCode::FORBIDDEN.into_response();
     }
 

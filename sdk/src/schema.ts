@@ -36,8 +36,8 @@ export type ClientId = number;
 // ---------------------------------------------------------------------------
 
 export const Permissions = Schema.Struct({
-  read: Schema.Boolean,
-  write: Schema.Boolean,
+  read: Schema.Array(Schema.String),
+  write: Schema.Array(Schema.String),
   admin: Schema.Boolean,
 });
 export type Permissions = typeof Permissions.Type;

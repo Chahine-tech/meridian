@@ -18,7 +18,7 @@ Claims:
 | `namespace` | `string` | The namespace this token grants access to |
 | `client_id` | `number` | Unique numeric ID for this client |
 | `expires_at` | `number` | Expiry timestamp in milliseconds |
-| `permissions` | `object` | `{ read: bool, write: bool }` |
+| `permissions` | `object` | `{ read: string[], write: string[] }` — glob patterns |
 
 ## Issue a token via HTTP
 
@@ -26,7 +26,7 @@ Claims:
 curl -X POST http://localhost:3000/v1/namespaces/my-room/tokens \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{ "client_id": 42, "ttl_ms": 3600000, "permissions": { "read": true, "write": true } }'
+  -d '{ "client_id": 42, "ttl_ms": 3600000, "permissions": { "read": ["*"], "write": ["*"] } }'
 ```
 
 Response:
@@ -47,12 +47,59 @@ const result = await Effect.runPromise(
   client.http.issueToken("my-room", {
     client_id: 42,
     ttl_ms: 3_600_000,
-    permissions: { read: true, write: true },
+    permissions: { read: ["*"], write: ["*"] },
   })
 );
 
 console.log(result.token);
 ```
+
+## Scoped permissions
+
+Permissions use glob patterns matched against the CRDT key (`crdt_id`). This lets you issue tokens that only access specific keys — critical for multi-tenant namespaces where multiple users share the same namespace.
+
+| Pattern | Matches |
+|---------|---------|
+| `"*"` | All keys (full access) |
+| `"gc:*"` | All GCounter keys |
+| `"or:cart-42"` | Only `or:cart-42` |
+| `"or:cart-*"` | All cart keys for any user |
+| `"lw:title"` | Only the `lw:title` key |
+
+### Example: per-user scoped token
+
+```bash
+# User 42 can read everything but only write to their own cart
+curl -X POST http://localhost:3000/v1/namespaces/shop/tokens \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_id": 42,
+    "permissions": {
+      "read": ["*"],
+      "write": ["or:cart-42", "pr:room-*"]
+    }
+  }'
+```
+
+### Example: read-only observer token
+
+```bash
+curl -X POST http://localhost:3000/v1/namespaces/shop/tokens \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_id": 99,
+    "permissions": {
+      "read": ["gc:views", "pn:votes"],
+      "write": []
+    }
+  }'
+```
+
+<Warning>
+  A token with `write: ["*"]` can write to **any** key in the namespace. In multi-user namespaces, always scope write permissions to the keys the client actually owns.
+</Warning>
 
 ## Verify a token (SDK)
 

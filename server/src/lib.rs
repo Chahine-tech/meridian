@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::{
     api::{handlers::AppStateExt, ws::{SubscriptionManager, WsState}},
     auth::TokenSigner,
-    storage::SledStore,
+    storage::{SledStore, Wal},
 };
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,10 @@ impl AppStateExt for AppState {
 
     fn signer(&self) -> &Arc<TokenSigner> {
         &self.signer
+    }
+
+    fn wal(&self) -> &Arc<Wal> {
+        &self.store.wal
     }
 }
 
