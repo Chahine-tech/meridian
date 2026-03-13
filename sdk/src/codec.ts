@@ -17,8 +17,8 @@ import type { ClientMsg, VectorClock } from "./schema.js";
 // ---------------------------------------------------------------------------
 
 /** Encode any value to msgpack bytes. */
-export function encode(value: unknown): Uint8Array {
-  return pack(value) as Uint8Array;
+export function encode(value: unknown): Uint8Array<ArrayBuffer> {
+  return pack(value) as Uint8Array<ArrayBuffer>;
 }
 
 /** Decode msgpack bytes to a plain JS value (unsafe — no schema validation). */
@@ -79,9 +79,11 @@ export function decodeVectorClock(bytes: Uint8Array): Effect.Effect<VectorClock,
     return Effect.fail(new CodecError({ message: "VectorClock msgpack decode failed", raw: bytes }));
   }
 
-  const obj = raw as { entries?: unknown };
+  const entries = raw !== null && typeof raw === "object" && "entries" in raw
+    ? (raw as { entries: unknown }).entries
+    : {};
   return Schema.decodeUnknown(Schema.Record({ key: Schema.String, value: Schema.Number }))(
-    obj.entries ?? {},
+    entries ?? {},
   ).pipe(
     Effect.mapError((e) =>
       new CodecError({ message: `VectorClock schema validation failed: ${e.message}`, raw: bytes }),

@@ -140,7 +140,7 @@ export class PresenceHandle<T> {
       return false;
     }
 
-    if (incoming.hlc.wall_ms > 0) {
+    if (incomingExpiresAt >= existing.expiresAtMs) {
       if (incoming.ttl_ms === 0) {
         this.entries.delete(clientIdStr);
       } else {

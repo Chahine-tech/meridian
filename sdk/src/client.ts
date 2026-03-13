@@ -74,8 +74,8 @@ export class MeridianClient {
     this.clientId = claims.client_id;
 
     const httpBase = config.url
-      .replace(/^wss?:\/\//, "http://")
-      .replace(/^https?:\/\//, (m) => m);
+      .replace(/^wss:\/\//, "https://")
+      .replace(/^ws:\/\//, "http://");
     this.http = new HttpClient({ baseUrl: httpBase, token: config.token });
 
     const wsUrl = `${config.url.replace(/^http/, "ws")}/v1/namespaces/${config.namespace}/connect`;

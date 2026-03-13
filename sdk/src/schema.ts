@@ -67,7 +67,7 @@ export type ClientMsg = typeof ClientMsg.Type;
 
 export const ServerMsg = Schema.Union(
   Schema.Struct({
-    Delta: Schema.Struct({ crdt_id: Schema.String, delta_bytes: Schema.Uint8ArrayFromSelf }),
+    Delta: Schema.Struct({ crdt_id: Schema.String, delta_bytes: Schema.instanceOf(Uint8Array) }),
   }),
   Schema.Struct({ Ack: Schema.Struct({ seq: Schema.Number }) }),
   Schema.Struct({
