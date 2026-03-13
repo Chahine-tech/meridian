@@ -33,13 +33,29 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - name: install
-        working-directory: sdk
+        working-directory: packages/sdk
         run: bun install
 
       - name: typecheck
-        working-directory: sdk
+        working-directory: packages/sdk
         run: bun run typecheck
 
       - name: test
-        working-directory: sdk
+        working-directory: packages/sdk
         run: bun test
+
+  sdk-react:
+    name: SDK React
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: install
+        working-directory: packages/sdk-react
+        run: bun install
+
+      - name: typecheck
+        working-directory: packages/sdk-react
+        run: bun run typecheck

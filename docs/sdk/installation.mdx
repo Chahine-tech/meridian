@@ -4,9 +4,11 @@ description: Install the Meridian TypeScript SDK.
 ---
 
 ```bash
-bun add meridian-sdk effect msgpackr
-# or
 npm install meridian-sdk effect msgpackr
+# or
+pnpm add meridian-sdk effect msgpackr
+# or
+bun add meridian-sdk effect msgpackr
 ```
 
 `effect` and `msgpackr` are peer dependencies.
@@ -27,6 +29,9 @@ examples/collaborative-workspace/
 
 ```bash
 cd examples/collaborative-workspace
-npm install
-npm run dev
+npm install && npm run dev
+# or
+pnpm install && pnpm dev
+# or
+bun install && bun dev
 ```
