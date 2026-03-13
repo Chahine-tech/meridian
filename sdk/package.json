@@ -1,5 +1,5 @@
 {
-  "name": "@meridian/sdk",
+  "name": "meridian-sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for Meridian CRDT server",
   "type": "module",

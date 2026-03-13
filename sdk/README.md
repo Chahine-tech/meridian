@@ -1,20 +1,20 @@
-# @meridian/sdk
+# meridian-sdk
 
 TypeScript SDK for [Meridian](../README.md) — Effect-based, fully typed, msgpack wire protocol.
 
 ## Install
 
 ```bash
-bun add @meridian/sdk effect msgpackr
+bun add meridian-sdk effect msgpackr
 # or
-npm install @meridian/sdk effect msgpackr
+npm install meridian-sdk effect msgpackr
 ```
 
 ## Quick start
 
 ```ts
 import { Effect, Schema } from "effect";
-import { MeridianClient } from "@meridian/sdk";
+import { MeridianClient } from "meridian-sdk";
 
 // MeridianClient.create() parses + validates the token — returns Effect
 const client = await Effect.runPromise(
@@ -52,7 +52,7 @@ All errors are `Data.TaggedError` — matchable with `Effect.catchTag`:
 
 ```ts
 import { Effect } from "effect";
-import { MeridianClient, TokenExpiredError, HttpError, NetworkError } from "@meridian/sdk";
+import { MeridianClient, TokenExpiredError, HttpError, NetworkError } from "meridian-sdk";
 
 await Effect.runPromise(
   MeridianClient.create(config).pipe(

@@ -20,7 +20,7 @@ All errors are `Data.TaggedError` from Effect, matchable with `Effect.catchTag`:
 
 ```ts
 import { Effect } from "effect";
-import { MeridianClient } from "@meridian/sdk";
+import { MeridianClient } from "meridian-sdk";
 
 await Effect.runPromise(
   MeridianClient.create(config).pipe(

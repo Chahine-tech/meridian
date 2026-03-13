@@ -39,7 +39,7 @@ Response:
 
 ```ts
 import { Effect } from "effect";
-import { MeridianClient } from "@meridian/sdk";
+import { MeridianClient } from "meridian-sdk";
 
 const client = await Effect.runPromise(MeridianClient.create({ ... }));
 
@@ -60,7 +60,7 @@ console.log(result.token);
 
 ```ts
 import { Effect } from "effect";
-import { MeridianClient, TokenExpiredError, TokenParseError } from "@meridian/sdk";
+import { MeridianClient, TokenExpiredError, TokenParseError } from "meridian-sdk";
 
 await Effect.runPromise(
   MeridianClient.create(config).pipe(
