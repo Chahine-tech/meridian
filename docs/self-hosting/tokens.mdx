@@ -1,0 +1,71 @@
+---
+title: Tokens
+description: How to issue and use Meridian auth tokens.
+---
+
+Meridian uses custom ed25519-signed tokens — smaller than JWT, constant-time verification.
+
+## Token format
+
+```
+base64url(msgpack(claims)) + "." + base64url(ed25519_signature)
+```
+
+Claims:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `namespace` | `string` | The namespace this token grants access to |
+| `client_id` | `number` | Unique numeric ID for this client |
+| `expires_at` | `number` | Expiry timestamp in milliseconds |
+| `permissions` | `object` | `{ read: bool, write: bool }` |
+
+## Issue a token via HTTP
+
+```bash
+curl -X POST http://localhost:3000/v1/namespaces/my-room/tokens \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "client_id": 42, "ttl_ms": 3600000, "permissions": { "read": true, "write": true } }'
+```
+
+Response:
+
+```json
+{ "token": "eyJ..." }
+```
+
+## Issue a token from the SDK
+
+```ts
+import { Effect } from "effect";
+import { MeridianClient } from "@meridian/sdk";
+
+const client = await Effect.runPromise(MeridianClient.create({ ... }));
+
+const result = await Effect.runPromise(
+  client.http.issueToken("my-room", {
+    client_id: 42,
+    ttl_ms: 3_600_000,
+    permissions: { read: true, write: true },
+  })
+);
+
+console.log(result.token);
+```
+
+## Verify a token (SDK)
+
+`MeridianClient.create()` automatically parses and validates the token before connecting:
+
+```ts
+import { Effect } from "effect";
+import { MeridianClient, TokenExpiredError, TokenParseError } from "@meridian/sdk";
+
+await Effect.runPromise(
+  MeridianClient.create(config).pipe(
+    Effect.catchTag("TokenExpiredError", () => Effect.die("renew your token")),
+    Effect.catchTag("TokenParseError", () => Effect.die("invalid token")),
+  )
+);
+```
