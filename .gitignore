@@ -5,9 +5,12 @@
 /data/
 
 # SDK
-sdk/node_modules/
-sdk/dist/
-sdk/bun.lock
+packages/sdk/node_modules/
+packages/sdk/dist/
+packages/sdk/bun.lock
+packages/sdk-react/node_modules/
+packages/sdk-react/dist/
+packages/sdk-react/bun.lock
 
 # Env
 .env

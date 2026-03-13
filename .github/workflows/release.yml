@@ -55,23 +55,54 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - name: install
-        working-directory: sdk
+        working-directory: packages/sdk
         run: bun install
 
       - name: typecheck
-        working-directory: sdk
+        working-directory: packages/sdk
         run: bun run typecheck
 
       - name: test
-        working-directory: sdk
+        working-directory: packages/sdk
         run: bun test
 
       - name: build
-        working-directory: sdk
+        working-directory: packages/sdk
         run: bun run build
 
       - name: publish
-        working-directory: sdk
+        working-directory: packages/sdk
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
+          bun publish --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  sdk-react-publish:
+    name: Publish SDK React to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: install
+        working-directory: packages/sdk-react
+        run: bun install
+
+      - name: typecheck
+        working-directory: packages/sdk-react
+        run: bun run typecheck
+
+      - name: build
+        working-directory: packages/sdk-react
+        run: bun run build
+
+      - name: publish
+        working-directory: packages/sdk-react
         run: |
           echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
           bun publish --access public
@@ -110,7 +141,7 @@ jobs:
 
   github-release:
     name: GitHub Release
-    needs: [server, sdk-publish, docker]
+    needs: [server, sdk-publish, sdk-react-publish, docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write
