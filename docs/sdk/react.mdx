@@ -1,0 +1,100 @@
+---
+title: React
+description: React hooks for Meridian CRDTs.
+---
+
+Install the React package alongside the core SDK:
+
+```bash
+npm install meridian-react meridian-sdk effect react
+# or
+pnpm add meridian-react meridian-sdk effect react
+# or
+bun add meridian-react meridian-sdk effect react
+```
+
+## Setup
+
+Wrap your app with `MeridianProvider`:
+
+```tsx
+import { MeridianProvider } from "meridian-react";
+
+function App() {
+  return (
+    <MeridianProvider url="ws://localhost:3000" token={token}>
+      <YourApp />
+    </MeridianProvider>
+  );
+}
+```
+
+The provider opens a single WebSocket connection and reconnects automatically. All hooks in the tree share the same client instance.
+
+## Hooks
+
+### `useGCounter`
+
+```tsx
+const { value, increment } = useGCounter("gc:page-views");
+
+<button onClick={() => increment()}>+1</button>
+<span>{value}</span>
+```
+
+### `usePNCounter`
+
+```tsx
+const { value, increment, decrement } = usePNCounter("pn:votes");
+```
+
+### `useORSet`
+
+Define the schema **outside the component** so its reference is stable:
+
+```tsx
+import { Schema } from "effect";
+
+const Task = Schema.Struct({ id: Schema.String, title: Schema.String });
+
+function TaskList() {
+  const { elements, add, remove } = useORSet("or:tasks", Task);
+}
+```
+
+### `useLwwRegister`
+
+```tsx
+const TitleSchema = Schema.String;
+
+function Title() {
+  const { value, set } = useLwwRegister("lw:doc-title", TitleSchema);
+}
+```
+
+### `usePresence`
+
+Define the schema outside the component. Pass `data` to enable auto-heartbeat:
+
+```tsx
+const CursorSchema = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+
+function Cursors() {
+  const { online } = usePresence("pr:cursors", {
+    schema: CursorSchema,
+    data: { x: mouseX, y: mouseY },
+    ttlMs: 5_000,
+  });
+
+  return online.map((entry) => (
+    <Cursor key={entry.clientId} x={entry.data.x} y={entry.data.y} />
+  ));
+}
+```
+
+If `data` is omitted, the hook subscribes without sending a heartbeat (observe-only).
+
+## Requirements
+
+- React 19+
+- `meridian-sdk` 0.2+

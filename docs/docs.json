@@ -40,7 +40,8 @@
             "pages": [
               "sdk/installation",
               "sdk/client",
-              "sdk/error-handling"
+              "sdk/error-handling",
+              "sdk/react"
             ]
           },
           {
