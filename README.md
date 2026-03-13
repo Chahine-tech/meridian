@@ -1,6 +1,6 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Chahine-tech/meridian/main/docs/logo/readme-light.svg#gh-light-mode-only" height="48" alt="Meridian" />
-  <img src="https://raw.githubusercontent.com/Chahine-tech/meridian/main/docs/logo/readme-dark.svg#gh-dark-mode-only" height="48" alt="Meridian" />
+  <img src="https://raw.githubusercontent.com/Chahine-tech/meridian/main/docs/logo/light.svg#gh-light-mode-only" width="220" alt="Meridian" />
+  <img src="https://raw.githubusercontent.com/Chahine-tech/meridian/main/docs/logo/dark.svg#gh-dark-mode-only" width="220" alt="Meridian" />
 </p>
 
 <p align="center">Self-hosted real-time CRDT store. Alternative to Liveblocks / PartyKit.<br/>No locks, no merge conflicts. Concurrent updates converge automatically.</p>
