@@ -18,38 +18,45 @@
       "url": "https://github.com/Chahine-tech/meridian"
     }
   ],
-  "navigation": [
-    {
-      "group": "Getting started",
-      "pages": ["introduction"]
-    },
-    {
-      "group": "Self-hosting",
-      "pages": [
-        "self-hosting/docker",
-        "self-hosting/configuration",
-        "self-hosting/tokens"
-      ]
-    },
-    {
-      "group": "SDK",
-      "pages": [
-        "sdk/installation",
-        "sdk/client",
-        "sdk/error-handling"
-      ]
-    },
-    {
-      "group": "CRDT handles",
-      "pages": [
-        "sdk/crdts/gcounter",
-        "sdk/crdts/pncounter",
-        "sdk/crdts/orset",
-        "sdk/crdts/lwwregister",
-        "sdk/crdts/presence"
-      ]
-    }
-  ],
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": ["introduction"]
+          },
+          {
+            "group": "Self-hosting",
+            "pages": [
+              "self-hosting/docker",
+              "self-hosting/configuration",
+              "self-hosting/tokens"
+            ]
+          },
+          {
+            "group": "SDK",
+            "pages": [
+              "sdk/installation",
+              "sdk/client",
+              "sdk/error-handling"
+            ]
+          },
+          {
+            "group": "CRDT handles",
+            "pages": [
+              "sdk/crdts/gcounter",
+              "sdk/crdts/pncounter",
+              "sdk/crdts/orset",
+              "sdk/crdts/lwwregister",
+              "sdk/crdts/presence"
+            ]
+          }
+        ]
+      }
+    ]
+  },
   "footerSocials": {
     "github": "https://github.com/Chahine-tech/meridian"
   }
