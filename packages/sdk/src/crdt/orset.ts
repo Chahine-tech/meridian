@@ -1,22 +1,16 @@
-/**
- * ORSet handle — add-wins observed-remove set.
- *
- * Each element has a set of add-tags (UUIDs). Remove only removes tags
- * known at remove time — a concurrent add with a new tag survives.
- *
- * Elements are serialized as JSON for the wire (serde_json::Value).
- *
- * Pass a `schema` to get runtime validation of elements deserialized from deltas:
- *   client.orset("id", Schema.Struct({ id: Schema.String }))
- */
-
 import { Schema } from "effect";
 import { encode, uuidToBytes } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { ORSetDelta } from "../sync/delta.js";
+import { toHex } from "../utils/to-hex.js";
 
+/**
+ * Low-level handle for an Observed-Remove Set (OR-Set) CRDT.
+ *
+ * Obtained via `MeridianClient.orset()`. Prefer the `useORSet` React hook for
+ * component-level usage; use this handle directly in non-React environments.
+ */
 export class ORSetHandle<T> {
-  /** element (JSON-stringified) → Set of live add-tags */
   private readonly tags = new Map<string, Set<string>>();
   private readonly crdtId: string;
   private readonly clientId: number;
@@ -37,36 +31,44 @@ export class ORSetHandle<T> {
     this.schema = opts.schema ?? null;
   }
 
-  // ---- Read ----
-
-  /** Returns all live elements (add-wins). */
+  /** Returns the current set elements as an array, decoded via the optional schema. */
   elements(): T[] {
     return Array.from(this.tags.keys())
       .filter(k => (this.tags.get(k)?.size ?? 0) > 0)
       .map(k => this.decode(JSON.parse(k)));
   }
 
+  /** Returns `true` if the set currently contains `element`. */
   has(element: T): boolean {
     const key = JSON.stringify(element);
     return (this.tags.get(key)?.size ?? 0) > 0;
   }
 
+  /**
+   * Registers a listener that is called whenever the set contents change.
+   *
+   * @returns An unsubscribe function — call it to stop receiving updates.
+   */
   onChange(listener: (elements: T[]) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   }
 
-  // ---- Write ----
-
+  /**
+   * Adds `element` to the set and broadcasts the operation.
+   *
+   * Each call generates a unique tag so concurrent adds of the same value
+   * are treated as distinct entries.
+   */
   add(element: T): void {
     const tag = crypto.randomUUID();
     const key = JSON.stringify(element);
 
     if (!this.tags.has(key)) this.tags.set(key, new Set());
-    this.tags.get(key)!.add(tag);
+    const tagSet = this.tags.get(key) as Set<string>;
+    tagSet.add(tag);
     this.emit();
 
-    // Rust Uuid is serialized as 16-byte bin — encode tag as bytes
     this.transport.send({
       Op: {
         crdt_id: this.crdtId,
@@ -75,6 +77,12 @@ export class ORSetHandle<T> {
     });
   }
 
+  /**
+   * Removes `element` from the set and broadcasts the operation.
+   *
+   * Only the tags observed locally at the time of this call are removed;
+   * concurrently added copies on other clients are left intact.
+   */
   remove(element: T): void {
     const key = JSON.stringify(element);
     const currentTags = Array.from(this.tags.get(key) ?? []);
@@ -83,7 +91,6 @@ export class ORSetHandle<T> {
     this.tags.delete(key);
     this.emit();
 
-    // Rust expects known_tags as a set of 16-byte UUIDs
     this.transport.send({
       Op: {
         crdt_id: this.crdtId,
@@ -92,16 +99,14 @@ export class ORSetHandle<T> {
     });
   }
 
-  // ---- Delta application ----
-
   applyDelta(delta: ORSetDelta): void {
     let changed = false;
 
     for (const [elem, addedTags] of Object.entries(delta.adds)) {
       if (!this.tags.has(elem)) this.tags.set(elem, new Set());
-      const set = this.tags.get(elem)!;
+      const set = this.tags.get(elem) as Set<string>;
       for (const tag of addedTags) {
-        const tagStr = Array.from(tag).map(b => b.toString(16).padStart(2, "0")).join("");
+        const tagStr = Array.from(tag).map(toHex).join("");
         if (!set.has(tagStr)) { set.add(tagStr); changed = true; }
       }
     }
@@ -110,7 +115,7 @@ export class ORSetHandle<T> {
       const set = this.tags.get(elem);
       if (!set) continue;
       for (const tag of removedTags) {
-        const tagStr = Array.from(tag).map(b => b.toString(16).padStart(2, "0")).join("");
+        const tagStr = Array.from(tag).map(toHex).join("");
         if (set.has(tagStr)) { set.delete(tagStr); changed = true; }
       }
       if (set.size === 0) this.tags.delete(elem);
@@ -118,8 +123,6 @@ export class ORSetHandle<T> {
 
     if (changed) this.emit();
   }
-
-  // ---- Internal ----
 
   private decode(raw: unknown): T {
     if (this.schema !== null) {
@@ -130,6 +133,6 @@ export class ORSetHandle<T> {
 
   private emit(): void {
     const elems = this.elements();
-    for (const l of this.listeners) l(elems);
+    for (const listener of this.listeners) listener(elems);
   }
 }

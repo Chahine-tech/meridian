@@ -1,19 +1,14 @@
-/**
- * LWW Register handle — Last-Write-Wins single-value cell.
- *
- * The winning write is determined by HLC (highest wall_ms wins),
- * tie-broken by author (higher client_id wins). The client sends its
- * local wall clock as HLC wall_ms; the server enforces ±30s drift limit.
- *
- * Pass a `schema` to get runtime validation of incoming deltas:
- *   client.lwwregister("id", Schema.Struct({ x: Schema.Number }))
- */
-
 import { Schema } from "effect";
 import { encode, wallMsToBigInt } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { LwwDelta, LwwEntry } from "../sync/delta.js";
 
+/**
+ * Low-level handle for a Last-Write-Wins register (LWW-Register) CRDT.
+ *
+ * Obtained via `MeridianClient.lwwregister()`. Prefer the `useLwwRegister` React
+ * hook for component-level usage; use this handle directly in non-React environments.
+ */
 export class LwwRegisterHandle<T> {
   private entry: LwwEntry | null = null;
   private readonly crdtId: string;
@@ -37,26 +32,39 @@ export class LwwRegisterHandle<T> {
     this.entry = opts.initial ?? null;
   }
 
-  // ---- Read ----
-
+  /** Returns the current register value, or `null` if no value has been written yet. */
   value(): T | null {
     if (this.entry === null) return null;
     return this.decode(this.entry.value);
   }
 
-  /** Metadata: when was the last write and by whom. */
+  /**
+   * Returns metadata about the winning entry, or `null` if the register is empty.
+   *
+   * `updatedAtMs` is the wall-clock timestamp of the write; `author` is the
+   * numeric client id of the writer.
+   */
   meta(): { updatedAtMs: number; author: number } | null {
     if (this.entry === null) return null;
     return { updatedAtMs: Number(this.entry.hlc.wall_ms), author: Number(this.entry.author) };
   }
 
+  /**
+   * Registers a listener that is called whenever the register value changes.
+   *
+   * @returns An unsubscribe function — call it to stop receiving updates.
+   */
   onChange(listener: (value: T | null) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   }
 
-  // ---- Write ----
-
+  /**
+   * Writes `value` to the register and broadcasts the operation.
+   *
+   * The write is stamped with the current wall-clock time. If a concurrent
+   * write from another client has a later timestamp it will win over this one.
+   */
   set(value: T): void {
     const wallMs = Date.now();
     const hlc = { wall_ms: wallMs, logical: 0, node_id: this.clientId };
@@ -67,8 +75,6 @@ export class LwwRegisterHandle<T> {
       this.emit();
     }
 
-    // wall_ms must be BigInt — msgpackr encodes large JS numbers as float64,
-    // but Rust expects u64 integer encoding
     const wireHlc = { wall_ms: wallMsToBigInt(wallMs), logical: 0, node_id: this.clientId };
     this.transport.send({
       Op: {
@@ -78,8 +84,6 @@ export class LwwRegisterHandle<T> {
     });
   }
 
-  // ---- Delta application ----
-
   applyDelta(delta: LwwDelta): void {
     if (delta.entry === null) return;
     if (this.entryWins(delta.entry, this.entry)) {
@@ -88,13 +92,11 @@ export class LwwRegisterHandle<T> {
     }
   }
 
-  // ---- Internal ----
-
   private decode(raw: unknown): T {
     if (this.schema !== null) {
       return Schema.decodeUnknownSync(this.schema)(raw);
     }
-    // No schema provided — T defaults to unknown, cast is the caller's responsibility
+    // HACK: No schema provided — T defaults to unknown, cast is the caller's responsibility.
     return raw as T;
   }
 

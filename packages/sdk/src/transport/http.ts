@@ -1,10 +1,3 @@
-/**
- * HTTP transport — REST API client for Meridian.
- *
- * All methods return Effect<T, HttpError | NetworkError> so callers
- * can handle network failures and server errors as typed values.
- */
-
 import { encode, decode } from "../codec.js";
 import { Effect, Schema } from "effect";
 import { HttpError, NetworkError } from "../errors.js";
@@ -13,26 +6,15 @@ import {
   CrdtOpResponse,
   TokenIssueResponse,
   ErrorResponse,
-  VectorClock,
+  type VectorClock,
 } from "../schema.js";
 import type { Permissions } from "../schema.js";
 
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
 export interface HttpClientConfig {
-  /** Base URL of the Meridian server, e.g. "http://localhost:3000" */
   baseUrl: string;
-  /** Bearer token. Can be updated after construction (e.g. after refresh). */
   token: string;
-  /** Request timeout in ms. Default: 10_000 */
   timeoutMs?: number;
 }
-
-// ---------------------------------------------------------------------------
-// HttpClient
-// ---------------------------------------------------------------------------
 
 export class HttpClient {
   private readonly baseUrl: string;
@@ -45,19 +27,14 @@ export class HttpClient {
     this.timeoutMs = config.timeoutMs ?? 10_000;
   }
 
-  // ---- CRDT REST ----
-
-  /** GET /v1/namespaces/:ns/crdts/:id */
   getCrdt(ns: string, id: string): Effect.Effect<CrdtGetResponse, HttpError | NetworkError> {
     return this.request(CrdtGetResponse, "GET", `/v1/namespaces/${ns}/crdts/${id}`);
   }
 
-  /** POST /v1/namespaces/:ns/crdts/:id/ops */
   postOp(ns: string, id: string, op: unknown): Effect.Effect<CrdtOpResponse, HttpError | NetworkError> {
     return this.request(CrdtOpResponse, "POST", `/v1/namespaces/${ns}/crdts/${id}/ops`, op);
   }
 
-  /** GET /v1/namespaces/:ns/crdts/:id/sync?since=<base64url(msgpack(vc))> */
   syncCrdt(
     ns: string,
     id: string,
@@ -71,15 +48,12 @@ export class HttpClient {
     return this.request(CrdtGetResponse, "GET", path);
   }
 
-  /** POST /v1/namespaces/:ns/tokens  (admin-only) */
   issueToken(
     ns: string,
     opts: { client_id: number; ttl_ms: number; permissions: Permissions },
   ): Effect.Effect<TokenIssueResponse, HttpError | NetworkError> {
     return this.request(TokenIssueResponse, "POST", `/v1/namespaces/${ns}/tokens`, opts);
   }
-
-  // ---- Internal ----
 
   private request<A, I>(
     responseSchema: Schema.Schema<A, I>,
@@ -140,14 +114,10 @@ export class HttpClient {
   }
 }
 
-// ---------------------------------------------------------------------------
-// base64url (no-padding) encoder
-// ---------------------------------------------------------------------------
-
-function base64urlEncode(bytes: Uint8Array): string {
+const base64urlEncode = (bytes: Uint8Array): string => {
   let binary = "";
   for (const b of bytes) {
     binary += String.fromCharCode(b);
   }
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-}
+};

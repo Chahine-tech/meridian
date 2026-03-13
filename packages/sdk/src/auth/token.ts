@@ -1,23 +1,9 @@
-/**
- * Token parsing and expiry check (client-side only — no signature verification).
- *
- * Wire format: `base64url_no_pad(msgpack(TokenClaims)) + "." + base64url_no_pad(sig[64B])`
- */
-
 import { unpack } from "msgpackr";
 import { Effect, Schema } from "effect";
 import { TokenParseError, TokenExpiredError } from "../errors.js";
 import { TokenClaims } from "../schema.js";
+import { TOKEN_SKEW_MS } from "../constants.js";
 
-// ---------------------------------------------------------------------------
-// Parse
-// ---------------------------------------------------------------------------
-
-/**
- * Parse a Meridian token string and return the decoded claims.
- * Returns Effect<TokenClaims, TokenParseError>.
- * Does NOT verify the ed25519 signature — the server enforces that.
- */
 export const parseToken = (token: string): Effect.Effect<TokenClaims, TokenParseError> =>
   Effect.gen(function* () {
     const dotIndex = token.indexOf(".");
@@ -51,39 +37,25 @@ export const parseToken = (token: string): Effect.Effect<TokenClaims, TokenParse
     );
   });
 
-/**
- * Check token expiry. Returns Effect<TokenClaims, TokenExpiredError>.
- * Clock-skew tolerance: ±5s.
- */
 export const checkTokenExpiry = (
   claims: TokenClaims,
   nowMs = Date.now(),
 ): Effect.Effect<TokenClaims, TokenExpiredError> => {
-  const SKEW_MS = 5_000;
-  if (nowMs >= claims.expires_at + SKEW_MS) {
+  if (nowMs >= claims.expires_at + TOKEN_SKEW_MS) {
     return Effect.fail(new TokenExpiredError({ expiredAt: claims.expires_at }));
   }
   return Effect.succeed(claims);
 };
 
-/**
- * Parse and check expiry in one step.
- * Returns Effect<TokenClaims, TokenParseError | TokenExpiredError>.
- */
 export const parseAndValidateToken = (
   token: string,
 ): Effect.Effect<TokenClaims, TokenParseError | TokenExpiredError> =>
   parseToken(token).pipe(Effect.flatMap(checkTokenExpiry));
 
-/** Returns milliseconds until the token expires (negative if already expired). */
 export const tokenTtlMs = (claims: TokenClaims, nowMs = Date.now()): number =>
   claims.expires_at - nowMs;
 
-// ---------------------------------------------------------------------------
-// Base64url (no-padding) decoder — no external dep
-// ---------------------------------------------------------------------------
-
-function base64urlDecode(input: string): Uint8Array {
+const base64urlDecode = (input: string): Uint8Array => {
   const padded = input.replace(/-/g, "+").replace(/_/g, "/");
   const padLen = (4 - (padded.length % 4)) % 4;
   const b64 = padded + "=".repeat(padLen);
@@ -93,4 +65,4 @@ function base64urlDecode(input: string): Uint8Array {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
-}
+};

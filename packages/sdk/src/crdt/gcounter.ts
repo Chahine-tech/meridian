@@ -1,10 +1,3 @@
-/**
- * GCounter handle — increment-only counter.
- *
- * Local state is kept as a sparse map `{ client_id → count }`.
- * `value()` returns the sum. Deltas are merged on incoming ServerMsg.Delta.
- */
-
 import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { GCounterDelta } from "../sync/delta.js";
@@ -13,6 +6,12 @@ export interface GCounterState {
   counts: Record<string, number>;
 }
 
+/**
+ * Low-level handle for a grow-only counter (GCounter) CRDT.
+ *
+ * Obtained via `MeridianClient.gcounter()`. Prefer the `useGCounter` React hook
+ * for component-level usage; use this handle directly in non-React environments.
+ */
 export class GCounterHandle {
   private state: GCounterState;
   private readonly clientId: number;
@@ -20,7 +19,6 @@ export class GCounterHandle {
   private readonly ns: string;
   private readonly transport: WsTransport;
 
-  /** Emits on every state change. */
   private readonly listeners = new Set<(value: number) => void>();
 
   constructor(opts: {
@@ -37,34 +35,38 @@ export class GCounterHandle {
     this.state = opts.initial ?? { counts: {} };
   }
 
-  // ---- Read ----
-
+  /** Returns the current counter value (sum of all client contributions). */
   value(): number {
     return Object.values(this.state.counts).reduce((a, b) => a + b, 0);
   }
 
+  /** Returns the raw per-client contribution map, keyed by client id string. */
   counts(): Readonly<Record<string, number>> {
     return this.state.counts;
   }
 
-  /** Subscribe to value changes. Returns an unsubscribe function. */
+  /**
+   * Registers a listener that is called whenever the counter value changes.
+   *
+   * @returns An unsubscribe function — call it to stop receiving updates.
+   */
   onChange(listener: (value: number) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   }
 
-  // ---- Write ----
-
-  /** Increment by `amount` (must be > 0). */
+  /**
+   * Increments the counter by `amount` (default `1`) and broadcasts the delta.
+   *
+   * @throws {RangeError} If `amount` is not greater than zero.
+   */
   increment(amount: number = 1): void {
     if (amount <= 0) throw new RangeError("GCounter: increment amount must be > 0");
 
-    // Optimistic local update
     const key = String(this.clientId);
     this.state.counts[key] = (this.state.counts[key] ?? 0) + amount;
     this.emit();
 
-    // Send Op to server
     const op = encode({
       GCounter: {
         client_id: this.clientId,
@@ -75,8 +77,6 @@ export class GCounterHandle {
       Op: { crdt_id: this.crdtId, op_bytes: op },
     });
   }
-
-  // ---- Delta application (called by MeridianClient on incoming Delta) ----
 
   applyDelta(delta: GCounterDelta): void {
     let changed = false;
@@ -89,8 +89,6 @@ export class GCounterHandle {
     }
     if (changed) this.emit();
   }
-
-  // ---- Internal ----
 
   private emit(): void {
     const v = this.value();

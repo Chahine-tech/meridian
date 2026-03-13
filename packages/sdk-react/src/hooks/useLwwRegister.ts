@@ -1,28 +1,47 @@
 import { useMemo, useSyncExternalStore } from "react";
-import { Schema } from "effect";
+import type { Schema } from "effect";
 import { useMeridianClient } from "../context.js";
 
+interface LwwRegisterHandle<T> {
+  value: T | null;
+  set: (value: T) => void;
+}
+
 /**
- * Subscribe to a LwwRegister CRDT (last-write-wins single value).
+ * Subscribe to a Last-Write-Wins register (LWW-Register) CRDT.
  *
+ * The register holds a single value. When multiple clients write concurrently
+ * the write with the highest hybrid-logical-clock timestamp wins. The resolved
+ * value is eventually consistent across all clients.
+ *
+ * Pass an `effect/Schema` to validate and decode the value from the wire format.
+ *
+ * @param crdtId - Unique identifier for the CRDT within the current namespace.
+ * @param schema - Optional Effect schema used to decode the stored value.
+ * @returns An object containing the current `value` (or `null` if unset) and a `set` function.
+ *
+ * @example
  * ```tsx
- * // Untyped
- * const { value, set } = useLwwRegister("lw:doc-title");
+ * import { useLwwRegister } from 'meridian-react';
+ * import { Schema } from 'effect';
  *
- * // Typed — define schema outside the component for a stable reference.
- * const TitleSchema = Schema.String;
- * function MyComponent() {
- *   const { value, set } = useLwwRegister("lw:doc-title", TitleSchema);
+ * const ThemeSchema = Schema.Literal('light', 'dark');
+ *
+ * function ThemePicker() {
+ *   const { value, set } = useLwwRegister('ui-theme', ThemeSchema);
+ *
+ *   return (
+ *     <button onClick={() => set(value === 'dark' ? 'light' : 'dark')}>
+ *       Current theme: {value ?? 'unset'}
+ *     </button>
+ *   );
  * }
  * ```
  */
-export function useLwwRegister<T = unknown>(
+export const useLwwRegister = <T = unknown>(
   crdtId: string,
   schema?: Schema.Schema<T>,
-): {
-  value: T | null;
-  set: (value: T) => void;
-} {
+): LwwRegisterHandle<T> => {
   const client = useMeridianClient();
   const handle = useMemo(
     () => client.lwwregister<T>(crdtId, schema),
@@ -37,6 +56,6 @@ export function useLwwRegister<T = unknown>(
 
   return {
     value,
-    set: (v: T) => handle.set(v),
+    set: (newValue: T) => handle.set(newValue),
   };
-}
+};
