@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Meridian — Collaborative Workspace</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #0f0f0f;
+        color: #e8e8e8;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      header {
+        border-bottom: 1px solid #222;
+        padding: 16px 24px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+
+      header h1 { font-size: 16px; font-weight: 600; color: #fff; }
+
+      #status-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: #555;
+        transition: background 0.3s;
+        flex-shrink: 0;
+      }
+      #status-dot.connected { background: #22c55e; }
+      #status-dot.connecting { background: #f59e0b; }
+
+      #presence-bar {
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        font-size: 13px;
+        color: #888;
+      }
+
+      .avatar {
+        width: 28px; height: 28px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 12px; font-weight: 600;
+        background: #2563eb; color: #fff;
+        flex-shrink: 0;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: 1fr 280px;
+        grid-template-rows: auto 1fr;
+        gap: 0;
+        flex: 1;
+      }
+
+      section {
+        padding: 24px;
+        border-right: 1px solid #222;
+      }
+
+      section:last-child { border-right: none; }
+
+      .section-title {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #555;
+        margin-bottom: 16px;
+      }
+
+      /* Workspace title (LWWRegister) */
+      #title-section {
+        grid-column: 1 / -1;
+        border-bottom: 1px solid #222;
+        padding: 20px 24px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      #workspace-title {
+        font-size: 22px;
+        font-weight: 700;
+        color: #fff;
+        background: transparent;
+        border: none;
+        outline: none;
+        flex: 1;
+        caret-color: #2563eb;
+      }
+
+      #workspace-title::placeholder { color: #444; }
+
+      #title-hint {
+        font-size: 12px;
+        color: #444;
+        flex-shrink: 0;
+      }
+
+      /* Tasks (ORSet) */
+      #tasks-section { border-bottom: 1px solid #222; }
+
+      #task-form {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+
+      #task-input {
+        flex: 1;
+        background: #1a1a1a;
+        border: 1px solid #2a2a2a;
+        border-radius: 6px;
+        padding: 8px 12px;
+        font-size: 14px;
+        color: #e8e8e8;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+
+      #task-input:focus { border-color: #2563eb; }
+      #task-input::placeholder { color: #444; }
+
+      button {
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 8px 14px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.15s;
+        white-space: nowrap;
+      }
+
+      button:hover { background: #1d4ed8; }
+      button:active { background: #1e40af; }
+
+      #task-list {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .task-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        background: #1a1a1a;
+        border: 1px solid #222;
+        border-radius: 6px;
+        font-size: 14px;
+        animation: fadeIn 0.15s ease;
+      }
+
+      @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; } }
+
+      .task-item span { flex: 1; }
+
+      .task-remove {
+        background: transparent;
+        color: #555;
+        padding: 2px 6px;
+        font-size: 16px;
+        border-radius: 4px;
+        line-height: 1;
+      }
+
+      .task-remove:hover { background: #2a2a2a; color: #e8e8e8; }
+
+      /* Votes (PNCounter) */
+      #votes-section {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      #vote-display {
+        text-align: center;
+        padding: 24px;
+        background: #1a1a1a;
+        border: 1px solid #222;
+        border-radius: 8px;
+      }
+
+      #vote-count {
+        font-size: 48px;
+        font-weight: 700;
+        color: #fff;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+      }
+
+      #vote-label {
+        font-size: 12px;
+        color: #555;
+        margin-top: 8px;
+      }
+
+      #vote-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      #vote-buttons button { padding: 10px; font-size: 18px; }
+
+      .btn-up { background: #166534 !important; }
+      .btn-up:hover { background: #15803d !important; }
+      .btn-down { background: #7f1d1d !important; }
+      .btn-down:hover { background: #991b1b !important; }
+
+      /* Presence sidebar */
+      #presence-section {
+        grid-row: span 2;
+        border-left: 1px solid #222;
+        border-right: none;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      #online-list {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .presence-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px;
+        background: #1a1a1a;
+        border: 1px solid #222;
+        border-radius: 6px;
+        font-size: 13px;
+        animation: fadeIn 0.15s ease;
+      }
+
+      .presence-item .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: #22c55e; flex-shrink: 0;
+      }
+
+      .presence-item .you {
+        margin-left: auto;
+        font-size: 11px;
+        color: #444;
+      }
+
+      #connect-overlay {
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+      }
+
+      #connect-box {
+        background: #1a1a1a;
+        border: 1px solid #2a2a2a;
+        border-radius: 12px;
+        padding: 32px;
+        width: 400px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      #connect-box h2 { font-size: 18px; font-weight: 600; }
+      #connect-box p  { font-size: 13px; color: #666; line-height: 1.5; }
+
+      .field { display: flex; flex-direction: column; gap: 6px; }
+      .field label { font-size: 12px; color: #888; }
+      .field input {
+        background: #111;
+        border: 1px solid #2a2a2a;
+        border-radius: 6px;
+        padding: 9px 12px;
+        font-size: 13px;
+        color: #e8e8e8;
+        outline: none;
+      }
+      .field input:focus { border-color: #2563eb; }
+      #connect-error { font-size: 12px; color: #f87171; min-height: 16px; }
+    </style>
+  </head>
+  <body>
+    <!-- Connect overlay -->
+    <div id="connect-overlay">
+      <div id="connect-box">
+        <h2>Connect to Meridian</h2>
+        <p>Enter your server URL and token to join the workspace.</p>
+        <div class="field">
+          <label>Server URL</label>
+          <input id="url-input" type="text" value="http://localhost:3000" />
+        </div>
+        <div class="field">
+          <label>Namespace</label>
+          <input id="ns-input" type="text" value="workspace" />
+        </div>
+        <div class="field">
+          <label>Token</label>
+          <input id="token-input" type="text" placeholder="Your Meridian token" />
+        </div>
+        <div id="connect-error"></div>
+        <button id="connect-btn">Connect</button>
+      </div>
+    </div>
+
+    <header>
+      <div id="status-dot" class="connecting"></div>
+      <h1>Meridian Workspace</h1>
+      <div id="presence-bar"></div>
+    </header>
+
+    <div id="title-section" style="display:none">
+      <input id="workspace-title" type="text" placeholder="Workspace title…" maxlength="80" />
+      <span id="title-hint">Last-Write-Wins register — edits converge automatically</span>
+    </div>
+
+    <main id="main" style="display:none">
+      <div style="display:flex;flex-direction:column;">
+        <section id="tasks-section">
+          <div class="section-title">Shared Tasks — ORSet (add-wins)</div>
+          <form id="task-form">
+            <input id="task-input" type="text" placeholder="Add a task…" maxlength="120" />
+            <button type="submit">Add</button>
+          </form>
+          <ul id="task-list"></ul>
+        </section>
+
+        <section id="votes-section">
+          <div class="section-title">Community Vote — PNCounter</div>
+          <div id="vote-display">
+            <div id="vote-count">0</div>
+            <div id="vote-label">votes</div>
+          </div>
+          <div id="vote-buttons">
+            <button class="btn-up" id="btn-up">+1</button>
+            <button class="btn-down" id="btn-down">−1</button>
+          </div>
+        </section>
+      </div>
+
+      <section id="presence-section">
+        <div class="section-title">Online — Presence (TTL 30s)</div>
+        <ul id="online-list"></ul>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -101,7 +101,7 @@ export class ORSetHandle<T> {
       if (!this.tags.has(elem)) this.tags.set(elem, new Set());
       const set = this.tags.get(elem)!;
       for (const tag of addedTags) {
-        const tagStr = Buffer.from(tag).toString("hex");
+        const tagStr = Array.from(tag).map(b => b.toString(16).padStart(2, "0")).join("");
         if (!set.has(tagStr)) { set.add(tagStr); changed = true; }
       }
     }
@@ -110,7 +110,7 @@ export class ORSetHandle<T> {
       const set = this.tags.get(elem);
       if (!set) continue;
       for (const tag of removedTags) {
-        const tagStr = Buffer.from(tag).toString("hex");
+        const tagStr = Array.from(tag).map(b => b.toString(16).padStart(2, "0")).join("");
         if (set.has(tagStr)) { set.delete(tagStr); changed = true; }
       }
       if (set.size === 0) this.tags.delete(elem);

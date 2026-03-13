@@ -18,3 +18,4 @@ sdk/bun.lock
 
 # Dev tools (not for production)
 server/src/bin/
+server/data/
