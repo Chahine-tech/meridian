@@ -1,0 +1,32 @@
+---
+title: PNCounter
+description: Increment and decrement counter. Ideal for inventory, vote tallies.
+---
+
+A PNCounter (Positive-Negative Counter) supports both increments and decrements. Internally it uses two GCounters — one for increments, one for decrements. The value is `increments - decrements`.
+
+## Usage
+
+```ts
+const stock = client.pncounter("pn:product-42-stock");
+
+// Increment / decrement
+stock.increment(10);
+stock.decrement(3);
+
+// Read
+console.log(stock.value()); // number (can be negative)
+
+// Subscribe
+const unsub = stock.onChange(v => console.log("stock:", v));
+unsub();
+```
+
+## API
+
+| Method | Description |
+|--------|-------------|
+| `increment(amount?: number)` | Add `amount` (default 1, must be > 0) |
+| `decrement(amount?: number)` | Subtract `amount` (default 1, must be > 0) |
+| `value()` | Returns `increments - decrements` |
+| `onChange(fn)` | Subscribe — returns unsubscribe function |

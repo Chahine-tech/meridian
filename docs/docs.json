@@ -1,0 +1,55 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "Meridian",
+  "logo": {
+    "dark": "/logo/dark.svg",
+    "light": "/logo/light.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#0D9373",
+    "light": "#07C983",
+    "dark": "#0D9373"
+  },
+  "topbarLinks": [
+    {
+      "name": "GitHub",
+      "url": "https://github.com/Chahine-tech/meridian"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Getting started",
+      "pages": ["introduction"]
+    },
+    {
+      "group": "Self-hosting",
+      "pages": [
+        "self-hosting/docker",
+        "self-hosting/configuration",
+        "self-hosting/tokens"
+      ]
+    },
+    {
+      "group": "SDK",
+      "pages": [
+        "sdk/installation",
+        "sdk/client",
+        "sdk/error-handling"
+      ]
+    },
+    {
+      "group": "CRDT handles",
+      "pages": [
+        "sdk/crdts/gcounter",
+        "sdk/crdts/pncounter",
+        "sdk/crdts/orset",
+        "sdk/crdts/lwwregister",
+        "sdk/crdts/presence"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/Chahine-tech/meridian"
+  }
+}

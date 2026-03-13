@@ -1,0 +1,35 @@
+---
+title: Configuration
+description: Environment variables for the Meridian server.
+---
+
+All configuration is via environment variables.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MERIDIAN_BIND` | `0.0.0.0:3000` | TCP bind address |
+| `MERIDIAN_DATA_DIR` | `./data` | Path to sled storage directory |
+| `MERIDIAN_SIGNING_KEY` | *(random)* | 64-char hex ed25519 seed (32 bytes) |
+
+## MERIDIAN_SIGNING_KEY
+
+Generate a secure key:
+
+```bash
+openssl rand -hex 32
+```
+
+This key is used to sign and verify auth tokens. Keep it secret and back it up — losing it invalidates all issued tokens.
+
+If unset, a random key is generated at startup. This is fine for local development but not for production (tokens become invalid on restart).
+
+## MERIDIAN_DATA_DIR
+
+Meridian uses [sled](https://github.com/spacejam/sled) as its embedded database. The data directory contains the sled tree files.
+
+In Docker, this is mounted as a named volume:
+
+```yaml
+volumes:
+  - meridian-data:/data
+```

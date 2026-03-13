@@ -1,0 +1,45 @@
+---
+title: Docker
+description: Run Meridian with Docker Compose in under a minute.
+---
+
+## Docker Compose (recommended)
+
+```bash
+MERIDIAN_SIGNING_KEY=$(openssl rand -hex 32) docker compose up -d
+```
+
+The server listens on `http://localhost:3000`.
+
+<Warning>
+  Set a fixed `MERIDIAN_SIGNING_KEY`. If unset, a random key is generated on startup — all existing tokens become invalid on restart.
+</Warning>
+
+To persist the key, add it to a `.env` file:
+
+```bash
+# .env
+MERIDIAN_SIGNING_KEY=your_64_char_hex_string_here
+```
+
+```bash
+docker compose up -d
+```
+
+## Docker only
+
+```bash
+docker run -d \
+  -p 3000:3000 \
+  -e MERIDIAN_SIGNING_KEY=$(openssl rand -hex 32) \
+  -v meridian-data:/data \
+  ghcr.io/yourusername/meridian:latest
+```
+
+## From source
+
+```bash
+MERIDIAN_SIGNING_KEY=$(openssl rand -hex 32) \
+MERIDIAN_DATA_DIR=./data \
+cargo run --release
+```

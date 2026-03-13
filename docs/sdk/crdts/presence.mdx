@@ -1,0 +1,72 @@
+---
+title: Presence
+description: Ephemeral presence with TTL. Who's online, cursor positions, typing indicators.
+---
+
+Presence tracks ephemeral per-client state with a TTL. Entries expire automatically when a client stops sending heartbeats. Ideal for "who's online", cursor positions, and typing indicators.
+
+## Usage without schema
+
+```ts
+const room = client.presence("pr:room-123");
+
+// Announce presence (data: any, ttl in ms)
+room.heartbeat({ status: "online" }, 30_000);
+
+// Read current entries
+console.log(room.value()); // Map<clientId, { data: unknown; expiresAtMs: number }>
+
+// Subscribe
+room.onChange(entries => {
+  for (const [clientId, entry] of entries) {
+    console.log(clientId, entry.data);
+  }
+});
+
+// Leave
+room.leave();
+```
+
+## Usage with schema
+
+```ts
+import { Schema } from "effect";
+
+const Cursor = Schema.Struct({
+  x: Schema.Number,
+  y: Schema.Number,
+});
+
+const cursors = client.presence("pr:cursors", Cursor);
+
+cursors.heartbeat({ x: 120, y: 340 }, 5_000);
+
+cursors.onChange(entries => {
+  for (const [clientId, entry] of entries) {
+    // entry.data: { x: number; y: number }
+    renderCursor(clientId, entry.data.x, entry.data.y);
+  }
+});
+```
+
+## API
+
+| Method | Description |
+|--------|-------------|
+| `heartbeat(data: T, ttlMs: number)` | Send presence data, expires after `ttlMs` |
+| `leave()` | Remove own entry immediately |
+| `value()` | Returns `Map<number, PresenceEntry<T>>` — only live entries |
+| `onChange(fn)` | Subscribe — returns unsubscribe function |
+
+## PresenceEntry
+
+```ts
+interface PresenceEntry<T> {
+  data: T;
+  expiresAtMs: number; // absolute timestamp
+}
+```
+
+## TTL behavior
+
+Entries expire when `now > expiresAtMs`. Call `heartbeat()` periodically to keep the entry alive. `value()` always filters out expired entries before returning.

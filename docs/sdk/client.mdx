@@ -1,0 +1,68 @@
+---
+title: MeridianClient
+description: Create and manage a Meridian client connection.
+---
+
+## Create a client
+
+`MeridianClient.create()` parses and validates the token before opening the WebSocket. It returns an `Effect`.
+
+```ts
+import { Effect } from "effect";
+import { MeridianClient } from "@meridian/sdk";
+
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "http://localhost:3000",
+    namespace: "my-room",
+    token: process.env.MERIDIAN_TOKEN!,
+  })
+);
+```
+
+## Config
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `url` | `string` | — | Server base URL (`http://` or `ws://`, both work) |
+| `namespace` | `string` | — | Namespace to connect to |
+| `token` | `string` | — | Meridian token |
+| `autoConnect` | `boolean` | `true` | Open WebSocket immediately |
+
+## Properties
+
+```ts
+client.namespace  // string
+client.clientId   // number
+client.claims     // TokenClaims — full parsed token claims
+client.http       // HttpClient — REST API access
+```
+
+## CRDT handles
+
+All handles are cached by `crdtId` — calling the same method twice returns the same instance.
+
+```ts
+client.gcounter("id")               // GCounterHandle
+client.pncounter("id")              // PNCounterHandle
+client.orset("id", schema?)         // ORSetHandle<T>
+client.lwwregister("id", schema?)   // LwwRegisterHandle<T>
+client.presence("id", schema?)      // PresenceHandle<T>
+```
+
+For `orset`, `lwwregister`, and `presence`, passing an Effect `Schema` enables runtime validation of incoming deltas. Without a schema, `T = unknown`.
+
+## HTTP client
+
+```ts
+client.http.getCrdt(ns, id)           // → Effect<CrdtGetResponse, HttpError | NetworkError>
+client.http.postOp(ns, id, op)        // → Effect<CrdtOpResponse, HttpError | NetworkError>
+client.http.syncCrdt(ns, id, sinceVc) // → Effect<CrdtGetResponse, HttpError | NetworkError>
+client.http.issueToken(ns, opts)      // → Effect<TokenIssueResponse, HttpError | NetworkError>
+```
+
+## Close
+
+```ts
+client.close(); // gracefully closes the WebSocket, no reconnect
+```

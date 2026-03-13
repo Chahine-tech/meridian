@@ -1,0 +1,48 @@
+---
+title: ORSet
+description: Observed-Remove Set. Concurrent add and remove operations are handled correctly.
+---
+
+An ORSet (Observed-Remove Set) allows concurrent adds and removes without conflicts. Each add generates a unique tag; a remove only removes the specific tags it observed — so a concurrent add of the same element wins.
+
+## Usage without schema
+
+```ts
+const tags = client.orset("or:article-123-tags");
+
+tags.add("typescript");
+tags.remove("javascript");
+
+console.log(tags.values()); // Set<unknown>
+
+tags.onChange(set => console.log("tags:", set));
+```
+
+## Usage with schema
+
+```ts
+import { Schema } from "effect";
+
+const Item = Schema.Struct({ id: Schema.String, name: Schema.String });
+const cart = client.orset("or:cart-user-42", Item);
+
+cart.add({ id: "prod-1", name: "Keyboard" });
+
+cart.onChange(items => {
+  // items: Set<{ id: string; name: string }>
+  for (const item of items) {
+    console.log(item.name);
+  }
+});
+```
+
+Incoming deltas are validated against the schema at runtime via `Schema.decodeUnknownSync`. Invalid entries are discarded.
+
+## API
+
+| Method | Description |
+|--------|-------------|
+| `add(value: T)` | Add an element |
+| `remove(value: T)` | Remove all observed instances of an element |
+| `values()` | Returns current `Set<T>` |
+| `onChange(fn)` | Subscribe — returns unsubscribe function |

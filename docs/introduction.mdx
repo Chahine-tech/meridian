@@ -1,0 +1,55 @@
+---
+title: Introduction
+description: Self-hosted real-time CRDT store. No locks, no merge conflicts.
+---
+
+Meridian is a self-hosted alternative to Liveblocks and PartyKit. Concurrent updates from multiple clients converge automatically using CRDTs — no operational transforms, no conflict resolution code on your end.
+
+## What it is
+
+- **Server**: Rust binary, single file, no external dependencies. Stores state in an embedded sled database.
+- **SDK**: TypeScript, Effect-based, msgpack wire protocol. Works in Node, Bun, and browsers.
+- **Auth**: Custom ed25519-signed tokens (smaller than JWT, constant-time verification).
+
+## Quickstart
+
+**1. Start the server**
+
+```bash
+MERIDIAN_SIGNING_KEY=$(openssl rand -hex 32) docker compose up -d
+```
+
+**2. Install the SDK**
+
+```bash
+bun add @meridian/sdk effect msgpackr
+```
+
+**3. Connect and sync**
+
+```ts
+import { Effect, Schema } from "effect";
+import { MeridianClient } from "@meridian/sdk";
+
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "http://localhost:3000",
+    namespace: "my-room",
+    token: process.env.MERIDIAN_TOKEN!,
+  })
+);
+
+const views = client.gcounter("gc:views");
+views.increment(1);
+views.onChange(v => console.log("views:", v));
+```
+
+## CRDT types
+
+| Type | Use case |
+|------|----------|
+| `GCounter` | Page views, likes, download counts |
+| `PNCounter` | Inventory, vote tallies |
+| `ORSet` | Shopping cart, tag sets, collaborative lists |
+| `LwwRegister` | User profile, document title, config |
+| `Presence` | Who's online, cursor positions, typing indicators |

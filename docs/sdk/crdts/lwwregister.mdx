@@ -1,0 +1,50 @@
+---
+title: LwwRegister
+description: Last-Write-Wins Register. Holds a single value; concurrent writes resolve by HLC timestamp.
+---
+
+A LwwRegister (Last-Write-Wins Register) holds a single value. When two clients write concurrently, the write with the higher HLC (Hybrid Logical Clock) timestamp wins. Ties are broken by client ID.
+
+## Usage without schema
+
+```ts
+const title = client.lwwregister("lw:doc-title");
+
+title.set("My document");
+
+console.log(title.value()); // "My document" | null
+
+title.onChange(v => console.log("title:", v));
+```
+
+## Usage with schema
+
+```ts
+import { Schema } from "effect";
+
+const Profile = Schema.Struct({
+  name: Schema.String,
+  avatar: Schema.String,
+});
+
+const profile = client.lwwregister("lw:user-42-profile", Profile);
+
+profile.set({ name: "Chahine", avatar: "https://..." });
+
+profile.onChange(v => {
+  // v: { name: string; avatar: string } | null
+  if (v) console.log("name:", v.name);
+});
+```
+
+## API
+
+| Method | Description |
+|--------|-------------|
+| `set(value: T)` | Write a new value |
+| `value()` | Returns current value or `null` if not set |
+| `onChange(fn)` | Subscribe — returns unsubscribe function |
+
+## Conflict resolution
+
+Conflicts are resolved by HLC timestamp (wall clock + logical counter). The write with the highest timestamp wins. If timestamps are equal, the write from the highest `client_id` wins. This is deterministic and consistent across all replicas.

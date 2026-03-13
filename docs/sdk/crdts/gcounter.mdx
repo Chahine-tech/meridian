@@ -1,0 +1,40 @@
+---
+title: GCounter
+description: Increment-only counter. Ideal for page views, likes, download counts.
+---
+
+A GCounter is a grow-only counter. Each client tracks its own count; the total is the sum across all clients. Concurrent increments never conflict.
+
+## Usage
+
+```ts
+const views = client.gcounter("gc:page-views");
+
+// Increment
+views.increment();      // +1
+views.increment(5);     // +5
+
+// Read current value
+console.log(views.value()); // number
+
+// Subscribe to changes
+const unsub = views.onChange(v => {
+  console.log("views:", v);
+});
+
+// Stop listening
+unsub();
+```
+
+## API
+
+| Method | Description |
+|--------|-------------|
+| `increment(amount?: number)` | Increment by `amount` (default 1, must be > 0) |
+| `value()` | Returns current total |
+| `counts()` | Returns raw `Record<clientId, count>` map |
+| `onChange(fn)` | Subscribe — returns unsubscribe function |
+
+## How it works
+
+Each client maintains its own counter. The total is the sum of all per-client counters. On merge, each per-client counter takes the max of both sides — increments always win, decrements are impossible.

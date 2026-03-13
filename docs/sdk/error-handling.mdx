@@ -1,0 +1,56 @@
+---
+title: Error handling
+description: All SDK errors are Data.TaggedError — matchable with Effect.catchTag.
+---
+
+## Error types
+
+| Error | When |
+|-------|------|
+| `TokenParseError` | Token is malformed or signature is invalid |
+| `TokenExpiredError` | Token `expires_at` is in the past |
+| `HttpError` | Server returned a non-2xx status |
+| `NetworkError` | Fetch failed (DNS, timeout, no connection) |
+| `CodecError` | msgpack decode or schema validation failed |
+| `TransportError` | WebSocket error |
+
+## Handling errors
+
+All errors are `Data.TaggedError` from Effect, matchable with `Effect.catchTag`:
+
+```ts
+import { Effect } from "effect";
+import { MeridianClient } from "@meridian/sdk";
+
+await Effect.runPromise(
+  MeridianClient.create(config).pipe(
+    Effect.catchTag("TokenExpiredError", (e) =>
+      Effect.die(`Token expired at ${new Date(e.expiredAt).toISOString()}`)
+    ),
+    Effect.catchTag("TokenParseError", () =>
+      Effect.die("Invalid token — check MERIDIAN_TOKEN")
+    ),
+    Effect.flatMap((client) =>
+      client.http.getCrdt("my-room", "gc:views").pipe(
+        Effect.catchTag("HttpError", (e) =>
+          Effect.succeed(`Server error ${e.status}: ${e.body.message}`)
+        ),
+        Effect.catchTag("NetworkError", (e) =>
+          Effect.succeed(`Network error: ${e.message}`)
+        ),
+      )
+    ),
+  )
+);
+```
+
+## Error fields
+
+```ts
+TokenParseError   → { message: string }
+TokenExpiredError → { expiredAt: number }  // ms timestamp
+HttpError         → { status: number; body: { message: string } }
+NetworkError      → { message: string; cause?: unknown }
+CodecError        → { message: string; raw: Uint8Array }
+TransportError    → { message: string; cause?: unknown }
+```
