@@ -72,10 +72,11 @@ jobs:
 
       - name: publish
         working-directory: sdk
-        run: bun publish --access public
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
+          bun publish --access public
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          BUN_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   docker:
     name: Docker image

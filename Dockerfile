@@ -10,7 +10,7 @@ RUN rustup target add x86_64-unknown-linux-musl
 # Cache dependencies — copy manifests first
 COPY Cargo.toml Cargo.lock ./
 COPY server/Cargo.toml server/Cargo.toml
-RUN mkdir -p server/src && echo "fn main() {}" > server/src/main.rs
+RUN mkdir -p server/src server/benches && echo "fn main() {}" > server/src/main.rs && echo "fn main() {}" > server/benches/crdt.rs
 RUN cargo build --release --target x86_64-unknown-linux-musl 2>/dev/null || true
 
 # Build the real binary
