@@ -67,11 +67,11 @@ export class PNCounterHandle {
 
   applyDelta(delta: PNCounterDelta): void {
     let changed = false;
-    for (const [id, count] of Object.entries(delta.p.increments)) {
+    for (const [id, count] of Object.entries(delta.pos?.counters ?? {})) {
       const cur = this.state.p[id] ?? 0;
       if (count > cur) { this.state.p[id] = count; changed = true; }
     }
-    for (const [id, count] of Object.entries(delta.n.increments)) {
+    for (const [id, count] of Object.entries(delta.neg?.counters ?? {})) {
       const cur = this.state.n[id] ?? 0;
       if (count > cur) { this.state.n[id] = count; changed = true; }
     }

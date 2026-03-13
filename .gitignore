@@ -15,3 +15,6 @@ sdk/bun.lock
 
 # OS
 .DS_Store
+
+# Dev tools (not for production)
+server/src/bin/

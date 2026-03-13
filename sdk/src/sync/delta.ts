@@ -2,8 +2,9 @@
  * Delta application helpers.
  *
  * The server sends deltas as opaque msgpack bytes inside `ServerMsg.Delta`.
- * Each CRDT type decodes its own delta format. This module provides typed
- * delta decoders that match the Rust server's serde output.
+ * Each CRDT type decodes its own delta format matching Rust serde output.
+ *
+ * Field names mirror the Rust structs exactly (rmp-serde named encoding).
  */
 
 import { unpack } from "msgpackr";
@@ -12,33 +13,34 @@ import { unpack } from "msgpackr";
 // GCounter delta
 // ---------------------------------------------------------------------------
 
-/** Sparse map of client_id → new count. Only changed entries are included. */
+/** GCounterDelta { counters: BTreeMap<u64, u64> } */
 export interface GCounterDelta {
-  increments: Record<string, number>;
+  counters: Record<string, number>;
 }
 
 export function decodeGCounterDelta(bytes: Uint8Array): GCounterDelta {
-  const raw = unpack(bytes) as { increments?: Record<string, number> };
-  return { increments: raw.increments ?? {} };
+  const raw = unpack(bytes) as { counters?: Record<string, number> };
+  return { counters: raw.counters ?? {} };
 }
 
 // ---------------------------------------------------------------------------
 // PNCounter delta
 // ---------------------------------------------------------------------------
 
+/** PNCounterDelta { pos: Option<GCounterDelta>, neg: Option<GCounterDelta> } */
 export interface PNCounterDelta {
-  p: GCounterDelta;
-  n: GCounterDelta;
+  pos: GCounterDelta | null;
+  neg: GCounterDelta | null;
 }
 
 export function decodePNCounterDelta(bytes: Uint8Array): PNCounterDelta {
   const raw = unpack(bytes) as {
-    p?: { increments?: Record<string, number> };
-    n?: { increments?: Record<string, number> };
+    pos?: { counters?: Record<string, number> } | null;
+    neg?: { counters?: Record<string, number> } | null;
   };
   return {
-    p: { increments: raw.p?.increments ?? {} },
-    n: { increments: raw.n?.increments ?? {} },
+    pos: raw.pos ? { counters: raw.pos.counters ?? {} } : null,
+    neg: raw.neg ? { counters: raw.neg.counters ?? {} } : null,
   };
 }
 
@@ -46,34 +48,39 @@ export function decodePNCounterDelta(bytes: Uint8Array): PNCounterDelta {
 // ORSet delta
 // ---------------------------------------------------------------------------
 
+/**
+ * ORSetDelta { adds: HashMap<String, HashSet<Uuid>>, removes: HashMap<String, HashSet<Uuid>> }
+ * Uuid bytes are decoded by msgpackr as Uint8Array or number[].
+ */
 export interface ORSetDelta {
-  /** element → set of add-tags (UUIDs as strings) */
-  added: Record<string, string[]>;
-  /** element → set of removed tags */
-  removed: Record<string, string[]>;
+  adds: Record<string, Uint8Array[]>;
+  removes: Record<string, Uint8Array[]>;
 }
 
 export function decodeORSetDelta(bytes: Uint8Array): ORSetDelta {
   const raw = unpack(bytes) as {
-    added?: Record<string, string[]>;
-    removed?: Record<string, string[]>;
+    adds?: Record<string, unknown[]>;
+    removes?: Record<string, unknown[]>;
   };
-  return {
-    added: raw.added ?? {},
-    removed: raw.removed ?? {},
-  };
+  const toBytes = (v: unknown): Uint8Array =>
+    v instanceof Uint8Array ? v : new Uint8Array(v as number[]);
+  const decodeMap = (m?: Record<string, unknown[]>) =>
+    Object.fromEntries(Object.entries(m ?? {}).map(([k, tags]) => [k, tags.map(toBytes)]));
+  return { adds: decodeMap(raw.adds), removes: decodeMap(raw.removes) };
 }
 
 // ---------------------------------------------------------------------------
 // LWW Register delta
 // ---------------------------------------------------------------------------
 
+/** LwwEntry { value, hlc: HybridLogicalClock, author: u64 } */
 export interface LwwEntry {
   value: unknown;
-  hlc: { wall_ms: number; logical: number; node_id: number };
-  author: number;
+  hlc: { wall_ms: number | bigint; logical: number; node_id: number | bigint };
+  author: number | bigint;
 }
 
+/** LwwDelta { entry: Option<LwwEntry> } */
 export interface LwwDelta {
   entry: LwwEntry | null;
 }
@@ -89,12 +96,12 @@ export function decodeLwwDelta(bytes: Uint8Array): LwwDelta {
 
 export interface PresenceEntryDelta {
   data: unknown;
-  hlc: { wall_ms: number; logical: number; node_id: number };
-  ttl_ms: number;
+  hlc: { wall_ms: number | bigint; logical: number; node_id: number | bigint };
+  ttl_ms: number | bigint;
 }
 
+/** PresenceDelta — changes per client_id */
 export interface PresenceDelta {
-  /** client_id → entry (null = removed/tombstone) */
   changes: Record<string, PresenceEntryDelta | null>;
 }
 

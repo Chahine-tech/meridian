@@ -64,7 +64,7 @@ describe("GCounterHandle", () => {
     const t = stubTransport();
     const h = new GCounterHandle({ ...BASE_OPTS, crdtId: "c", transport: t });
     h.increment(10); // client 1 = 10
-    h.applyDelta({ increments: { "2": 20 } });
+    h.applyDelta({ counters: { "2": 20 } });
     expect(h.value()).toBe(30);
   });
 
@@ -72,7 +72,7 @@ describe("GCounterHandle", () => {
     const t = stubTransport();
     const h = new GCounterHandle({ ...BASE_OPTS, crdtId: "c", transport: t });
     h.increment(10);
-    h.applyDelta({ increments: { "1": 5 } }); // 5 < 10 — stale
+    h.applyDelta({ counters: { "1": 5 } }); // 5 < 10 — stale
     expect(h.value()).toBe(10);
   });
 
@@ -124,7 +124,7 @@ describe("PNCounterHandle", () => {
   it("applyDelta merges both GCounters", () => {
     const t = stubTransport();
     const h = new PNCounterHandle({ ...BASE_OPTS, crdtId: "pn", transport: t });
-    h.applyDelta({ p: { increments: { "2": 100 } }, n: { increments: { "2": 40 } } });
+    h.applyDelta({ pos: { counters: { "2": 100 } }, neg: { counters: { "2": 40 } } });
     expect(h.value()).toBe(60);
   });
 });

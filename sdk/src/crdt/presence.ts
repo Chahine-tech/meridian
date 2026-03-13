@@ -126,7 +126,7 @@ export class PresenceHandle<T> {
 
   private mergeEntry(clientIdStr: string, incoming: PresenceEntryDelta): boolean {
     const existing = this.entries.get(clientIdStr);
-    const incomingExpiresAt = incoming.hlc.wall_ms + incoming.ttl_ms;
+    const incomingExpiresAt = Number(incoming.hlc.wall_ms) + Number(incoming.ttl_ms);
 
     if (existing === undefined) {
       if (incoming.ttl_ms > 0) {

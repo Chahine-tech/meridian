@@ -11,7 +11,7 @@
  */
 
 import { Schema } from "effect";
-import { encode } from "../codec.js";
+import { encode, uuidToBytes } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { ORSetDelta } from "../sync/delta.js";
 
@@ -66,10 +66,11 @@ export class ORSetHandle<T> {
     this.tags.get(key)!.add(tag);
     this.emit();
 
+    // Rust Uuid is serialized as 16-byte bin — encode tag as bytes
     this.transport.send({
       Op: {
         crdt_id: this.crdtId,
-        op_bytes: encode({ ORSet: { Add: { element, tag, client_id: this.clientId } } }),
+        op_bytes: encode({ ORSet: { Add: { element, tag: uuidToBytes(tag) } } }),
       },
     });
   }
@@ -82,10 +83,11 @@ export class ORSetHandle<T> {
     this.tags.delete(key);
     this.emit();
 
+    // Rust expects known_tags as a set of 16-byte UUIDs
     this.transport.send({
       Op: {
         crdt_id: this.crdtId,
-        op_bytes: encode({ ORSet: { Remove: { element, tags: currentTags, client_id: this.clientId } } }),
+        op_bytes: encode({ ORSet: { Remove: { element, known_tags: currentTags.map(uuidToBytes) } } }),
       },
     });
   }
@@ -95,19 +97,21 @@ export class ORSetHandle<T> {
   applyDelta(delta: ORSetDelta): void {
     let changed = false;
 
-    for (const [elem, addedTags] of Object.entries(delta.added)) {
+    for (const [elem, addedTags] of Object.entries(delta.adds)) {
       if (!this.tags.has(elem)) this.tags.set(elem, new Set());
       const set = this.tags.get(elem)!;
       for (const tag of addedTags) {
-        if (!set.has(tag)) { set.add(tag); changed = true; }
+        const tagStr = Buffer.from(tag).toString("hex");
+        if (!set.has(tagStr)) { set.add(tagStr); changed = true; }
       }
     }
 
-    for (const [elem, removedTags] of Object.entries(delta.removed)) {
+    for (const [elem, removedTags] of Object.entries(delta.removes)) {
       const set = this.tags.get(elem);
       if (!set) continue;
       for (const tag of removedTags) {
-        if (set.has(tag)) { set.delete(tag); changed = true; }
+        const tagStr = Buffer.from(tag).toString("hex");
+        if (set.has(tagStr)) { set.delete(tagStr); changed = true; }
       }
       if (set.size === 0) this.tags.delete(elem);
     }

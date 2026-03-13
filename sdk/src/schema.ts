@@ -11,13 +11,25 @@ import { Schema } from "effect";
 // Shared primitives
 // ---------------------------------------------------------------------------
 
-/** Unix timestamp in milliseconds (u64 fits in JS number up to 2^53). */
-export const TimestampMs = Schema.Number;
-export type TimestampMs = typeof TimestampMs.Type;
+/**
+ * Unix timestamp in milliseconds.
+ * msgpackr decodes Rust u64 as BigInt — accept both for compatibility.
+ */
+export const TimestampMs = Schema.Union(Schema.Number, Schema.BigIntFromSelf.pipe(Schema.transform(
+  Schema.Number,
+  { decode: (n) => Number(n), encode: (n) => BigInt(n) },
+)));
+export type TimestampMs = number;
 
-/** client_id / author — opaque u64 encoded as number. */
-export const ClientId = Schema.Number;
-export type ClientId = typeof ClientId.Type;
+/**
+ * client_id / author — Rust u64, decoded by msgpackr as BigInt or number.
+ * Accept both and normalise to number.
+ */
+export const ClientId = Schema.Union(Schema.Number, Schema.BigIntFromSelf.pipe(Schema.transform(
+  Schema.Number,
+  { decode: (n) => Number(n), encode: (n) => BigInt(n) },
+)));
+export type ClientId = number;
 
 // ---------------------------------------------------------------------------
 // Auth / Token claims
@@ -67,7 +79,17 @@ export type ClientMsg = typeof ClientMsg.Type;
 
 export const ServerMsg = Schema.Union(
   Schema.Struct({
-    Delta: Schema.Struct({ crdt_id: Schema.String, delta_bytes: Schema.instanceOf(Uint8Array) }),
+    Delta: Schema.Struct({
+      crdt_id: Schema.String,
+      // msgpackr may decode bin as Uint8Array or number[] depending on context — normalise to Uint8Array
+      delta_bytes: Schema.Union(
+        Schema.Uint8ArrayFromSelf,
+        Schema.Array(Schema.Number).pipe(Schema.transform(Schema.Uint8ArrayFromSelf, {
+          decode: (arr) => new Uint8Array(arr),
+          encode: (u8) => Array.from(u8),
+        })),
+      ),
+    }),
   }),
   Schema.Struct({ Ack: Schema.Struct({ seq: Schema.Number }) }),
   Schema.Struct({
@@ -118,19 +140,13 @@ export type PresenceValue = typeof PresenceValue.Type;
 // HTTP response envelopes
 // ---------------------------------------------------------------------------
 
-export const CrdtGetResponse = Schema.Struct({
-  crdt_type: Schema.String,
-  value: Schema.Unknown,
-  vector_clock: VectorClock,
-});
-export type CrdtGetResponse = typeof CrdtGetResponse.Type;
+/** GET /v1/namespaces/:ns/crdts/:id — server returns the raw JSON value directly. */
+export const CrdtGetResponse = Schema.Unknown;
+export type CrdtGetResponse = unknown;
 
-export const CrdtOpResponse = Schema.Struct({
-  delta: Schema.Unknown,
-  vector_clock: VectorClock,
-  seq: Schema.Number,
-});
-export type CrdtOpResponse = typeof CrdtOpResponse.Type;
+/** POST /v1/namespaces/:ns/crdts/:id/ops — server returns msgpack-encoded delta bytes. */
+export const CrdtOpResponse = Schema.Unknown;
+export type CrdtOpResponse = unknown;
 
 export const TokenIssueResponse = Schema.Struct({
   token: Schema.String,

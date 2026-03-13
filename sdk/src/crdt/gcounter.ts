@@ -80,7 +80,7 @@ export class GCounterHandle {
 
   applyDelta(delta: GCounterDelta): void {
     let changed = false;
-    for (const [id, count] of Object.entries(delta.increments)) {
+    for (const [id, count] of Object.entries(delta.counters)) {
       const current = this.state.counts[id] ?? 0;
       if (count > current) {
         this.state.counts[id] = count;

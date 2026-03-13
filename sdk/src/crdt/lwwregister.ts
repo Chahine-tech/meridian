@@ -10,7 +10,7 @@
  */
 
 import { Schema } from "effect";
-import { encode } from "../codec.js";
+import { encode, wallMsToBigInt } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { LwwDelta, LwwEntry } from "../sync/delta.js";
 
@@ -47,7 +47,7 @@ export class LwwRegisterHandle<T> {
   /** Metadata: when was the last write and by whom. */
   meta(): { updatedAtMs: number; author: number } | null {
     if (this.entry === null) return null;
-    return { updatedAtMs: this.entry.hlc.wall_ms, author: this.entry.author };
+    return { updatedAtMs: Number(this.entry.hlc.wall_ms), author: Number(this.entry.author) };
   }
 
   onChange(listener: (value: T | null) => void): () => void {
@@ -67,10 +67,13 @@ export class LwwRegisterHandle<T> {
       this.emit();
     }
 
+    // wall_ms must be BigInt — msgpackr encodes large JS numbers as float64,
+    // but Rust expects u64 integer encoding
+    const wireHlc = { wall_ms: wallMsToBigInt(wallMs), logical: 0, node_id: this.clientId };
     this.transport.send({
       Op: {
         crdt_id: this.crdtId,
-        op_bytes: encode({ LwwRegister: { value, hlc, author: this.clientId } }),
+        op_bytes: encode({ LwwRegister: { value, hlc: wireHlc, author: this.clientId } }),
       },
     });
   }

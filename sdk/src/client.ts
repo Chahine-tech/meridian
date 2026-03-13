@@ -159,6 +159,11 @@ export class MeridianClient {
 
   // ---- Lifecycle ----
 
+  /** Resolves when the WebSocket is connected and ready. */
+  waitForConnected(timeoutMs = 5_000): Promise<void> {
+    return this.transport.waitForConnected(timeoutMs);
+  }
+
   close(): void {
     this.transport.close();
   }

@@ -63,6 +63,32 @@ export function decodeServerMsg(bytes: Uint8Array): Effect.Effect<ServerMsg, Cod
 }
 
 // ---------------------------------------------------------------------------
+// Wire type helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a UUID string ("xxxxxxxx-xxxx-...") to a 16-byte Uint8Array.
+ * Rust's `uuid::Uuid` is serialized by rmp-serde as raw bytes (bin type).
+ */
+export function uuidToBytes(uuid: string): Uint8Array {
+  const hex = uuid.replace(/-/g, "");
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+/**
+ * Encode a wall-clock timestamp (ms) as BigInt for msgpack u64 encoding.
+ * msgpackr encodes JS `number` as float64 for large values; Rust u64 fields
+ * require an integer encoding — BigInt forces msgpackr to use uint64.
+ */
+export function wallMsToBigInt(ms: number): bigint {
+  return BigInt(ms);
+}
+
+// ---------------------------------------------------------------------------
 // VectorClock <-> msgpack bytes
 // ---------------------------------------------------------------------------
 

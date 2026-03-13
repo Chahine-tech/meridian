@@ -120,13 +120,16 @@ export class HttpClient {
         if (!response.ok) {
           let errBody: ErrorResponse;
           try {
-            errBody = Schema.decodeUnknownSync(ErrorResponse)(decode(bytes));
+            errBody = Schema.decodeUnknownSync(ErrorResponse)(JSON.parse(new TextDecoder().decode(bytes)));
           } catch {
             errBody = { error: "unknown", message: `HTTP ${response.status}` };
           }
           return Effect.fail(new HttpError({ status: response.status, body: errBody }));
         }
-        const raw = decode(bytes);
+        const contentType = response.headers.get("content-type") ?? "";
+        const raw = contentType.includes("application/msgpack")
+          ? decode(bytes)
+          : JSON.parse(new TextDecoder().decode(bytes));
         return Schema.decodeUnknown(responseSchema)(raw).pipe(
           Effect.mapError((e) =>
             new NetworkError({ message: `Response schema validation failed: ${e.message}` }),

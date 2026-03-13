@@ -104,6 +104,33 @@ export class WsTransport {
     return this.state;
   }
 
+  /** Resolves when the transport reaches CONNECTED state (or rejects on timeout). */
+  waitForConnected(timeoutMs = 5_000): Promise<void> {
+    if (this.state === "CONNECTED") return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const orig = this.config.onStateChange;
+      const restore = () => {
+        if (orig !== undefined) {
+          this.config.onStateChange = orig;
+        } else {
+          delete (this.config as Partial<WsTransportConfig>).onStateChange;
+        }
+      };
+      const timer = setTimeout(() => {
+        restore();
+        reject(new Error("WsTransport: connect timeout"));
+      }, timeoutMs);
+      this.config.onStateChange = (s) => {
+        orig?.(s);
+        if (s === "CONNECTED") {
+          clearTimeout(timer);
+          restore();
+          resolve();
+        }
+      };
+    });
+  }
+
   // ---- FSM internals ----
 
   private doConnect(): void {
