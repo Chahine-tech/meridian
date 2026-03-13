@@ -1,3 +1,4 @@
-<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M4 34V6L20 26L36 6V34" stroke="#0D9373" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<svg width="160" height="40" viewBox="0 0 160 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M4 32V8L16 24L28 8V32" stroke="#0D9373" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <text x="38" y="28" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="700" fill="#1a1a1a" letter-spacing="-0.5">Meridian</text>
 </svg>
