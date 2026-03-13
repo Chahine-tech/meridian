@@ -158,9 +158,11 @@ describe("ORSetHandle", () => {
   it("add-wins: concurrent add+remove → element survives via applyDelta", () => {
     const t = stubTransport();
     const h = new ORSetHandle<string>({ ...BASE_OPTS, crdtId: "s", transport: t });
-    // Remote adds "alice" with tag "t1", local remove only removes "t2" (different tag)
-    h.applyDelta({ added: { '"alice"': ["t1"] }, removed: {} });
-    h.applyDelta({ added: {}, removed: { '"alice"': ["t2"] } }); // unknown tag — no effect
+    // Remote adds "alice" with tag t1 (16 bytes), local remove only removes t2 (different tag)
+    const t1 = new Uint8Array(16).fill(0x01);
+    const t2 = new Uint8Array(16).fill(0x02);
+    h.applyDelta({ adds: { '"alice"': [t1] }, removes: {} });
+    h.applyDelta({ adds: {}, removes: { '"alice"': [t2] } }); // unknown tag — no effect
     expect(h.has("alice")).toBe(true);
   });
 

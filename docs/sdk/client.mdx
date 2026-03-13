@@ -61,6 +61,17 @@ client.http.syncCrdt(ns, id, sinceVc) // → Effect<CrdtGetResponse, HttpError |
 client.http.issueToken(ns, opts)      // → Effect<TokenIssueResponse, HttpError | NetworkError>
 ```
 
+## Wait for connection
+
+```ts
+await client.waitForConnected();          // default 5s timeout
+await client.waitForConnected(10_000);    // custom timeout in ms
+```
+
+Resolves when the WebSocket reaches `CONNECTED` state. Useful in tests or when you need to send an operation immediately after creating the client (before the connection handshake completes).
+
+Throws `Error: WsTransport: connect timeout` if the timeout elapses.
+
 ## Close
 
 ```ts
