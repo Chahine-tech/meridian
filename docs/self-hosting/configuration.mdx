@@ -10,6 +10,8 @@ All configuration is via environment variables.
 | `MERIDIAN_BIND` | `0.0.0.0:3000` | TCP bind address |
 | `MERIDIAN_DATA_DIR` | `./data` | Path to sled storage directory |
 | `MERIDIAN_SIGNING_KEY` | *(random)* | 64-char hex ed25519 seed (32 bytes) |
+| `MERIDIAN_WEBHOOK_URL` | *(unset)* | HTTP endpoint to receive webhook events |
+| `MERIDIAN_WEBHOOK_SECRET` | *(unset)* | Secret for `X-Meridian-Signature` HMAC-SHA256 |
 
 ## MERIDIAN_SIGNING_KEY
 
@@ -22,6 +24,69 @@ openssl rand -hex 32
 This key is used to sign and verify auth tokens. Keep it secret and back it up — losing it invalidates all issued tokens.
 
 If unset, a random key is generated at startup. This is fine for local development but not for production (tokens become invalid on restart).
+
+## Webhooks
+
+When `MERIDIAN_WEBHOOK_URL` is set, Meridian sends a `POST` request to that URL after every successful CRDT operation.
+
+**Payload**
+
+```json
+{
+  "ns": "my-room",
+  "crdt_id": "counter",
+  "source": "http",
+  "timestamp_ms": 1712345678901
+}
+```
+
+`source` is either `"http"` (REST op) or `"ws"` (WebSocket op).
+
+**Signature verification**
+
+Every request includes an `X-Meridian-Signature` header containing `HMAC-SHA256(secret, body)` as a lowercase hex string.
+
+```ts
+import { createHmac } from "crypto";
+
+const signature = createHmac("sha256", process.env.MERIDIAN_WEBHOOK_SECRET!)
+  .update(rawBody)
+  .digest("hex");
+
+if (signature !== req.headers["x-meridian-signature"]) {
+  return res.status(401).end();
+}
+```
+
+Failed deliveries are retried up to 3 times with exponential backoff (200ms, 400ms, 800ms). Events are dropped if the internal queue (1024 slots) is full.
+
+## Rate limiting
+
+Each token is limited to **100 requests per second** (sliding window). Requests over the limit return `429 Too Many Requests`:
+
+```json
+{ "error": "rate_limited", "message": "too many requests" }
+```
+
+## Metrics
+
+Meridian exposes a Prometheus-compatible metrics endpoint at `GET /metrics` (no authentication required).
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `meridian_ops_total` | Counter | CRDT operations applied, labeled by `ns`, `crdt_id`, `op_type` |
+| `meridian_ws_connections_active` | Gauge | Active WebSocket connections |
+| `meridian_wal_entries_total` | Counter | WAL entries written |
+
+Example Prometheus scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: meridian
+    static_configs:
+      - targets: ["localhost:3000"]
+    metrics_path: /metrics
+```
 
 ## MERIDIAN_DATA_DIR
 
