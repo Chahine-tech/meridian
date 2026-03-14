@@ -16,6 +16,7 @@ use crate::{
     },
     metrics,
     storage::Store,
+    webhooks::WebhookEvent,
 };
 
 use super::AppStateExt;
@@ -118,6 +119,15 @@ pub async fn post_op<S: AppStateExt>(
         }
 
         metrics::record_op(&ns, &id, "http");
+
+        if let Some(dispatcher) = state.webhooks() {
+            dispatcher.send(WebhookEvent {
+                ns: ns.clone(),
+                crdt_id: id.clone(),
+                source: "http".into(),
+                timestamp_ms: now_ms(),
+            });
+        }
 
         // Fan-out delta to WebSocket subscribers
         let msg = std::sync::Arc::new(crate::api::ws::ServerMsg::Delta {

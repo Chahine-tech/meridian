@@ -14,16 +14,13 @@ use meridian_server::{
     rate_limit::RateLimiter,
     storage::SledStore,
     tasks::{run_presence_gc, run_snapshot_flusher, run_wal_compactor},
+    webhooks::{WebhookConfig, WebhookDispatcher},
     AppState,
 };
 
 struct Config {
-    /// TCP bind address. Default: 0.0.0.0:3000
     bind: String,
-    /// Path to sled data directory. Default: ./data
     data_dir: String,
-    /// Hex-encoded 32-byte ed25519 seed. If unset, a random key is generated
-    /// (dev mode — tokens won't survive restart).
     signing_key_hex: Option<String>,
 }
 
@@ -73,16 +70,27 @@ async fn main() -> anyhow::Result<()> {
         rate_limiter: Arc::new(RateLimiter::new()),
     });
 
+    // ----- Graceful shutdown token -----
+    let cancel = CancellationToken::new();
+
+    // ----- Webhooks (optional) -----
+    let webhooks = WebhookConfig::from_env().map(|webhook_config| {
+        info!(url = webhook_config.url, "webhooks enabled");
+        WebhookDispatcher::new(webhook_config, cancel.clone())
+    });
+
+    if webhooks.is_none() {
+        info!("MERIDIAN_WEBHOOK_URL not set — webhooks disabled");
+    }
+
     // ----- Shared state -----
     let subscriptions = Arc::new(SubscriptionManager::new());
     let state = AppState {
         store: Arc::clone(&store),
         subscriptions: Arc::clone(&subscriptions),
         signer: Arc::clone(&signer),
+        webhooks,
     };
-
-    // ----- Graceful shutdown token -----
-    let cancel = CancellationToken::new();
 
     // ----- Background tasks -----
     let gc_handle = tokio::spawn(run_presence_gc(

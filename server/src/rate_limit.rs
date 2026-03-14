@@ -32,6 +32,7 @@ impl RateLimiter {
     }
 
     /// Returns `true` if the request is allowed, `false` if rate-limited.
+    #[must_use]
     pub fn check(&self, key: &str) -> bool {
         let now = Instant::now();
         let cutoff = now - RATE_LIMIT_WINDOW;
@@ -46,5 +47,37 @@ impl RateLimiter {
 
         entry.push(now);
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RateLimiter;
+
+    #[test]
+    fn allows_requests_under_limit() {
+        let limiter = RateLimiter::new();
+        for _ in 0..99 {
+            assert!(limiter.check("client:ns"));
+        }
+    }
+
+    #[test]
+    fn blocks_requests_over_limit() {
+        let limiter = RateLimiter::new();
+        for _ in 0..100 {
+            let _ = limiter.check("client:ns");
+        }
+        assert!(!limiter.check("client:ns"));
+    }
+
+    #[test]
+    fn different_keys_are_independent() {
+        let limiter = RateLimiter::new();
+        for _ in 0..100 {
+            let _ = limiter.check("client-a:ns");
+        }
+        assert!(!limiter.check("client-a:ns"));
+        assert!(limiter.check("client-b:ns"));
     }
 }
