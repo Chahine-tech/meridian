@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use axum::Extension;
+use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -8,15 +10,12 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 use meridian_server::{
     api::build_router,
     api::ws::SubscriptionManager,
-    auth::TokenSigner,
+    auth::{AuthState, TokenSigner},
+    rate_limit::RateLimiter,
     storage::SledStore,
     tasks::{run_presence_gc, run_snapshot_flusher, run_wal_compactor},
     AppState,
 };
-
-// ---------------------------------------------------------------------------
-// Config (from env vars)
-// ---------------------------------------------------------------------------
 
 struct Config {
     /// TCP bind address. Default: 0.0.0.0:3000
@@ -38,19 +37,19 @@ impl Config {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Structured logging — RUST_LOG controls verbosity (default: info)
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .with(tracing_subscriber::fmt::layer())
         .init();
 
     let config = Config::from_env();
+
+    // ----- Metrics recorder (must be installed before any metric is recorded) -----
+    let prometheus_handle = PrometheusBuilder::new()
+        .install_recorder()
+        .expect("failed to install Prometheus recorder");
 
     // ----- Storage -----
     let store = Arc::new(SledStore::open(&config.data_dir)?);
@@ -67,6 +66,12 @@ async fn main() -> anyhow::Result<()> {
             Arc::new(TokenSigner::generate())
         }
     };
+
+    // ----- Auth state (signer + rate limiter) -----
+    let auth_state = Arc::new(AuthState {
+        signer: Arc::clone(&signer),
+        rate_limiter: Arc::new(RateLimiter::new()),
+    });
 
     // ----- Shared state -----
     let subscriptions = Arc::new(SubscriptionManager::new());
@@ -97,11 +102,12 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     // ----- HTTP server -----
-    let router = build_router(state);
+    let router = build_router(state, auth_state)
+        .layer(Extension(prometheus_handle));
+
     let listener = TcpListener::bind(&config.bind).await?;
     info!(addr = config.bind, "Meridian listening");
 
-    // Serve until Ctrl-C
     axum::serve(listener, router)
         .with_graceful_shutdown(async move {
             tokio::signal::ctrl_c()
@@ -112,7 +118,6 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
 
-    // Wait for background tasks to finish their final flush/gc tick.
     let _ = tokio::join!(gc_handle, flush_handle, compact_handle);
 
     info!("Meridian stopped cleanly");

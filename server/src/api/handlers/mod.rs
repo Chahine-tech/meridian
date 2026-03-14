@@ -1,5 +1,6 @@
 pub mod crdt;
 pub mod history;
+pub mod metrics;
 pub mod tokens;
 
 use std::sync::Arc;

@@ -14,6 +14,7 @@ use crate::{
         registry::{apply_op, CrdtOp, CrdtType, CrdtValue},
         VectorClock,
     },
+    metrics,
     storage::Store,
 };
 
@@ -115,6 +116,8 @@ pub async fn post_op<S: AppStateExt>(
             tracing::error!(error = %e, "store.put failed");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
+
+        metrics::record_op(&ns, &id, "http");
 
         // Fan-out delta to WebSocket subscribers
         let msg = std::sync::Arc::new(crate::api::ws::ServerMsg::Delta {

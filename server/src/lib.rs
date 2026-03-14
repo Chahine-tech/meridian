@@ -1,7 +1,9 @@
 pub mod api;
 pub mod auth;
 pub mod crdt;
+pub mod metrics;
 pub mod namespace;
+pub mod rate_limit;
 pub mod storage;
 pub mod tasks;
 
