@@ -1,20 +1,19 @@
-import { pack, unpack } from "msgpackr";
+import { decode as msgpackDecode, encode as msgpackEncode } from "@msgpack/msgpack";
 import { Effect, Schema } from "effect";
 import { CodecError } from "./errors.js";
 import { ServerMsg } from "./schema.js";
 import type { ClientMsg, VectorClock } from "./schema.js";
 
-export const encode = (value: unknown): Uint8Array<ArrayBuffer> =>
-  pack(value) as Uint8Array<ArrayBuffer>;
+export const encode = (value: unknown): Uint8Array => msgpackEncode(value);
 
-export const decode = (bytes: Uint8Array): unknown => unpack(bytes);
+export const decode = (bytes: Uint8Array): unknown => msgpackDecode(bytes);
 
 export const encodeClientMsg = (msg: ClientMsg): Uint8Array => encode(msg);
 
 export const decodeServerMsg = (bytes: Uint8Array): Effect.Effect<ServerMsg, CodecError> => {
   let raw: unknown;
   try {
-    raw = unpack(bytes);
+    raw = decode(bytes);
   } catch {
     return Effect.fail(new CodecError({ message: "msgpack decode failed", raw: bytes }));
   }
@@ -38,15 +37,12 @@ export const uuidToBytes = (uuid: string): Uint8Array => {
   return bytes;
 };
 
-// HACK: wallMsToBigInt forces msgpackr to use uint64 encoding — JS `number` encodes as float64 for large values, but Rust u64 fields require integer encoding.
-export const wallMsToBigInt = (ms: number): bigint => BigInt(ms);
-
 export const encodeVectorClock = (vc: VectorClock): Uint8Array => encode({ entries: vc });
 
 export const decodeVectorClock = (bytes: Uint8Array): Effect.Effect<VectorClock, CodecError> => {
   let raw: unknown;
   try {
-    raw = unpack(bytes);
+    raw = decode(bytes);
   } catch {
     return Effect.fail(new CodecError({ message: "VectorClock msgpack decode failed", raw: bytes }));
   }

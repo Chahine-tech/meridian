@@ -1,11 +1,11 @@
-import { unpack } from "msgpackr";
+import { decode } from "@msgpack/msgpack";
 
 export interface GCounterDelta {
   counters: Record<string, number>;
 }
 
 export const decodeGCounterDelta = (bytes: Uint8Array): GCounterDelta => {
-  const raw = unpack(bytes) as { counters?: Record<string, number> };
+  const raw = decode(bytes) as { counters?: Record<string, number> };
   return { counters: raw.counters ?? {} };
 };
 
@@ -15,7 +15,7 @@ export interface PNCounterDelta {
 }
 
 export const decodePNCounterDelta = (bytes: Uint8Array): PNCounterDelta => {
-  const raw = unpack(bytes) as {
+  const raw = decode(bytes) as {
     pos?: { counters?: Record<string, number> } | null;
     neg?: { counters?: Record<string, number> } | null;
   };
@@ -31,14 +31,14 @@ export interface ORSetDelta {
 }
 
 export const decodeORSetDelta = (bytes: Uint8Array): ORSetDelta => {
-  const raw = unpack(bytes) as {
+  const raw = decode(bytes) as {
     adds?: Record<string, unknown[]>;
     removes?: Record<string, unknown[]>;
   };
-  const toBytes = (v: unknown): Uint8Array =>
-    v instanceof Uint8Array ? v : new Uint8Array(v as number[]);
-  const decodeMap = (m?: Record<string, unknown[]>) =>
-    Object.fromEntries(Object.entries(m ?? {}).map(([k, tags]) => [k, tags.map(toBytes)]));
+  const toBytes = (value: unknown): Uint8Array =>
+    value instanceof Uint8Array ? value : new Uint8Array(value as number[]);
+  const decodeMap = (map?: Record<string, unknown[]>) =>
+    Object.fromEntries(Object.entries(map ?? {}).map(([key, tags]) => [key, tags.map(toBytes)]));
   return { adds: decodeMap(raw.adds), removes: decodeMap(raw.removes) };
 };
 
@@ -53,7 +53,7 @@ export interface LwwDelta {
 }
 
 export const decodeLwwDelta = (bytes: Uint8Array): LwwDelta => {
-  const raw = unpack(bytes) as { entry?: LwwEntry | null };
+  const raw = decode(bytes) as { entry?: LwwEntry | null };
   return { entry: raw.entry ?? null };
 };
 
@@ -68,6 +68,6 @@ export interface PresenceDelta {
 }
 
 export const decodePresenceDelta = (bytes: Uint8Array): PresenceDelta => {
-  const raw = unpack(bytes) as { changes?: Record<string, PresenceEntryDelta | null> };
+  const raw = decode(bytes) as { changes?: Record<string, PresenceEntryDelta | null> };
   return { changes: raw.changes ?? {} };
 };

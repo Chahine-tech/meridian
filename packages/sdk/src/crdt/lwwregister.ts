@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { encode, wallMsToBigInt } from "../codec.js";
+import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { LwwDelta, LwwEntry } from "../sync/delta.js";
 
@@ -75,11 +75,10 @@ export class LwwRegisterHandle<T> {
       this.emit();
     }
 
-    const wireHlc = { wall_ms: wallMsToBigInt(wallMs), logical: 0, node_id: this.clientId };
     this.transport.send({
       Op: {
         crdt_id: this.crdtId,
-        op_bytes: encode({ LwwRegister: { value, hlc: wireHlc, author: this.clientId } }),
+        op_bytes: encode({ LwwRegister: { value, hlc: { wall_ms: wallMs, logical: 0, node_id: this.clientId }, author: this.clientId } }),
       },
     });
   }

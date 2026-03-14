@@ -7,14 +7,14 @@
 
 import { Schema } from "effect";
 
-/** Unix timestamp in milliseconds. msgpackr decodes Rust u64 as BigInt — accept both for compatibility. */
+/** Unix timestamp in milliseconds. Rust u64 decodes as bigint when > Number.MAX_SAFE_INTEGER — normalise to number. */
 export const TimestampMs = Schema.Union(Schema.Number, Schema.BigIntFromSelf.pipe(Schema.transform(
   Schema.Number,
   { decode: (n) => Number(n), encode: (n) => BigInt(n) },
 )));
 export type TimestampMs = number;
 
-/** client_id / author — Rust u64, decoded by msgpackr as BigInt or number. Accept both and normalise to number. */
+/** client_id / author — Rust u64, may decode as bigint for large values. Normalise to number. */
 export const ClientId = Schema.Union(Schema.Number, Schema.BigIntFromSelf.pipe(Schema.transform(
   Schema.Number,
   { decode: (n) => Number(n), encode: (n) => BigInt(n) },
@@ -55,14 +55,7 @@ export const ServerMsg = Schema.Union(
   Schema.Struct({
     Delta: Schema.Struct({
       crdt_id: Schema.String,
-      // HACK: msgpackr may decode bin as Uint8Array or number[] depending on context — normalise to Uint8Array
-      delta_bytes: Schema.Union(
-        Schema.Uint8ArrayFromSelf,
-        Schema.Array(Schema.Number).pipe(Schema.transform(Schema.Uint8ArrayFromSelf, {
-          decode: (arr) => new Uint8Array(arr),
-          encode: (u8) => Array.from(u8),
-        })),
-      ),
+      delta_bytes: Schema.Uint8ArrayFromSelf,
     }),
   }),
   Schema.Struct({ Ack: Schema.Struct({ seq: Schema.Number }) }),
