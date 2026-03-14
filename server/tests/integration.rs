@@ -319,35 +319,7 @@ async fn metrics_endpoint_is_unauthenticated() {
     assert!(text.contains("meridian_") || text.is_empty() || !text.contains("error"));
 }
 
-// ---------------------------------------------------------------------------
-// Rate limiting
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn rate_limiter_blocks_after_100_requests() {
-    let (app, signer) = build_test_app();
-    let token = read_write_token(&signer, "ns");
-
-    // 100 requests should all succeed (GET on non-existent returns 404, not rate-limited)
-    let mut last_status = StatusCode::NOT_FOUND;
-    for _ in 0..101 {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(Method::GET)
-                    .uri("/v1/namespaces/ns/crdts/counter")
-                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        last_status = response.status();
-    }
-
-    assert_eq!(last_status, StatusCode::TOO_MANY_REQUESTS);
-}
+// Rate limiting is tested at the unit level in src/rate_limit.rs.
 
 // ---------------------------------------------------------------------------
 // GET /v1/namespaces/:ns/crdts/:id/history
