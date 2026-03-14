@@ -10,10 +10,7 @@ use serde_json::json;
 use tracing::warn;
 
 use super::{claims::TokenClaims, error::AuthError, signer::TokenSigner};
-
-// ---------------------------------------------------------------------------
-// Error response helper
-// ---------------------------------------------------------------------------
+use crate::rate_limit::RateLimiter;
 
 fn auth_error_response(err: AuthError) -> Response {
     let (status, code, message) = match &err {
@@ -30,20 +27,24 @@ fn auth_error_response(err: AuthError) -> Response {
     (status, Json(json!({ "error": code, "message": message }))).into_response()
 }
 
-// ---------------------------------------------------------------------------
-// Auth middleware
-// ---------------------------------------------------------------------------
+/// Combined auth + rate-limit state threaded through the middleware.
+#[derive(Clone)]
+pub struct AuthState {
+    pub signer: Arc<TokenSigner>,
+    pub rate_limiter: Arc<RateLimiter>,
+}
 
-/// Axum middleware that validates a Meridian token on every request.
+/// Axum middleware that validates a Meridian token on every request,
+/// then enforces per-token rate limiting (100 req/s sliding window).
 ///
 /// Token lookup order:
 /// 1. `Authorization: Bearer <token>` header
 /// 2. `?token=<token>` query parameter (for WebSocket handshakes)
 ///
 /// On success: inserts `TokenClaims` into request extensions.
-/// On failure: returns a structured JSON 401/403.
+/// On failure: returns a structured JSON 401/403/429.
 pub async fn auth_middleware(
-    State(signer): State<Arc<TokenSigner>>,
+    State(auth_state): State<Arc<AuthState>>,
     mut req: Request,
     next: Next,
 ) -> Response {
@@ -51,12 +52,20 @@ pub async fn auth_middleware(
 
     match token {
         None => auth_error_response(AuthError::MissingToken),
-        Some(t) => match signer.verify(t) {
+        Some(t) => match auth_state.signer.verify(t) {
             Err(e) => {
                 warn!(error = %e, "auth rejected");
                 auth_error_response(e)
             }
             Ok(claims) => {
+                let rate_key = format!("{}:{}", claims.namespace, claims.client_id);
+                if !auth_state.rate_limiter.check(&rate_key) {
+                    return (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        Json(json!({ "error": "rate_limited", "message": "too many requests" })),
+                    )
+                        .into_response();
+                }
                 req.extensions_mut().insert(claims);
                 next.run(req).await
             }
@@ -64,9 +73,7 @@ pub async fn auth_middleware(
     }
 }
 
-/// Extract the raw token string from the request (does not allocate if not found).
 fn extract_token(req: &Request) -> Option<&str> {
-    // 1. Authorization header
     if let Some(auth) = req.headers().get(header::AUTHORIZATION)
         && let Ok(s) = auth.to_str()
         && let Some(token) = s.strip_prefix("Bearer ")
@@ -74,7 +81,6 @@ fn extract_token(req: &Request) -> Option<&str> {
         return Some(token);
     }
 
-    // 2. ?token= query param
     if let Some(query) = req.uri().query() {
         for pair in query.split('&') {
             if let Some(val) = pair.strip_prefix("token=") {
@@ -85,10 +91,6 @@ fn extract_token(req: &Request) -> Option<&str> {
 
     None
 }
-
-// ---------------------------------------------------------------------------
-// Extractor: pull TokenClaims from extensions
-// ---------------------------------------------------------------------------
 
 /// Axum extractor that retrieves `TokenClaims` inserted by the middleware.
 /// Use this in handlers: `async fn handler(claims: ClaimsExt, ...) -> ...`
