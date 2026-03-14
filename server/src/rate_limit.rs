@@ -18,11 +18,17 @@ pub struct RateLimiter {
     windows: Arc<DashMap<String, Vec<Instant>>>,
 }
 
-impl RateLimiter {
-    pub fn new() -> Self {
+impl Default for RateLimiter {
+    fn default() -> Self {
         Self {
             windows: Arc::new(DashMap::new()),
         }
+    }
+}
+
+impl RateLimiter {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Returns `true` if the request is allowed, `false` if rate-limited.

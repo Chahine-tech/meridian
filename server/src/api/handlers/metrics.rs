@@ -9,12 +9,11 @@ use metrics_exporter_prometheus::PrometheusHandle;
 pub async fn get_metrics(
     axum::extract::Extension(handle): axum::extract::Extension<PrometheusHandle>,
 ) -> Response {
-    match handle.render() {
-        output => (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
-            output,
-        )
-            .into_response(),
-    }
+    let output = handle.render();
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        output,
+    )
+        .into_response()
 }
