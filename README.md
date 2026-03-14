@@ -12,6 +12,7 @@
   <a href="https://github.com/Chahine-tech/meridian/actions"><img src="https://github.com/Chahine-tech/meridian/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024" />
   <img src="https://img.shields.io/badge/tests-124-brightgreen" alt="124 tests" />
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
 </p>
 
 ---
