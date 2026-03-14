@@ -12,8 +12,10 @@ use tracing::{debug, info, warn};
 
 use crate::{
     auth::ClaimsExt,
-    crdt::registry::{apply_op, CrdtOp, CrdtType, CrdtValue},
+    crdt::{clock::now_ms, registry::{apply_op, CrdtOp, CrdtType, CrdtValue}},
+    metrics,
     storage::Store,
+    webhooks::{WebhookDispatcher, WebhookEvent},
 };
 
 use super::{
@@ -31,6 +33,7 @@ pub trait WsState: Clone + Send + Sync + 'static {
     type S: Store;
     fn store(&self) -> &Self::S;
     fn subscriptions(&self) -> &Arc<SubscriptionManager>;
+    fn webhooks(&self) -> Option<&WebhookDispatcher>;
 }
 
 use crate::auth::claims::TokenClaims;
@@ -62,6 +65,7 @@ where
     let client_id = claims.client_id;
     info!(ns, client_id, "WebSocket upgrade");
 
+    metrics::ws_connected();
     ws.on_upgrade(move |socket| handle_socket(socket, ns, client_id, claims, state))
 }
 
@@ -123,6 +127,7 @@ async fn handle_socket<S: WsState>(mut socket: WebSocket, ns: String, client_id:
         }
     }
 
+    metrics::ws_disconnected();
     debug!(ns, client_id, "WebSocket handler exiting");
 }
 
@@ -183,6 +188,17 @@ async fn handle_client_message<S: WsState>(
             match apply_and_persist(state, ns, &crdt_id, op).await {
                 Ok(Some(delta_bytes)) => {
                     *seq += 1;
+                    metrics::record_op(ns, &crdt_id, "ws");
+
+                    if let Some(dispatcher) = state.webhooks() {
+                        dispatcher.send(WebhookEvent {
+                            ns: ns.to_owned(),
+                            crdt_id: crdt_id.clone(),
+                            source: "ws".into(),
+                            timestamp_ms: now_ms(),
+                        });
+                    }
+
                     // Broadcast delta to all namespace subscribers (including this client).
                     let delta_msg = Arc::new(ServerMsg::Delta {
                         crdt_id: crdt_id.clone(),

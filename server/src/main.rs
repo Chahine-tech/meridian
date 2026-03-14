@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use axum::Extension;
+use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -8,23 +10,17 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 use meridian_server::{
     api::build_router,
     api::ws::SubscriptionManager,
-    auth::TokenSigner,
+    auth::{AuthState, TokenSigner},
+    rate_limit::RateLimiter,
     storage::SledStore,
     tasks::{run_presence_gc, run_snapshot_flusher, run_wal_compactor},
+    webhooks::{WebhookConfig, WebhookDispatcher},
     AppState,
 };
 
-// ---------------------------------------------------------------------------
-// Config (from env vars)
-// ---------------------------------------------------------------------------
-
 struct Config {
-    /// TCP bind address. Default: 0.0.0.0:3000
     bind: String,
-    /// Path to sled data directory. Default: ./data
     data_dir: String,
-    /// Hex-encoded 32-byte ed25519 seed. If unset, a random key is generated
-    /// (dev mode — tokens won't survive restart).
     signing_key_hex: Option<String>,
 }
 
@@ -38,19 +34,19 @@ impl Config {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Structured logging — RUST_LOG controls verbosity (default: info)
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .with(tracing_subscriber::fmt::layer())
         .init();
 
     let config = Config::from_env();
+
+    // ----- Metrics recorder (must be installed before any metric is recorded) -----
+    let prometheus_handle = PrometheusBuilder::new()
+        .install_recorder()
+        .expect("failed to install Prometheus recorder");
 
     // ----- Storage -----
     let store = Arc::new(SledStore::open(&config.data_dir)?);
@@ -68,16 +64,33 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // ----- Auth state (signer + rate limiter) -----
+    let auth_state = Arc::new(AuthState {
+        signer: Arc::clone(&signer),
+        rate_limiter: Arc::new(RateLimiter::new()),
+    });
+
+    // ----- Graceful shutdown token -----
+    let cancel = CancellationToken::new();
+
+    // ----- Webhooks (optional) -----
+    let webhooks = WebhookConfig::from_env().map(|webhook_config| {
+        info!(url = webhook_config.url, "webhooks enabled");
+        WebhookDispatcher::new(webhook_config, cancel.clone())
+    });
+
+    if webhooks.is_none() {
+        info!("MERIDIAN_WEBHOOK_URL not set — webhooks disabled");
+    }
+
     // ----- Shared state -----
     let subscriptions = Arc::new(SubscriptionManager::new());
     let state = AppState {
         store: Arc::clone(&store),
         subscriptions: Arc::clone(&subscriptions),
         signer: Arc::clone(&signer),
+        webhooks,
     };
-
-    // ----- Graceful shutdown token -----
-    let cancel = CancellationToken::new();
 
     // ----- Background tasks -----
     let gc_handle = tokio::spawn(run_presence_gc(
@@ -97,11 +110,12 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     // ----- HTTP server -----
-    let router = build_router(state);
+    let router = build_router(state, auth_state)
+        .layer(Extension(prometheus_handle));
+
     let listener = TcpListener::bind(&config.bind).await?;
     info!(addr = config.bind, "Meridian listening");
 
-    // Serve until Ctrl-C
     axum::serve(listener, router)
         .with_graceful_shutdown(async move {
             tokio::signal::ctrl_c()
@@ -112,7 +126,6 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
 
-    // Wait for background tasks to finish their final flush/gc tick.
     let _ = tokio::join!(gc_handle, flush_handle, compact_handle);
 
     info!("Meridian stopped cleanly");

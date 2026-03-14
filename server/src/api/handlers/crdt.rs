@@ -14,7 +14,9 @@ use crate::{
         registry::{apply_op, CrdtOp, CrdtType, CrdtValue},
         VectorClock,
     },
+    metrics,
     storage::Store,
+    webhooks::WebhookEvent,
 };
 
 use super::AppStateExt;
@@ -114,6 +116,17 @@ pub async fn post_op<S: AppStateExt>(
         if let Err(e) = state.store().put(&ns, &id, &crdt).await {
             tracing::error!(error = %e, "store.put failed");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+
+        metrics::record_op(&ns, &id, "http");
+
+        if let Some(dispatcher) = state.webhooks() {
+            dispatcher.send(WebhookEvent {
+                ns: ns.clone(),
+                crdt_id: id.clone(),
+                source: "http".into(),
+                timestamp_ms: now_ms(),
+            });
         }
 
         // Fan-out delta to WebSocket subscribers

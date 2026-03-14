@@ -5,5 +5,5 @@ pub mod signer;
 
 pub use claims::{Permissions, TokenClaims};
 pub use error::AuthError;
-pub use middleware::{auth_middleware, ClaimsExt};
+pub use middleware::{auth_middleware, AuthState, ClaimsExt};
 pub use signer::TokenSigner;
