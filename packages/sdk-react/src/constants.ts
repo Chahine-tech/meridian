@@ -1,0 +1,2 @@
+export const DEFAULT_PRESENCE_TTL_MS = 30_000;
+export const HEARTBEAT_INTERVAL_DIVISOR = 2;

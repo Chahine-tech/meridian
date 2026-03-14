@@ -1,35 +1,43 @@
 import { createContext, useContext, useEffect, type ReactNode } from "react";
 import type { MeridianClient } from "meridian-sdk";
 
-// ---------------------------------------------------------------------------
-// Context
-// ---------------------------------------------------------------------------
-
-const MeridianContext = createContext<MeridianClient | null>(null);
-
-// ---------------------------------------------------------------------------
-// Provider
-// ---------------------------------------------------------------------------
-
 interface MeridianProviderProps {
   client: MeridianClient;
   children: ReactNode;
 }
 
+const MeridianContext = createContext<MeridianClient | null>(null);
+
 /**
- * Provides a `MeridianClient` to the React tree.
+ * Provides a `MeridianClient` instance to the React component tree.
  *
+ * Wrap your application (or the subtree that uses Meridian hooks) with this
+ * component. The client is automatically closed when the provider unmounts.
+ *
+ * @param props.client - A `MeridianClient` instance created via `MeridianClient.create()`.
+ * @param props.children - Child components that can access the client via `useMeridianClient()`.
+ *
+ * @example
  * ```tsx
- * const client = await Effect.runPromise(MeridianClient.create({ ... }));
+ * import { Effect } from 'effect';
+ * import { MeridianClient } from 'meridian-sdk';
+ * import { MeridianProvider } from 'meridian-react';
  *
- * <MeridianProvider client={client}>
- *   <App />
- * </MeridianProvider>
+ * const client = await Effect.runPromise(
+ *   MeridianClient.create({ url: 'ws://localhost:8080', namespace: 'app', token: '...' })
+ * );
+ *
+ * function App() {
+ *   return (
+ *     <MeridianProvider client={client}>
+ *       <YourApp />
+ *     </MeridianProvider>
+ *   );
+ * }
  * ```
  */
-export function MeridianProvider({ client, children }: MeridianProviderProps) {
+export const MeridianProvider = ({ client, children }: MeridianProviderProps) => {
   useEffect(() => {
-    // Disconnect when the provider unmounts (e.g. page navigation / logout).
     return () => {
       client.close();
     };
@@ -40,20 +48,31 @@ export function MeridianProvider({ client, children }: MeridianProviderProps) {
       {children}
     </MeridianContext.Provider>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
+};
 
 /**
- * Returns the nearest `MeridianClient` from context.
- * Must be used inside a `<MeridianProvider>`.
+ * Returns the `MeridianClient` provided by the nearest `<MeridianProvider>`.
+ *
+ * Throws if called outside of a `<MeridianProvider>`. Prefer the typed CRDT
+ * hooks (`useGCounter`, `usePNCounter`, etc.) for day-to-day use; reach for
+ * this hook when you need direct access to the underlying client.
+ *
+ * @returns The `MeridianClient` instance from context.
+ *
+ * @example
+ * ```tsx
+ * import { useMeridianClient } from 'meridian-react';
+ *
+ * function DebugPanel() {
+ *   const client = useMeridianClient();
+ *   return <pre>{JSON.stringify(client.claims)}</pre>;
+ * }
+ * ```
  */
-export function useMeridianClient(): MeridianClient {
+export const useMeridianClient = (): MeridianClient => {
   const client = useContext(MeridianContext);
   if (client === null) {
     throw new Error("useMeridianClient must be used inside <MeridianProvider>");
   }
   return client;
-}
+};

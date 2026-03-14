@@ -1,22 +1,13 @@
-/**
- * WebSocket transport — reconnect FSM + Sync on reconnect.
- *
- * States:
- *   DISCONNECTED → CONNECTING → AUTHENTICATING → CONNECTED → CLOSING
- *
- * On reconnect: re-subscribes to all known CRDTs and sends Sync(localVectorClock)
- * so the server can push missed deltas.
- *
- * Backoff: 100ms → 200ms → 400ms → … → 30s (±20% jitter).
- */
-
 import { Effect } from "effect";
 import { encodeClientMsg, decodeServerMsg, encodeVectorClock } from "../codec.js";
 import type { ServerMsg, VectorClock } from "../schema.js";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import {
+  BACKOFF_INITIAL_MS,
+  BACKOFF_MAX_MS,
+  BACKOFF_MULTIPLIER,
+  JITTER_MULTIPLIER,
+  DEFAULT_TIMEOUT_MS,
+} from "../constants.js";
 
 export type WsState =
   | "DISCONNECTED"
@@ -25,21 +16,12 @@ export type WsState =
   | "CLOSING";
 
 export interface WsTransportConfig {
-  /** Full WebSocket URL, e.g. "ws://localhost:3000/v1/namespaces/my-room/connect" */
   url: string;
-  /** Bearer token passed as ?token= query param (WS can't set headers). */
   token: string;
-  /** Called whenever a ServerMsg arrives. */
   onMessage: (msg: ServerMsg) => void;
-  /** Called on state transitions. */
   onStateChange?: (state: WsState) => void;
-  /** Maximum reconnect delay in ms. Default: 30_000 */
   maxBackoffMs?: number;
 }
-
-// ---------------------------------------------------------------------------
-// WsTransport
-// ---------------------------------------------------------------------------
 
 export class WsTransport {
   private readonly config: WsTransportConfig;
@@ -47,19 +29,16 @@ export class WsTransport {
 
   private ws: WebSocket | null = null;
   private state: WsState = "DISCONNECTED";
-  private backoffMs = 100;
+  private backoffMs = BACKOFF_INITIAL_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
 
-  /** CRDTs to re-subscribe on reconnect: crdt_id → last known VectorClock */
   private readonly subscriptions = new Map<string, VectorClock>();
 
   constructor(config: WsTransportConfig) {
     this.config = config;
-    this.maxBackoffMs = config.maxBackoffMs ?? 30_000;
+    this.maxBackoffMs = config.maxBackoffMs ?? BACKOFF_MAX_MS;
   }
-
-  // ---- Public API ----
 
   connect(): void {
     if (this.closed) return;
@@ -67,7 +46,6 @@ export class WsTransport {
     this.doConnect();
   }
 
-  /** Gracefully close — will not reconnect. */
   close(): void {
     this.closed = true;
     this.clearReconnectTimer();
@@ -75,11 +53,6 @@ export class WsTransport {
     this.ws?.close(1000, "client close");
   }
 
-  /**
-   * Subscribe to a CRDT's deltas.
-   * If already connected, sends Subscribe immediately.
-   * On reconnect, the subscription is re-sent automatically.
-   */
   subscribe(crdtId: string, sinceVc: VectorClock = {}): void {
     this.subscriptions.set(crdtId, sinceVc);
     if (this.state === "CONNECTED") {
@@ -87,12 +60,10 @@ export class WsTransport {
     }
   }
 
-  /** Update the local vector clock for a CRDT (used for reconnect Sync). */
   updateClock(crdtId: string, vc: VectorClock): void {
     this.subscriptions.set(crdtId, vc);
   }
 
-  /** Send a raw ClientMsg. Throws if not connected. */
   send(msg: Parameters<typeof encodeClientMsg>[0]): void {
     if (this.state !== "CONNECTED" || this.ws === null) {
       throw new Error("WsTransport: not connected");
@@ -104,8 +75,7 @@ export class WsTransport {
     return this.state;
   }
 
-  /** Resolves when the transport reaches CONNECTED state (or rejects on timeout). */
-  waitForConnected(timeoutMs = 5_000): Promise<void> {
+  waitForConnected(timeoutMs = DEFAULT_TIMEOUT_MS): Promise<void> {
     if (this.state === "CONNECTED") return Promise.resolve();
     return new Promise((resolve, reject) => {
       const orig = this.config.onStateChange;
@@ -131,8 +101,6 @@ export class WsTransport {
     });
   }
 
-  // ---- FSM internals ----
-
   private doConnect(): void {
     if (this.closed) return;
     this.transitionTo("CONNECTING");
@@ -143,8 +111,8 @@ export class WsTransport {
     this.ws = ws;
 
     ws.addEventListener("open", () => {
-      if (ws !== this.ws) return; // stale socket
-      this.backoffMs = 100; // reset backoff on successful connect
+      if (ws !== this.ws) return;
+      this.backoffMs = BACKOFF_INITIAL_MS;
       this.transitionTo("CONNECTED");
       this.resubscribeAll();
     });
@@ -168,19 +136,19 @@ export class WsTransport {
     });
 
     ws.addEventListener("error", () => {
-      // The "close" event fires right after — let that handle reconnect.
+      // HACK: The "close" event fires right after an error — let that handler drive reconnect logic.
     });
   }
 
   private scheduleReconnect(): void {
     if (this.closed) return;
-    const jitter = this.backoffMs * 0.2 * (Math.random() * 2 - 1); // ±20%
+    const jitter = this.backoffMs * JITTER_MULTIPLIER * (Math.random() * 2 - 1);
     const delay = Math.round(this.backoffMs + jitter);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.doConnect();
     }, delay);
-    this.backoffMs = Math.min(this.backoffMs * 2, this.maxBackoffMs);
+    this.backoffMs = Math.min(this.backoffMs * BACKOFF_MULTIPLIER, this.maxBackoffMs);
   }
 
   private clearReconnectTimer(): void {
@@ -196,7 +164,6 @@ export class WsTransport {
     this.config.onStateChange?.(next);
   }
 
-  /** On reconnect: re-subscribe and send Sync for each known CRDT. */
   private resubscribeAll(): void {
     for (const [crdtId, vc] of this.subscriptions) {
       this.sendSubscribe(crdtId, vc);
@@ -205,11 +172,7 @@ export class WsTransport {
 
   private sendSubscribe(crdtId: string, vc: VectorClock): void {
     if (this.ws === null || this.state !== "CONNECTED") return;
-
-    // First subscribe so the server starts pushing future deltas
     this.ws.send(encodeClientMsg({ Subscribe: { crdt_id: crdtId } }));
-
-    // Then sync to get missed deltas since our last known VC
     const vcBytes = encodeVectorClock(vc);
     this.ws.send(encodeClientMsg({ Sync: { crdt_id: crdtId, since_vc: vcBytes } }));
   }

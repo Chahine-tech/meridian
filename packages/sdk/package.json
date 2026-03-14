@@ -15,9 +15,12 @@
     "build": "tsc",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint ./src",
+    "format": "biome format --write ./src"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.7",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

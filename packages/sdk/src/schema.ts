@@ -7,33 +7,19 @@
 
 import { Schema } from "effect";
 
-// ---------------------------------------------------------------------------
-// Shared primitives
-// ---------------------------------------------------------------------------
-
-/**
- * Unix timestamp in milliseconds.
- * msgpackr decodes Rust u64 as BigInt — accept both for compatibility.
- */
+/** Unix timestamp in milliseconds. msgpackr decodes Rust u64 as BigInt — accept both for compatibility. */
 export const TimestampMs = Schema.Union(Schema.Number, Schema.BigIntFromSelf.pipe(Schema.transform(
   Schema.Number,
   { decode: (n) => Number(n), encode: (n) => BigInt(n) },
 )));
 export type TimestampMs = number;
 
-/**
- * client_id / author — Rust u64, decoded by msgpackr as BigInt or number.
- * Accept both and normalise to number.
- */
+/** client_id / author — Rust u64, decoded by msgpackr as BigInt or number. Accept both and normalise to number. */
 export const ClientId = Schema.Union(Schema.Number, Schema.BigIntFromSelf.pipe(Schema.transform(
   Schema.Number,
   { decode: (n) => Number(n), encode: (n) => BigInt(n) },
 )));
 export type ClientId = number;
-
-// ---------------------------------------------------------------------------
-// Auth / Token claims
-// ---------------------------------------------------------------------------
 
 export const Permissions = Schema.Struct({
   read: Schema.Array(Schema.String),
@@ -50,17 +36,9 @@ export const TokenClaims = Schema.Struct({
 });
 export type TokenClaims = typeof TokenClaims.Type;
 
-// ---------------------------------------------------------------------------
-// Vector clock
-// ---------------------------------------------------------------------------
-
 /** BTreeMap<client_id, version> — matches server VectorClock.entries */
 export const VectorClock = Schema.Record({ key: Schema.String, value: Schema.Number });
 export type VectorClock = typeof VectorClock.Type;
-
-// ---------------------------------------------------------------------------
-// Client → Server WebSocket messages
-// ---------------------------------------------------------------------------
 
 export const ClientMsg = Schema.Union(
   Schema.Struct({ Subscribe: Schema.Struct({ crdt_id: Schema.String }) }),
@@ -73,15 +51,11 @@ export const ClientMsg = Schema.Union(
 );
 export type ClientMsg = typeof ClientMsg.Type;
 
-// ---------------------------------------------------------------------------
-// Server → Client WebSocket messages
-// ---------------------------------------------------------------------------
-
 export const ServerMsg = Schema.Union(
   Schema.Struct({
     Delta: Schema.Struct({
       crdt_id: Schema.String,
-      // msgpackr may decode bin as Uint8Array or number[] depending on context — normalise to Uint8Array
+      // HACK: msgpackr may decode bin as Uint8Array or number[] depending on context — normalise to Uint8Array
       delta_bytes: Schema.Union(
         Schema.Uint8ArrayFromSelf,
         Schema.Array(Schema.Number).pipe(Schema.transform(Schema.Uint8ArrayFromSelf, {
@@ -97,10 +71,6 @@ export const ServerMsg = Schema.Union(
   }),
 );
 export type ServerMsg = typeof ServerMsg.Type;
-
-// ---------------------------------------------------------------------------
-// CRDT value types (returned by GET /v1/namespaces/:ns/crdts/:id)
-// ---------------------------------------------------------------------------
 
 export const GCounterValue = Schema.Struct({
   value: Schema.Number,
@@ -135,10 +105,6 @@ export const PresenceValue = Schema.Struct({
   entries: Schema.Record({ key: Schema.String, value: PresenceEntryView }),
 });
 export type PresenceValue = typeof PresenceValue.Type;
-
-// ---------------------------------------------------------------------------
-// HTTP response envelopes
-// ---------------------------------------------------------------------------
 
 /** GET /v1/namespaces/:ns/crdts/:id — server returns the raw JSON value directly. */
 export const CrdtGetResponse = Schema.Unknown;

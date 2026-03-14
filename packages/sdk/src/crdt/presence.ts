@@ -1,14 +1,3 @@
-/**
- * Presence handle — TTL-aware presence tracking.
- *
- * `heartbeat(data, ttlMs)` upserts the local client's entry.
- * `leave()` creates an explicit tombstone (ttl = 0).
- * Background GC on the server prunes expired entries every 5s.
- *
- * Pass a `schema` to get runtime validation of incoming delta data:
- *   client.presence("id", Schema.Struct({ cursor: Schema.Tuple(Schema.Number, Schema.Number) }))
- */
-
 import { Schema } from "effect";
 import { encode, wallMsToBigInt } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
@@ -20,6 +9,13 @@ export interface PresenceEntry<T> {
   expiresAtMs: number;
 }
 
+/**
+ * Low-level handle for a presence channel CRDT.
+ *
+ * Obtained via `MeridianClient.presence()`. Prefer the `usePresence` React hook
+ * for component-level usage (it manages heartbeat timers and cleanup automatically);
+ * use this handle directly in non-React environments.
+ */
 export class PresenceHandle<T> {
   private readonly entries = new Map<string, PresenceEntry<T>>();
   private readonly crdtId: string;
@@ -41,9 +37,10 @@ export class PresenceHandle<T> {
     this.schema = opts.schema ?? null;
   }
 
-  // ---- Read ----
-
-  /** Returns all live entries (expired entries are filtered out). */
+  /**
+   * Returns all currently online entries — those whose TTL has not yet elapsed
+   * as of the call time.
+   */
   online(): PresenceEntry<T>[] {
     const now = Date.now();
     const live: PresenceEntry<T>[] = [];
@@ -53,14 +50,27 @@ export class PresenceHandle<T> {
     return live;
   }
 
+  /**
+   * Registers a listener that is called whenever the online entries change.
+   *
+   * @returns An unsubscribe function — call it to stop receiving updates.
+   */
   onChange(listener: (entries: PresenceEntry<T>[]) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   }
 
-  // ---- Write ----
-
-  /** Send a presence heartbeat. Call every `ttlMs / 2` to stay alive. Default ttl: 30s. */
+  /**
+   * Broadcasts a heartbeat that marks the current client as online for `ttlMs`
+   * milliseconds (default `30 000`).
+   *
+   * Call this periodically (at least once per `ttlMs`) to remain visible to
+   * other clients. The `usePresence` hook manages this automatically when
+   * `opts.data` is provided.
+   *
+   * @param data - Arbitrary payload broadcast to other clients.
+   * @param ttlMs - Time-to-live in milliseconds before the entry is considered stale.
+   */
   heartbeat(data: T, ttlMs: number = 30_000): void {
     const wallMs = Date.now();
     const hlc = { wall_ms: wallMsToBigInt(wallMs), logical: 0, node_id: this.clientId };
@@ -82,7 +92,12 @@ export class PresenceHandle<T> {
     });
   }
 
-  /** Explicitly leave — entry expires immediately for all peers. */
+  /**
+   * Marks the current client as offline and broadcasts a leave operation.
+   *
+   * After calling this, the client's entry is removed from the `online()` list
+   * on all peers. The `usePresence` hook calls this automatically on unmount.
+   */
   leave(): void {
     const wallMs = Date.now();
     const hlc = { wall_ms: wallMsToBigInt(wallMs), logical: 0, node_id: this.clientId };
@@ -98,8 +113,6 @@ export class PresenceHandle<T> {
     });
   }
 
-  // ---- Delta application ----
-
   applyDelta(delta: PresenceDelta): void {
     let changed = false;
     for (const [clientIdStr, entry] of Object.entries(delta.changes)) {
@@ -114,8 +127,6 @@ export class PresenceHandle<T> {
     }
     if (changed) this.emit();
   }
-
-  // ---- Internal ----
 
   private decode(raw: unknown): T {
     if (this.schema !== null) {
@@ -157,6 +168,6 @@ export class PresenceHandle<T> {
 
   private emit(): void {
     const live = this.online();
-    for (const l of this.listeners) l(live);
+    for (const listener of this.listeners) listener(live);
   }
 }

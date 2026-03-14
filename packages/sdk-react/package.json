@@ -13,9 +13,12 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint ./src",
+    "format": "biome format --write ./src"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.7",
     "@types/react": "^19.0.0",
     "meridian-sdk": "^0.2.0",
     "typescript": "^5.8.0"

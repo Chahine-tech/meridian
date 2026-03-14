@@ -36,6 +36,10 @@ jobs:
         working-directory: packages/sdk
         run: bun install
 
+      - name: lint
+        working-directory: packages/sdk
+        run: bun run lint
+
       - name: typecheck
         working-directory: packages/sdk
         run: bun run typecheck
@@ -55,6 +59,10 @@ jobs:
       - name: install
         working-directory: packages/sdk-react
         run: bun install
+
+      - name: lint
+        working-directory: packages/sdk-react
+        run: bun run lint
 
       - name: typecheck
         working-directory: packages/sdk-react
