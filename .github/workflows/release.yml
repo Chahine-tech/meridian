@@ -80,6 +80,7 @@ jobs:
 
   sdk-react-publish:
     name: Publish SDK React to npm
+    needs: sdk-publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
