@@ -1,0 +1,158 @@
+---
+title: Monitoring
+description: Set up Prometheus and Grafana to monitor your Meridian server.
+---
+
+Meridian exposes a Prometheus-compatible metrics endpoint at `GET /metrics` (no authentication required). This guide sets up a full observability stack with Docker Compose.
+
+## Metrics exposed
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `meridian_ops_total` | Counter | `ns`, `crdt_id`, `op_type` | CRDT operations applied |
+| `meridian_ws_connections_active` | Gauge | — | Active WebSocket connections |
+| `meridian_wal_entries_total` | Counter | — | WAL entries written |
+
+`op_type` is either `http` (REST) or `ws` (WebSocket).
+
+## Docker Compose stack
+
+Create a `docker-compose.monitoring.yml` alongside your existing `docker-compose.yml`:
+
+```yaml
+services:
+  meridian:
+    image: ghcr.io/chahine-tech/meridian:latest
+    ports:
+      - "3000:3000"
+    environment:
+      MERIDIAN_SIGNING_KEY: ${MERIDIAN_SIGNING_KEY}
+      MERIDIAN_DATA_DIR: /data
+    volumes:
+      - meridian-data:/data
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  meridian-data:
+  prometheus-data:
+  grafana-data:
+```
+
+## Prometheus config
+
+Create `prometheus.yml` next to your compose file:
+
+```yaml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: meridian
+    static_configs:
+      - targets: ["meridian:3000"]
+    metrics_path: /metrics
+```
+
+## Start the stack
+
+```bash
+MERIDIAN_SIGNING_KEY=$(openssl rand -hex 32) docker compose -f docker-compose.monitoring.yml up -d
+```
+
+- Meridian → `http://localhost:3000`
+- Prometheus → `http://localhost:9090`
+- Grafana → `http://localhost:3001` (admin / admin)
+
+## Grafana dashboard
+
+After logging into Grafana:
+
+1. Go to **Connections → Data sources → Add data source**
+2. Select **Prometheus**, set URL to `http://prometheus:9090`
+3. Click **Save & test**
+
+### Useful queries
+
+**Ops per second (by namespace)**
+```promql
+rate(meridian_ops_total[1m])
+```
+
+**Active WebSocket connections**
+```promql
+meridian_ws_connections_active
+```
+
+**Top CRDTs by op count**
+```promql
+topk(10, sum by (crdt_id) (meridian_ops_total))
+```
+
+**HTTP vs WebSocket op breakdown**
+```promql
+sum by (op_type) (rate(meridian_ops_total[5m]))
+```
+
+### Recommended panels
+
+| Panel | Query | Visualization |
+|-------|-------|---------------|
+| Ops/s | `rate(meridian_ops_total[1m])` | Time series |
+| Active connections | `meridian_ws_connections_active` | Stat |
+| Total ops | `sum(meridian_ops_total)` | Stat |
+| Ops by namespace | `sum by (ns) (rate(meridian_ops_total[5m]))` | Bar chart |
+
+## Alerts
+
+Example Prometheus alert rules — save as `alerts.yml` and add to your `prometheus.yml`:
+
+```yaml
+# prometheus.yml
+rule_files:
+  - alerts.yml
+```
+
+```yaml
+# alerts.yml
+groups:
+  - name: meridian
+    rules:
+      - alert: MeridianNoConnections
+        expr: meridian_ws_connections_active == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No active WebSocket connections for 5 minutes"
+
+      - alert: MeridianHighOpRate
+        expr: rate(meridian_ops_total[1m]) > 500
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Op rate exceeds 500/s on {{ $labels.ns }}"
+```
