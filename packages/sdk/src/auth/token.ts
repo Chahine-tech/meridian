@@ -1,4 +1,4 @@
-import { unpack } from "msgpackr";
+import { decode } from "@msgpack/msgpack";
 import { Effect, Schema } from "effect";
 import { TokenParseError, TokenExpiredError } from "../errors.js";
 import { TokenClaims } from "../schema.js";
@@ -24,7 +24,7 @@ export const parseToken = (token: string): Effect.Effect<TokenClaims, TokenParse
 
     let raw: unknown;
     try {
-      raw = unpack(bytes);
+      raw = decode(bytes);
     } catch {
       yield* Effect.fail(new TokenParseError({ message: "Invalid token format: msgpack decode failed" }));
       return undefined as never;

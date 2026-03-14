@@ -8,7 +8,6 @@ import { VectorClockTracker } from "../src/sync/clock.js";
 import { encode, decode, encodeClientMsg, decodeServerMsg } from "../src/codec.js";
 import { parseToken, checkTokenExpiry } from "../src/auth/token.js";
 import { CodecError, TokenParseError, TokenExpiredError } from "../src/errors.js";
-import { pack } from "msgpackr";
 
 // ---------------------------------------------------------------------------
 // VectorClockTracker
@@ -124,7 +123,7 @@ describe("codec", () => {
 
 describe("parseToken", () => {
   function makeToken(claims: object): string {
-    const payload = pack(claims);
+    const payload = encode(claims);
     const b64 = btoa(String.fromCharCode(...payload))
       .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
     return `${b64}.fakesig`;

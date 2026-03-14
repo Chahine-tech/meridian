@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { encode, wallMsToBigInt } from "../codec.js";
+import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { PresenceDelta, PresenceEntryDelta } from "../sync/delta.js";
 
@@ -73,7 +73,7 @@ export class PresenceHandle<T> {
    */
   heartbeat(data: T, ttlMs: number = 30_000): void {
     const wallMs = Date.now();
-    const hlc = { wall_ms: wallMsToBigInt(wallMs), logical: 0, node_id: this.clientId };
+    const hlc = { wall_ms: wallMs, logical: 0, node_id: this.clientId };
 
     this.entries.set(String(this.clientId), {
       clientId: this.clientId,
@@ -100,7 +100,7 @@ export class PresenceHandle<T> {
    */
   leave(): void {
     const wallMs = Date.now();
-    const hlc = { wall_ms: wallMsToBigInt(wallMs), logical: 0, node_id: this.clientId };
+    const hlc = { wall_ms: wallMs, logical: 0, node_id: this.clientId };
 
     this.entries.delete(String(this.clientId));
     this.emit();

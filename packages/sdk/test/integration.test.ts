@@ -15,7 +15,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Effect } from "effect";
 import { MeridianClient } from "../src/client.js";
 import { HttpClient } from "../src/transport/http.js";
-import { uuidToBytes, wallMsToBigInt } from "../src/codec.js";
+import { uuidToBytes } from "../src/codec.js";
 
 // ---------------------------------------------------------------------------
 // Config — matches the dev signing key [0x42; 32]
@@ -145,8 +145,7 @@ describe("Meridian integration", () => {
 
   skip("LwwRegister: set and read", async () => {
     const key = `lw:${Date.now()}`;
-    // wall_ms must be BigInt — Rust u64 requires integer msgpack encoding
-    const now = wallMsToBigInt(Date.now());
+    const now = Date.now();
 
     await Effect.runPromise(http.postOp(NAMESPACE, key, {
       LwwRegister: {
