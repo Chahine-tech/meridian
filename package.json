@@ -1,0 +1,8 @@
+{
+  "name": "meridian",
+  "private": true,
+  "workspaces": [
+    "packages/sdk",
+    "packages/sdk-react"
+  ]
+}

@@ -4,3 +4,4 @@ export { usePNCounter } from "./hooks/usePNCounter.js";
 export { useORSet } from "./hooks/useORSet.js";
 export { useLwwRegister } from "./hooks/useLwwRegister.js";
 export { usePresence } from "./hooks/usePresence.js";
+export { useCRDTMap } from "./hooks/useCRDTMap.js";
