@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
+    crdtmap::{CRDTMap, CRDTMapOp},
     gcounter::{GCounter, GCounterOp},
     lwwregister::{LwwOp, LwwRegister},
     orset::{ORSet, ORSetOp},
@@ -16,11 +17,12 @@ use super::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum CrdtType {
-    GCounter  = 0x01,
-    PNCounter = 0x02,
-    ORSet     = 0x03,
+    GCounter    = 0x01,
+    PNCounter   = 0x02,
+    ORSet       = 0x03,
     LwwRegister = 0x04,
-    Presence  = 0x05,
+    Presence    = 0x05,
+    CRDTMap     = 0x06,
 }
 
 impl CrdtType {
@@ -31,6 +33,7 @@ impl CrdtType {
             0x03 => Some(Self::ORSet),
             0x04 => Some(Self::LwwRegister),
             0x05 => Some(Self::Presence),
+            0x06 => Some(Self::CRDTMap),
             _ => None,
         }
     }
@@ -42,6 +45,7 @@ impl CrdtType {
             Self::ORSet       => "orset",
             Self::LwwRegister => "lwwregister",
             Self::Presence    => "presence",
+            Self::CRDTMap     => "crdtmap",
         }
     }
 }
@@ -61,6 +65,7 @@ impl std::str::FromStr for CrdtType {
             "orset"       => Ok(Self::ORSet),
             "lwwregister" => Ok(Self::LwwRegister),
             "presence"    => Ok(Self::Presence),
+            "crdtmap"     => Ok(Self::CRDTMap),
             other         => Err(format!("unknown crdt type: {other}")),
         }
     }
@@ -77,6 +82,7 @@ pub enum CrdtValue {
     ORSet(ORSet),
     LwwRegister(LwwRegister),
     Presence(Presence),
+    CRDTMap(CRDTMap),
 }
 
 impl CrdtValue {
@@ -87,6 +93,7 @@ impl CrdtValue {
             Self::ORSet(_)       => CrdtType::ORSet,
             Self::LwwRegister(_) => CrdtType::LwwRegister,
             Self::Presence(_)    => CrdtType::Presence,
+            Self::CRDTMap(_)     => CrdtType::CRDTMap,
         }
     }
 
@@ -97,6 +104,7 @@ impl CrdtValue {
             CrdtType::ORSet       => Self::ORSet(ORSet::default()),
             CrdtType::LwwRegister => Self::LwwRegister(LwwRegister::default()),
             CrdtType::Presence    => Self::Presence(Presence::default()),
+            CrdtType::CRDTMap     => Self::CRDTMap(CRDTMap::default()),
         }
     }
 
@@ -107,6 +115,7 @@ impl CrdtValue {
             Self::ORSet(v)       => v.is_empty(),
             Self::LwwRegister(v) => v.is_empty(),
             Self::Presence(v)    => v.is_empty(),
+            Self::CRDTMap(v)     => v.is_empty(),
         }
     }
 
@@ -118,6 +127,7 @@ impl CrdtValue {
             Self::ORSet(v)       => serde_json::to_value(v.value()).unwrap_or_default(),
             Self::LwwRegister(v) => serde_json::to_value(v.value()).unwrap_or_default(),
             Self::Presence(v)    => serde_json::to_value(v.value()).unwrap_or_default(),
+            Self::CRDTMap(v)     => serde_json::to_value(v.value()).unwrap_or_default(),
         }
     }
 
@@ -139,6 +149,7 @@ impl CrdtValue {
             Self::ORSet(v)       => v.delta_since(vc).map(|d| rmp_serde::encode::to_vec_named(&d)),
             Self::LwwRegister(v) => v.delta_since(vc).map(|d| rmp_serde::encode::to_vec_named(&d)),
             Self::Presence(v)    => v.delta_since(vc).map(|d| rmp_serde::encode::to_vec_named(&d)),
+            Self::CRDTMap(v)     => v.delta_since(vc).map(|d| rmp_serde::encode::to_vec_named(&d)),
         };
         match delta {
             None => Ok(None),
@@ -159,6 +170,7 @@ pub enum CrdtOp {
     ORSet(ORSetOp),
     LwwRegister(LwwOp),
     Presence(PresenceOp),
+    CRDTMap(CRDTMapOp),
 }
 
 impl CrdtOp {
@@ -169,6 +181,7 @@ impl CrdtOp {
             Self::ORSet(_)       => CrdtType::ORSet,
             Self::LwwRegister(_) => CrdtType::LwwRegister,
             Self::Presence(_)    => CrdtType::Presence,
+            Self::CRDTMap(_)     => CrdtType::CRDTMap,
         }
     }
 }
@@ -191,6 +204,7 @@ pub fn apply_op(value: &mut CrdtValue, op: CrdtOp) -> Result<Option<Vec<u8>>, Cr
         (CrdtValue::ORSet(v),       CrdtOp::ORSet(op))       => apply_and_serialize!(v, op),
         (CrdtValue::LwwRegister(v), CrdtOp::LwwRegister(op)) => apply_and_serialize!(v, op),
         (CrdtValue::Presence(v),    CrdtOp::Presence(op))    => apply_and_serialize!(v, op),
+        (CrdtValue::CRDTMap(v),     CrdtOp::CRDTMap(op))     => apply_and_serialize!(v, op),
         _ => Err(CrdtError::InvalidOp("op type does not match crdt type".into())),
     }
 }
@@ -212,6 +226,7 @@ mod tests {
             CrdtType::ORSet,
             CrdtType::LwwRegister,
             CrdtType::Presence,
+            CrdtType::CRDTMap,
         ] {
             let s = t.as_str();
             let parsed: CrdtType = s.parse().unwrap();

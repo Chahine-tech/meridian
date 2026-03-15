@@ -1,4 +1,5 @@
 pub mod clock;
+pub mod crdtmap;
 pub mod gcounter;
 pub mod lwwregister;
 pub mod orset;
@@ -7,6 +8,7 @@ pub mod presence;
 pub mod registry;
 
 pub use clock::{HybridLogicalClock, VectorClock};
+pub use crdtmap::CRDTMap;
 pub use gcounter::GCounter;
 pub use lwwregister::LwwRegister;
 pub use orset::ORSet;

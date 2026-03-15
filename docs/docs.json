@@ -51,7 +51,8 @@
               "sdk/crdts/pncounter",
               "sdk/crdts/orset",
               "sdk/crdts/lwwregister",
-              "sdk/crdts/presence"
+              "sdk/crdts/presence",
+              "sdk/crdts/crdtmap"
             ]
           }
         ]

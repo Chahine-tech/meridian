@@ -221,6 +221,69 @@
       .btn-down { background: #7f1d1d !important; }
       .btn-down:hover { background: #991b1b !important; }
 
+      /* Doc metadata (CRDTMap) */
+      #docmeta-section {
+        border-bottom: 1px solid #222;
+      }
+
+      .meta-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      .meta-card {
+        background: #1a1a1a;
+        border: 1px solid #222;
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 13px;
+      }
+
+      .meta-card .meta-label {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #555;
+        margin-bottom: 4px;
+      }
+
+      .meta-card .meta-value {
+        color: #e8e8e8;
+        font-weight: 500;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .meta-controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .meta-controls select {
+        flex: 1;
+        background: #1a1a1a;
+        border: 1px solid #2a2a2a;
+        border-radius: 6px;
+        padding: 7px 10px;
+        font-size: 13px;
+        color: #e8e8e8;
+        outline: none;
+        cursor: pointer;
+      }
+
+      .meta-controls select:focus { border-color: #2563eb; }
+
+      .meta-controls button {
+        white-space: nowrap;
+        font-size: 13px;
+        padding: 7px 12px;
+      }
+
       /* Presence sidebar */
       #presence-section {
         grid-row: span 2;
@@ -353,6 +416,32 @@
           <div id="vote-buttons">
             <button class="btn-up" id="btn-up">+1</button>
             <button class="btn-down" id="btn-down">−1</button>
+          </div>
+        </section>
+
+        <section id="docmeta-section">
+          <div class="section-title">Doc Metadata — CRDTMap (mixed types per key)</div>
+          <div class="meta-grid">
+            <div class="meta-card">
+              <div class="meta-label">Last author</div>
+              <div class="meta-value" id="doc-author">—</div>
+            </div>
+            <div class="meta-card">
+              <div class="meta-label">Version</div>
+              <div class="meta-value" id="doc-version">0</div>
+            </div>
+            <div class="meta-card">
+              <div class="meta-label">Status</div>
+              <div class="meta-value" id="doc-status">draft</div>
+            </div>
+          </div>
+          <div class="meta-controls">
+            <select id="doc-status-select">
+              <option value="draft">Draft</option>
+              <option value="review">In Review</option>
+              <option value="published">Published</option>
+            </select>
+            <button id="doc-version-btn">Bump version</button>
           </div>
         </section>
       </div>

@@ -1,6 +1,6 @@
 # Collaborative Workspace — Meridian Example
 
-A minimal collaborative app showing all four main CRDT types in action.
+A minimal collaborative app showing all six CRDT types in action.
 
 | Feature | CRDT | Behaviour |
 |---------|------|-----------|
@@ -8,6 +8,7 @@ A minimal collaborative app showing all four main CRDT types in action.
 | Shared task list | `ORSet<{ text }>` | Add-wins — concurrent add+remove keeps the add |
 | Community vote | `PNCounter` | Increment / decrement, can go negative |
 | Who's online | `Presence` | 30s TTL, refreshed every 15s, explicit leave on tab close |
+| Doc metadata | `CRDTMap` | Mixed types per key: author (LwwRegister), version (GCounter), status (LwwRegister) |
 
 Open the same URL in two browser tabs to see live sync.
 
