@@ -74,7 +74,7 @@ jobs:
         working-directory: packages/sdk
         run: bun publish --access public
         env:
-          BUN_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   sdk-react-publish:
     name: Publish SDK React to npm
@@ -107,7 +107,7 @@ jobs:
         working-directory: packages/sdk-react
         run: bun publish --access public
         env:
-          BUN_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   docker:
     name: Docker image
