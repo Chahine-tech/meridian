@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_bytes::ByteBuf;
 
 // ---------------------------------------------------------------------------
 // Client → Server messages
@@ -13,11 +14,11 @@ pub enum ClientMsg {
 
     /// Apply an operation to a CRDT.
     /// `op_bytes` is msgpack-encoded `CrdtOp`.
-    Op { crdt_id: String, op_bytes: Vec<u8> },
+    Op { crdt_id: String, op_bytes: ByteBuf },
 
     /// Request a delta since a vector clock checkpoint.
     /// `since_vc` is msgpack-encoded `VectorClock`.
-    Sync { crdt_id: String, since_vc: Vec<u8> },
+    Sync { crdt_id: String, since_vc: ByteBuf },
 }
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ pub enum ClientMsg {
 pub enum ServerMsg {
     /// A CRDT delta for a subscribed CRDT.
     /// `delta_bytes` is msgpack-encoded delta type for the CRDT kind.
-    Delta { crdt_id: String, delta_bytes: Vec<u8> },
+    Delta { crdt_id: String, delta_bytes: ByteBuf },
 
     /// Acknowledgement of a successfully applied `Op`.
     Ack { seq: u64 },
@@ -79,10 +80,10 @@ mod tests {
 
     #[test]
     fn client_msg_op_roundtrip() {
-        let msg = ClientMsg::Op { crdt_id: "set".into(), op_bytes: vec![1, 2, 3] };
+        let msg = ClientMsg::Op { crdt_id: "set".into(), op_bytes: ByteBuf::from(vec![1, 2, 3]) };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ClientMsg::from_msgpack(&bytes).unwrap();
-        assert!(matches!(decoded, ClientMsg::Op { op_bytes, .. } if op_bytes == vec![1, 2, 3]));
+        assert!(matches!(decoded, ClientMsg::Op { op_bytes, .. } if op_bytes.as_ref() == [1, 2, 3]));
     }
 
     #[test]
@@ -95,12 +96,12 @@ mod tests {
 
     #[test]
     fn server_msg_delta_roundtrip() {
-        let msg = ServerMsg::Delta { crdt_id: "x".into(), delta_bytes: vec![0xde, 0xad] };
+        let msg = ServerMsg::Delta { crdt_id: "x".into(), delta_bytes: ByteBuf::from(vec![0xde, 0xad]) };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ServerMsg::from_msgpack(&bytes).unwrap();
         assert!(
             matches!(decoded, ServerMsg::Delta { crdt_id, delta_bytes }
-                if crdt_id == "x" && delta_bytes == vec![0xde, 0xad])
+                if crdt_id == "x" && delta_bytes.as_ref() == [0xde, 0xad])
         );
     }
 

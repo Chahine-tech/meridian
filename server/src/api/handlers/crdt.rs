@@ -132,7 +132,7 @@ pub async fn post_op<S: AppStateExt>(
         // Fan-out delta to WebSocket subscribers
         let msg = std::sync::Arc::new(crate::api::ws::ServerMsg::Delta {
             crdt_id: id.clone(),
-            delta_bytes: bytes.clone(),
+            delta_bytes: bytes.clone().into(),
         });
         state.subscriptions().publish(&ns, msg);
 

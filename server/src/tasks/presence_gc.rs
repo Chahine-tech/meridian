@@ -77,7 +77,7 @@ async fn gc_tick(store: &SledStore, subscriptions: &SubscriptionManager) -> crat
         if let Ok(delta_bytes) = rmp_serde::encode::to_vec_named(&gc_delta) {
             subscriptions.publish(ns, Arc::new(crate::api::ws::ServerMsg::Delta {
                 crdt_id: crdt_id.to_owned(),
-                delta_bytes,
+                delta_bytes: delta_bytes.into(),
             }));
         }
 

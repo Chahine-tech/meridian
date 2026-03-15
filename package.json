@@ -3,6 +3,7 @@
   "private": true,
   "workspaces": [
     "packages/sdk",
-    "packages/sdk-react"
+    "packages/sdk-react",
+    "examples/collaborative-workspace"
   ]
 }

@@ -202,7 +202,7 @@ async fn handle_client_message<S: WsState>(
                     // Broadcast delta to all namespace subscribers (including this client).
                     let delta_msg = Arc::new(ServerMsg::Delta {
                         crdt_id: crdt_id.clone(),
-                        delta_bytes,
+                        delta_bytes: delta_bytes.into(),
                     });
                     state.subscriptions().publish(ns, delta_msg);
 
@@ -242,7 +242,7 @@ async fn handle_client_message<S: WsState>(
             match state.store().get(ns, &crdt_id).await {
                 Ok(Some(crdt)) => {
                     if let Ok(Some(delta_bytes)) = crdt.delta_since_msgpack(&vc) {
-                        let msg = ServerMsg::Delta { crdt_id, delta_bytes };
+                        let msg = ServerMsg::Delta { crdt_id, delta_bytes: delta_bytes.into() };
                         if let Ok(b) = msg.to_msgpack() {
                             let _ = socket.send(Message::Binary(b.into())).await;
                         }
