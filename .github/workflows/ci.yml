@@ -57,8 +57,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - name: install
-        working-directory: packages/sdk-react
         run: bun install
+
+      - name: build sdk
+        working-directory: packages/sdk
+        run: bun run build
 
       - name: lint
         working-directory: packages/sdk-react
