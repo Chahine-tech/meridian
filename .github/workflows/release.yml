@@ -72,11 +72,9 @@ jobs:
 
       - name: publish
         working-directory: packages/sdk
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
-          bun publish --access public
+        run: bun publish --access public
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          BUN_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   sdk-react-publish:
     name: Publish SDK React to npm
@@ -91,8 +89,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - name: install
-        working-directory: packages/sdk-react
         run: bun install
+
+      - name: build sdk
+        working-directory: packages/sdk
+        run: bun run build
 
       - name: typecheck
         working-directory: packages/sdk-react
@@ -104,11 +105,9 @@ jobs:
 
       - name: publish
         working-directory: packages/sdk-react
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
-          bun publish --access public
+        run: bun publish --access public
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          BUN_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   docker:
     name: Docker image
