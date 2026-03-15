@@ -1,0 +1,80 @@
+---
+title: CRDTMap
+description: A map of named CRDT values. Each key holds an independent CRDT that syncs automatically.
+---
+
+A `CRDTMap` is a collaborative map where each key holds its own independent CRDT (GCounter, PNCounter, ORSet, LwwRegister, or Presence). The type of each key is fixed at first write. Merge is performed per-key — keys are independent and never conflict with each other.
+
+Use this when you need a structured document with multiple independent fields, each with their own conflict resolution semantics.
+
+## Basic usage
+
+```ts
+const doc = client.crdtmap("doc:homepage");
+
+// Each key has its own CRDT type
+doc.lwwSet("title", "My Page");
+doc.incrementCounter("views");
+
+doc.onChange(value => {
+  console.log("title:", value.title);
+  console.log("views:", value.views);
+});
+```
+
+## Per-key CRDT types
+
+Each key is permanently bound to its CRDT type at first write. Sending an operation of the wrong type to an existing key is rejected by the server.
+
+### LWW-Register key
+
+```ts
+doc.lwwSet("title", "Hello World");
+// value.title → { value: "Hello World", updatedAtMs: ..., author: ... }
+```
+
+### GCounter key
+
+```ts
+doc.incrementCounter("views");
+doc.incrementCounter("views", 5);
+// value.views → { total: 6, counts: { "1": 6 } }
+```
+
+### PNCounter key
+
+```ts
+doc.incrementPNCounter("score", 10);
+doc.decrementPNCounter("score", 3);
+// value.score → { value: 7, pos: { "1": 10 }, neg: { "1": 3 } }
+```
+
+### ORSet key
+
+```ts
+import { randomUUID } from "crypto";
+
+const tag = new Uint8Array(Buffer.from(randomUUID().replace(/-/g, ""), "hex"));
+doc.orsetAdd("tags", "typescript", tag);
+// value.tags → { elements: ["typescript"] }
+```
+
+## API
+
+| Method | Description |
+|--------|-------------|
+| `value()` | Returns snapshot of the full map `Record<string, unknown>` |
+| `get(key)` | Returns the current value at `key`, or `undefined` |
+| `onChange(fn)` | Subscribe to any change — returns unsubscribe function |
+| `lwwSet(key, value)` | Write a LWW-Register value |
+| `incrementCounter(key, amount?)` | Increment a GCounter key (default `1`) |
+| `incrementPNCounter(key, amount?)` | Increment a PNCounter key (default `1`) |
+| `decrementPNCounter(key, amount?)` | Decrement a PNCounter key (default `1`) |
+| `orsetAdd(key, element, tag)` | Add an element to an ORSet key |
+| `orsetRemove(key, element, knownTags)` | Remove an element from an ORSet key |
+
+## Merge semantics
+
+Each key is merged independently using its inner CRDT's lattice join. Two replicas that each update different keys will converge without conflict. Two replicas that update the same key converge using that key's CRDT semantics (e.g. LWW-Register: higher HLC wins; GCounter: max per client).
+
+Keys are permanent — once created they cannot be deleted.

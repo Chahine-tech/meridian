@@ -10,6 +10,8 @@ export { ORSetHandle } from "./crdt/orset.js";
 export { LwwRegisterHandle } from "./crdt/lwwregister.js";
 export { PresenceHandle } from "./crdt/presence.js";
 export type { PresenceEntry } from "./crdt/presence.js";
+export { CRDTMapHandle } from "./crdt/crdtmap.js";
+export type { CrdtMapValue } from "./crdt/crdtmap.js";
 
 // Transport
 export { HttpClient } from "./transport/http.js";

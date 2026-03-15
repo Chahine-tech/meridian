@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect";
 import { MeridianClient } from "meridian-sdk";
-import type { PresenceEntry } from "meridian-sdk";
+import type { PresenceEntry, CrdtMapValue } from "meridian-sdk";
 
 const TaskSchema = Schema.Struct({ text: Schema.String });
 type Task = typeof TaskSchema.Type;
@@ -20,6 +20,11 @@ const voteCount = getElement("vote-count");
 const onlineList = getElement<HTMLUListElement>("online-list");
 const statusDot = getElement("status-dot");
 const presenceBar = getElement("presence-bar");
+const docAuthorEl = getElement("doc-author");
+const docVersionEl = getElement("doc-version");
+const docStatusEl = getElement("doc-status");
+const docStatusSelect = getElement<HTMLSelectElement>("doc-status-select");
+const docVersionBtn = getElement("doc-version-btn");
 
 getElement("connect-btn").addEventListener("click", async () => {
   const url = getElement<HTMLInputElement>("url-input").value.trim();
@@ -167,5 +172,35 @@ const initWorkspace = (client: MeridianClient): void => {
     clearInterval(heartbeatInterval);
     presence.leave();
     client.close();
+  });
+
+  // CRDTMap — doc metadata: author (LwwRegister), version (GCounter), status (LwwRegister)
+  const docMeta = client.crdtmap("doc-meta");
+
+  const renderDocMeta = (value: CrdtMapValue): void => {
+    const author = (value["author"] as { value?: string } | undefined)?.value;
+    const version = (value["version"] as { total?: number } | undefined)?.total;
+    const status = (value["status"] as { value?: string } | undefined)?.value;
+    docAuthorEl.textContent = author ?? "—";
+    docVersionEl.textContent = String(version ?? 0);
+    docStatusEl.textContent = status ?? "draft";
+  };
+
+  docMeta.onChange(renderDocMeta);
+  renderDocMeta(docMeta.value());
+
+  // Set author on connect
+  client.waitForConnected().then(() => {
+    docMeta.lwwSet("author", myName);
+  }).catch(() => {});
+
+  // Increment version counter
+  docVersionBtn.addEventListener("click", () => {
+    docMeta.incrementCounter("version");
+  });
+
+  // Change status
+  docStatusSelect.addEventListener("change", () => {
+    docMeta.lwwSet("status", docStatusSelect.value);
   });
 };

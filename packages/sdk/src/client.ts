@@ -6,12 +6,14 @@ import { PNCounterHandle } from "./crdt/pncounter.js";
 import { ORSetHandle } from "./crdt/orset.js";
 import { LwwRegisterHandle } from "./crdt/lwwregister.js";
 import { PresenceHandle } from "./crdt/presence.js";
+import { CRDTMapHandle } from "./crdt/crdtmap.js";
 import {
   decodeGCounterDelta,
   decodePNCounterDelta,
   decodeORSetDelta,
   decodeLwwDelta,
   decodePresenceDelta,
+  decodeCRDTMapDelta,
 } from "./sync/delta.js";
 import { parseAndValidateToken } from "./auth/token.js";
 import type { ServerMsg, TokenClaims } from "./schema.js";
@@ -64,6 +66,7 @@ export class MeridianClient {
   private readonly orHandles = new Map<string, ORSetHandle<unknown>>();
   private readonly lwHandles = new Map<string, LwwRegisterHandle<unknown>>();
   private readonly prHandles = new Map<string, PresenceHandle<unknown>>();
+  private readonly cmHandles = new Map<string, CRDTMapHandle>();
 
   private constructor(config: MeridianClientConfig, claims: TokenClaims) {
     this.namespace = config.namespace;
@@ -255,6 +258,32 @@ export class MeridianClient {
     return handle;
   }
 
+  /**
+   * Returns a handle for a CRDTMap — a map of named CRDT values.
+   *
+   * Handles are cached by `crdtId`; calling this method multiple times with the
+   * same id returns the same handle instance and creates only one subscription.
+   *
+   * @param crdtId - Unique identifier for the CRDT within this namespace.
+   *
+   * @example
+   * ```ts
+   * const doc = client.crdtmap('document-1');
+   * doc.lwwSet('title', 'Hello World');
+   * doc.incrementCounter('views');
+   * console.log(doc.value()); // { title: { value: 'Hello World', ... }, views: { total: 1, ... } }
+   * ```
+   */
+  crdtmap(crdtId: string): CRDTMapHandle {
+    let handle = this.cmHandles.get(crdtId);
+    if (!handle) {
+      handle = new CRDTMapHandle({ ns: this.namespace, crdtId, clientId: this.clientId, transport: this.transport });
+      this.cmHandles.set(crdtId, handle);
+      this.transport.subscribe(crdtId);
+    }
+    return handle;
+  }
+
   waitForConnected(timeoutMs = 5_000): Promise<void> {
     return this.transport.waitForConnected(timeoutMs);
   }
@@ -297,6 +326,11 @@ export class MeridianClient {
     const prHandle = this.prHandles.get(crdt_id);
     if (prHandle) {
       try { prHandle.applyDelta(decodePresenceDelta(delta_bytes)); } catch { /* stale */ }
+      return;
+    }
+    const cmHandle = this.cmHandles.get(crdt_id);
+    if (cmHandle) {
+      try { cmHandle.applyDelta(decodeCRDTMapDelta(delta_bytes)); } catch { /* stale */ }
     }
   }
 }

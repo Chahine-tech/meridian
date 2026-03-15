@@ -71,3 +71,19 @@ export const decodePresenceDelta = (bytes: Uint8Array): PresenceDelta => {
   const raw = decode(bytes) as { changes?: Record<string, PresenceEntryDelta | null> };
   return { changes: raw.changes ?? {} };
 };
+
+export type CrdtValueDelta =
+  | { GCounter: GCounterDelta }
+  | { PNCounter: PNCounterDelta }
+  | { ORSet: ORSetDelta }
+  | { LwwRegister: LwwDelta }
+  | { Presence: PresenceDelta };
+
+export interface CRDTMapDelta {
+  deltas: Record<string, CrdtValueDelta>;
+}
+
+export const decodeCRDTMapDelta = (bytes: Uint8Array): CRDTMapDelta => {
+  const raw = decode(bytes) as { deltas?: Record<string, unknown> };
+  return { deltas: (raw.deltas ?? {}) as Record<string, CrdtValueDelta> };
+};

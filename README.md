@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Chahine-tech/meridian/actions"><img src="https://github.com/Chahine-tech/meridian/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024" />
-  <img src="https://img.shields.io/badge/tests-124-brightgreen" alt="124 tests" />
+  <img src="https://img.shields.io/badge/tests-135-brightgreen" alt="135 tests" />
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
 </p>
 
@@ -90,6 +90,9 @@ client.close();
 | `ORSet` | Shopping cart, tags | `or:cart` |
 | `LwwRegister` | User profile, config | `lw:title` |
 | `Presence` | Who's online, cursors | `pr:room` |
+| `CRDTMap` | Structured document with typed fields | `cm:doc` |
+
+`CRDTMap` lets you assign a different CRDT type to each key within a single document. Each key merges independently using its own conflict resolution semantics.
 
 ## Packages
 
@@ -101,14 +104,14 @@ client.close();
 ## Features
 
 - **Real-time sync** over WebSocket with automatic reconnection
-- **5 CRDT types** covering the most common collaborative patterns
+- **6 CRDT types** covering the most common collaborative patterns
 - **Scoped permissions** — token-level read/write access with glob patterns (`allowed:*`)
 - **Rate limiting** — 100 req/s per token, sliding window
 - **Webhooks** — `POST` to your backend on every op, HMAC-SHA256 signed
 - **Prometheus metrics** — ops counter, active WS connections, WAL entries (`GET /metrics`)
 - **WAL compaction** — automatic background truncation
 - **History API** — audit log per CRDT (`GET /v1/namespaces/:ns/crdts/:id/history`)
-- **124 tests** — unit, property-based, and integration
+- **135 tests** — unit, property-based, and integration
 
 ## Configuration
 
