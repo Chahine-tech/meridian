@@ -44,7 +44,6 @@ export {
   ORSetValue,
   LwwValue,
   PresenceValue,
-  CrdtMapValue,
   CrdtGetResponse,
   CrdtOpResponse,
   ErrorResponse,

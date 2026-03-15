@@ -99,9 +99,6 @@ export const PresenceValue = Schema.Struct({
 });
 export type PresenceValue = typeof PresenceValue.Type;
 
-export const CrdtMapValue = Schema.Record({ key: Schema.String, value: Schema.Unknown });
-export type CrdtMapValue = typeof CrdtMapValue.Type;
-
 /** GET /v1/namespaces/:ns/crdts/:id — server returns the raw JSON value directly. */
 export const CrdtGetResponse = Schema.Unknown;
 export type CrdtGetResponse = unknown;

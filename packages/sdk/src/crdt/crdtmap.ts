@@ -2,7 +2,9 @@ import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { CRDTMapDelta, CrdtValueDelta } from "../sync/delta.js";
 
-export type CrdtMapValue = Record<string, unknown>;
+export interface CrdtMapValue {
+  [key: string]: unknown;
+}
 
 /**
  * Low-level handle for a CRDTMap — a map of named CRDT values.
@@ -53,10 +55,6 @@ export class CRDTMapHandle {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   }
-
-  // ---------------------------------------------------------------------------
-  // Mutation helpers — one per supported inner CRDT type
-  // ---------------------------------------------------------------------------
 
   /** Increment a GCounter key by `amount` (default `1`). */
   incrementCounter(key: string, amount: number = 1): void {
@@ -153,64 +151,64 @@ export class CRDTMapHandle {
   }
 
   private emit(): void {
-    for (const l of this.listeners) l(this.state);
+    for (const listener of this.listeners) listener(this.state);
   }
 }
 
-// ---------------------------------------------------------------------------
-// Delta application helpers
-// ---------------------------------------------------------------------------
-
-function applyValueDelta(current: unknown, delta: CrdtValueDelta): unknown {
+const applyValueDelta = (current: unknown, delta: CrdtValueDelta): unknown => {
   if ("GCounter" in delta) {
-    const cur = (current as { counts?: Record<string, number> } | undefined)?.counts ?? {};
-    const merged: Record<string, number> = { ...cur };
-    for (const [id, count] of Object.entries(delta.GCounter.counters)) {
-      if ((merged[id] ?? 0) < count) merged[id] = count;
+    // HACK: current is unknown — shape is set by previous applyValueDelta call
+    const currentCounts = (current as { counts?: Record<string, number> } | undefined)?.counts ?? {};
+    const merged: Record<string, number> = { ...currentCounts };
+    for (const [clientId, count] of Object.entries(delta.GCounter.counters)) {
+      if ((merged[clientId] ?? 0) < count) merged[clientId] = count;
     }
-    const total = Object.values(merged).reduce((a, b) => a + b, 0);
+    const total = Object.values(merged).reduce((sum, count) => sum + count, 0);
     return { total, counts: merged };
   }
 
   if ("PNCounter" in delta) {
-    const cur = current as { pos?: Record<string, number>; neg?: Record<string, number> } | undefined;
-    const pos = mergeCounterMap(cur?.pos ?? {}, delta.PNCounter.pos?.counters ?? {});
-    const neg = mergeCounterMap(cur?.neg ?? {}, delta.PNCounter.neg?.counters ?? {});
-    const value = Object.values(pos).reduce((a, b) => a + b, 0)
-                - Object.values(neg).reduce((a, b) => a + b, 0);
+    // HACK: current is unknown — shape is set by previous applyValueDelta call
+    const currentPn = current as { pos?: Record<string, number>; neg?: Record<string, number> } | undefined;
+    const pos = mergeCounterMap(currentPn?.pos ?? {}, delta.PNCounter.pos?.counters ?? {});
+    const neg = mergeCounterMap(currentPn?.neg ?? {}, delta.PNCounter.neg?.counters ?? {});
+    const value = Object.values(pos).reduce((sum, count) => sum + count, 0)
+                - Object.values(neg).reduce((sum, count) => sum + count, 0);
     return { value, pos, neg };
   }
 
   if ("ORSet" in delta) {
-    const cur = current as { elements?: unknown[] } | undefined;
-    // Conservative: return delta's add set merged with existing
-    const existing = new Set((cur?.elements ?? []).map((e) => JSON.stringify(e)));
+    // HACK: current is unknown — shape is set by previous applyValueDelta call
+    const currentOrset = current as { elements?: unknown[] } | undefined;
+    const existing = new Set((currentOrset?.elements ?? []).map((element) => JSON.stringify(element)));
     for (const key of Object.keys(delta.ORSet.adds)) {
       existing.add(key);
     }
     for (const key of Object.keys(delta.ORSet.removes)) {
       existing.delete(key);
     }
-    return { elements: Array.from(existing).map((k) => { try { return JSON.parse(k); } catch { return k; } }) };
+    return { elements: Array.from(existing).map((key) => { try { return JSON.parse(key); } catch { return key; } }) };
   }
 
   if ("LwwRegister" in delta) {
     const entry = delta.LwwRegister.entry;
     if (entry === null) return current;
-    const curEntry = current as { hlc?: { wall_ms: number; logical: number }; author?: number } | undefined;
-    if (curEntry?.hlc) {
-      const curWall = Number(curEntry.hlc.wall_ms);
-      const newWall = Number(entry.hlc.wall_ms);
-      if (newWall < curWall) return current;
-      if (newWall === curWall && entry.hlc.logical < (curEntry.hlc.logical ?? 0)) return current;
-      if (newWall === curWall && entry.hlc.logical === (curEntry.hlc.logical ?? 0) && Number(entry.author) <= Number(curEntry.author ?? 0)) return current;
+    // HACK: current is unknown — shape is set by previous applyValueDelta call
+    const currentLww = current as { hlc?: { wall_ms: number; logical: number }; author?: number } | undefined;
+    if (currentLww?.hlc) {
+      const currentWallMs = Number(currentLww.hlc.wall_ms);
+      const newWallMs = Number(entry.hlc.wall_ms);
+      if (newWallMs < currentWallMs) return current;
+      if (newWallMs === currentWallMs && entry.hlc.logical < (currentLww.hlc.logical ?? 0)) return current;
+      if (newWallMs === currentWallMs && entry.hlc.logical === (currentLww.hlc.logical ?? 0) && Number(entry.author) <= Number(currentLww.author ?? 0)) return current;
     }
     return { value: entry.value, updatedAtMs: Number(entry.hlc.wall_ms), author: Number(entry.author) };
   }
 
   if ("Presence" in delta) {
-    const cur = current as { entries?: Record<string, unknown> } | undefined;
-    const entries = { ...(cur?.entries ?? {}) };
+    // HACK: current is unknown — shape is set by previous applyValueDelta call
+    const currentPresence = current as { entries?: Record<string, unknown> } | undefined;
+    const entries = { ...(currentPresence?.entries ?? {}) };
     for (const [clientId, entry] of Object.entries(delta.Presence.changes)) {
       if (entry === null) {
         delete entries[clientId];
@@ -222,12 +220,12 @@ function applyValueDelta(current: unknown, delta: CrdtValueDelta): unknown {
   }
 
   return current;
-}
+};
 
-function mergeCounterMap(a: Record<string, number>, b: Record<string, number>): Record<string, number> {
-  const result = { ...a };
-  for (const [id, count] of Object.entries(b)) {
-    if ((result[id] ?? 0) < count) result[id] = count;
+const mergeCounterMap = (source: Record<string, number>, incoming: Record<string, number>): Record<string, number> => {
+  const result = { ...source };
+  for (const [clientId, count] of Object.entries(incoming)) {
+    if ((result[clientId] ?? 0) < count) result[clientId] = count;
   }
   return result;
-}
+};
