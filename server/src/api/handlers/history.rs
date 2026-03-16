@@ -9,6 +9,7 @@ use tracing::instrument;
 use crate::{
     auth::ClaimsExt,
     crdt::registry::CrdtOp,
+    storage::WalBackend,
 };
 
 use super::AppStateExt;
@@ -75,7 +76,7 @@ pub async fn get_history<S: AppStateExt>(
     let limit = q.limit.unwrap_or(50).min(500);
 
     let wal = state.wal();
-    let all_entries = match wal.replay_from(since_seq) {
+    let all_entries = match wal.replay_from(since_seq).await {
         Ok(e) => e,
         Err(e) => {
             tracing::error!(error = %e, "WAL replay failed");

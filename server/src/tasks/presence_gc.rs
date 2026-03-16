@@ -8,7 +8,7 @@ use tracing::{debug, error, instrument};
 use crate::{
     api::ws::SubscriptionManager,
     crdt::{clock::now_ms, registry::CrdtValue},
-    storage::{SledStore, Store},
+    storage::{CrdtStore, Result},
 };
 
 const GC_INTERVAL: Duration = Duration::from_secs(5);
@@ -24,8 +24,8 @@ const GC_INTERVAL: Duration = Duration::from_secs(5);
 /// is a fresh read-modify-write. The CAS-like safety comes from sled's
 /// single-writer guarantee per key at the storage level.
 #[instrument(skip(store, subscriptions, cancel))]
-pub async fn run_presence_gc(
-    store: Arc<SledStore>,
+pub async fn run_presence_gc<S: CrdtStore>(
+    store: Arc<S>,
     subscriptions: Arc<SubscriptionManager>,
     cancel: CancellationToken,
 ) {
@@ -39,7 +39,7 @@ pub async fn run_presence_gc(
                 break;
             }
             _ = interval.tick() => {
-                if let Err(e) = gc_tick(&store, &subscriptions).await {
+                if let Err(e) = gc_tick(&*store, &subscriptions).await {
                     error!(error = %e, "presence_gc tick failed");
                 }
             }
@@ -47,9 +47,8 @@ pub async fn run_presence_gc(
     }
 }
 
-async fn gc_tick(store: &SledStore, subscriptions: &SubscriptionManager) -> crate::storage::Result<()> {
+async fn gc_tick<S: CrdtStore>(store: &S, subscriptions: &SubscriptionManager) -> Result<()> {
     let now = now_ms();
-    // Scan all keys — Presence CRDTs can be in any namespace.
     let all = store.scan_prefix("").await?;
 
     for (key, mut crdt) in all {
@@ -62,18 +61,15 @@ async fn gc_tick(store: &SledStore, subscriptions: &SubscriptionManager) -> crat
             continue;
         }
 
-        // key format: "{ns}/{crdt_id}"
         let Some((ns, crdt_id)) = key.split_once('/') else {
             continue;
         };
 
-        // Persist pruned state
         if let Err(e) = store.put(ns, crdt_id, &crdt).await {
             error!(key, error = %e, "gc: store.put failed");
             continue;
         }
 
-        // Broadcast removal delta to subscribers
         if let Ok(delta_bytes) = rmp_serde::encode::to_vec_named(&gc_delta) {
             subscriptions.publish(ns, Arc::new(crate::api::ws::ServerMsg::Delta {
                 crdt_id: crdt_id.to_owned(),

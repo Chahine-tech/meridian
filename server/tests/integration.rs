@@ -14,7 +14,7 @@ use meridian_server::{
         registry::CrdtOp,
     },
     rate_limit::RateLimiter,
-    storage::SledStore,
+    storage::{SledStore, SledWal},
     AppState,
 };
 use tower::ServiceExt;
@@ -38,6 +38,7 @@ fn prometheus_handle() -> metrics_exporter_prometheus::PrometheusHandle {
 
 fn build_test_app() -> (axum::Router, Arc<TokenSigner>) {
     let store = Arc::new(SledStore::open_temporary().unwrap());
+    let wal = Arc::new(SledWal::new(store.db()).unwrap());
     let signer = Arc::new(TokenSigner::generate());
     let auth_state = Arc::new(AuthState {
         signer: Arc::clone(&signer),
@@ -45,6 +46,7 @@ fn build_test_app() -> (axum::Router, Arc<TokenSigner>) {
     });
     let state = AppState {
         store,
+        wal,
         subscriptions: Arc::new(SubscriptionManager::new()),
         signer: Arc::clone(&signer),
         webhooks: None,

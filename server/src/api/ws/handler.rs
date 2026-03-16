@@ -14,7 +14,7 @@ use crate::{
     auth::ClaimsExt,
     crdt::{clock::now_ms, registry::{apply_op, CrdtOp, CrdtType, CrdtValue}},
     metrics,
-    storage::Store,
+    storage::{CrdtStore, Store},
     webhooks::{WebhookDispatcher, WebhookEvent},
 };
 
@@ -30,7 +30,7 @@ use super::{
 /// Minimal state needed by the WS handler.
 /// The concrete `AppState` implements this interface.
 pub trait WsState: Clone + Send + Sync + 'static {
-    type S: Store;
+    type S: CrdtStore;
     fn store(&self) -> &Self::S;
     fn subscriptions(&self) -> &Arc<SubscriptionManager>;
     fn webhooks(&self) -> Option<&WebhookDispatcher>;
@@ -281,7 +281,7 @@ async fn apply_and_persist<S: WsState>(
         .unwrap_or_else(|| CrdtValue::new(crdt_type));
 
     let delta_bytes = apply_op(&mut crdt, op)
-        .map_err(crate::storage::StorageError::Crdt)?;
+        .map_err(|e| crate::storage::StorageError::Codec(e.into()))?;
 
     if delta_bytes.is_some() {
         state.store().put(ns, crdt_id, &crdt).await?;

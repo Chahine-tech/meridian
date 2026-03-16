@@ -5,29 +5,33 @@ use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument};
 
-use crate::storage::SledStore;
+use crate::storage::{CrdtStore, WalBackend};
 
-/// Compact the WAL every `COMPACT_INTERVAL` or when it exceeds `COMPACT_THRESHOLD` entries.
+/// Compact the WAL every `COMPACT_INTERVAL`.
 ///
 /// ## Strategy
 ///
-/// sled is already the "snapshot" — every `Store::put` writes the full CRDT state.
+/// The store is already the "snapshot" — every `Store::put` writes the full CRDT state.
 /// So compaction is straightforward:
-/// 1. Flush sled to disk (ensures all CRDT states are durable).
+/// 1. Flush the store to disk (ensures all CRDT states are durable).
 /// 2. Truncate WAL entries up to the current last_seq.
 ///
-/// After a restart, the server loads CRDT state directly from sled (already up-to-date)
+/// After a restart, the server loads CRDT state directly from the store (already up-to-date)
 /// and only needs to replay WAL entries written *after* the last compaction point.
 /// With periodic compaction the WAL stays bounded regardless of write volume.
 ///
 /// ## Safety
 ///
-/// We flush sled *before* truncating the WAL. If the process crashes between the two
+/// We flush the store *before* truncating the WAL. If the process crashes between the two
 /// steps, the WAL entries are replayed harmlessly (CRDT merge is idempotent).
 const COMPACT_INTERVAL: Duration = Duration::from_secs(60);
 
-#[instrument(skip(store, cancel))]
-pub async fn run_wal_compactor(store: Arc<SledStore>, cancel: CancellationToken) {
+#[instrument(skip(store, wal, cancel))]
+pub async fn run_wal_compactor<S: CrdtStore, W: WalBackend>(
+    store: Arc<S>,
+    wal: Arc<W>,
+    cancel: CancellationToken,
+) {
     let mut interval = time::interval(COMPACT_INTERVAL);
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
@@ -35,14 +39,14 @@ pub async fn run_wal_compactor(store: Arc<SledStore>, cancel: CancellationToken)
         tokio::select! {
             _ = cancel.cancelled() => {
                 debug!("wal_compactor shutting down — final compaction");
-                compact(&store).await;
+                compact(&*store, &*wal).await;
                 break;
             }
             _ = interval.tick() => {
-                let pending = store.wal.last_seq().saturating_sub(store.wal.checkpoint_seq());
+                let pending = wal.last_seq().saturating_sub(wal.checkpoint_seq());
                 if pending > 0 {
                     debug!(pending, "wal_compactor: running compaction");
-                    compact(&store).await;
+                    compact(&*store, &*wal).await;
                 } else {
                     debug!("wal_compactor: WAL already compact");
                 }
@@ -51,27 +55,24 @@ pub async fn run_wal_compactor(store: Arc<SledStore>, cancel: CancellationToken)
     }
 }
 
-async fn compact(store: &SledStore) {
-    // Step 1: flush sled — all CRDT states are now durable on disk.
+async fn compact<S: CrdtStore, W: WalBackend>(store: &S, wal: &W) {
     if let Err(e) = store.flush().await {
         error!(error = %e, "wal_compactor: flush failed — skipping truncation");
         return;
     }
 
-    // Step 2: snapshot the current WAL tail (everything up to this point is
-    // covered by the sled state we just flushed).
-    let up_to = store.wal.last_seq();
-
-    // Step 3: truncate WAL entries up to (but not including) up_to.
-    // We keep the last entry so next_seq arithmetic stays correct.
+    let up_to = wal.last_seq();
     if up_to == 0 {
         return;
     }
 
-    match store.wal.truncate_before(up_to) {
+    match wal.truncate_before(up_to).await {
         Ok(()) => {
-            store.wal.set_checkpoint_seq(up_to);
-            info!(up_to, "wal_compactor: WAL compacted");
+            if let Err(e) = wal.set_checkpoint_seq(up_to).await {
+                error!(error = %e, "wal_compactor: set_checkpoint_seq failed");
+            } else {
+                info!(up_to, "wal_compactor: WAL compacted");
+            }
         }
         Err(e) => error!(error = %e, "wal_compactor: truncate failed"),
     }
