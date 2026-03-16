@@ -9,7 +9,7 @@ Sub-millisecond merge latency on a single node. Deltas are broadcast over WebSoc
 
 ## What it is
 
-- **Server**: Rust binary, single file, no external dependencies. Stores state in an embedded sled database.
+- **Server**: Rust binary. Embedded sled storage by default — PostgreSQL and Redis backends available as optional features.
 - **SDK**: TypeScript, Effect-based, msgpack wire protocol. Works in Node, Bun, and browsers.
 - **Auth**: Custom ed25519-signed tokens (smaller than JWT, constant-time verification).
 
@@ -24,7 +24,7 @@ MERIDIAN_SIGNING_KEY=$(openssl rand -hex 32) docker compose up -d
 **2. Install the SDK**
 
 ```bash
-bun add meridian-sdk effect msgpackr
+bun add meridian-sdk
 ```
 
 **3. Connect and sync**
