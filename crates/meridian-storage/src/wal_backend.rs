@@ -45,11 +45,19 @@ pub trait WalBackend: Send + Sync + 'static {
     ///
     /// Used for point-in-time recovery: replay the WAL up to a specific wall-clock
     /// timestamp to reconstruct CRDT state as it was at that moment.
+    ///
+    /// Default impl filters the result of `replay_from` in memory — backends
+    /// can override with a more efficient storage-side filter.
     fn replay_until(
         &self,
         from_seq: u64,
         until_ms: u64,
-    ) -> impl std::future::Future<Output = Result<Vec<WalEntry>>> + Send;
+    ) -> impl std::future::Future<Output = Result<Vec<WalEntry>>> + Send {
+        async move {
+            let entries = self.replay_from(from_seq).await?;
+            Ok(entries.into_iter().filter(|e| e.timestamp_ms <= until_ms).collect())
+        }
+    }
 
     /// Remove all entries with `seq < before_seq`.
     fn truncate_before(
