@@ -16,6 +16,7 @@ default = ["storage-sled"]
 storage-sled = ["meridian-storage/storage-sled"]
 storage-memory = ["meridian-storage/storage-memory"]
 storage-postgres = ["meridian-storage/storage-postgres"]
+storage-redis = ["meridian-storage/storage-redis"]
 
 [dependencies]
 # Storage abstraction layer

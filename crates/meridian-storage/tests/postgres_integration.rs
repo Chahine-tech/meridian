@@ -6,6 +6,7 @@
 
 #![cfg(feature = "storage-postgres")]
 
+use meridian_storage::store::Store;
 use meridian_storage::{
     postgres::{PgStore, PgWal},
     store::Store,
@@ -84,7 +85,7 @@ async fn pg_store_delete_removes_entry() {
 
     let value = TestValue { data: "to delete".into(), count: 0 };
     store.put("ns", "id1", &value).await.unwrap();
-    store.delete("ns", "id1").await.unwrap();
+    Store::<TestValue>::delete(&store, "ns", "id1").await.unwrap();
     let retrieved: Option<TestValue> = store.get("ns", "id1").await.unwrap();
     assert!(retrieved.is_none());
 }

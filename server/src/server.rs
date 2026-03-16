@@ -26,9 +26,12 @@ pub struct Config {
     pub bind: String,
     pub data_dir: String,
     pub signing_key_hex: Option<String>,
-    /// PostgreSQL connection URL. If set, overrides sled backend.
+    /// PostgreSQL connection URL. If set, takes priority over sled.
     /// Requires `--features storage-postgres`.
     pub database_url: Option<String>,
+    /// Redis connection URL. If set and `DATABASE_URL` is not, overrides sled.
+    /// Requires `--features storage-redis`.
+    pub redis_url: Option<String>,
 }
 
 impl Config {
@@ -38,6 +41,7 @@ impl Config {
             data_dir: std::env::var("MERIDIAN_DATA_DIR").unwrap_or_else(|_| "./data".into()),
             signing_key_hex: std::env::var("MERIDIAN_SIGNING_KEY").ok(),
             database_url: std::env::var("DATABASE_URL").ok(),
+            redis_url: std::env::var("REDIS_URL").ok(),
         }
     }
 }
