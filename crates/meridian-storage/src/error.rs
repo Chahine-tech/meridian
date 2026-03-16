@@ -32,9 +32,6 @@ pub enum StorageError {
 
     #[error("invalid key format: {0}")]
     InvalidKey(String),
-
-    #[error("internal lock poisoned")]
-    LockPoisoned,
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;

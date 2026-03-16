@@ -1,7 +1,7 @@
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{
-    error::{Result, StorageError},
+    error::Result,
     wal_backend::{WalBackend, WalEntry},
 };
 
@@ -12,12 +12,12 @@ use crate::{
 /// No-op WAL — discards all entries. Used with `MemoryStore` in tests and
 /// edge/WASM environments where WAL persistence is not needed.
 pub struct NoopWal {
-    next_seq: Mutex<u64>,
+    next_seq: AtomicU64,
 }
 
 impl NoopWal {
     pub fn new() -> Self {
-        Self { next_seq: Mutex::new(0) }
+        Self { next_seq: AtomicU64::new(0) }
     }
 }
 
@@ -29,10 +29,7 @@ impl Default for NoopWal {
 
 impl WalBackend for NoopWal {
     async fn append(&self, _namespace: &str, _crdt_id: &str, _op_bytes: Vec<u8>) -> Result<u64> {
-        let mut guard = self.next_seq.lock().map_err(|_| StorageError::LockPoisoned)?;
-        let seq = *guard;
-        *guard = seq + 1;
-        Ok(seq)
+        Ok(self.next_seq.fetch_add(1, Ordering::Relaxed))
     }
 
     async fn replay_from(&self, _from_seq: u64) -> Result<Vec<WalEntry>> {
@@ -44,7 +41,7 @@ impl WalBackend for NoopWal {
     }
 
     fn last_seq(&self) -> u64 {
-        self.next_seq.lock().map(|g| g.saturating_sub(1)).unwrap_or(0)
+        self.next_seq.load(Ordering::Relaxed).saturating_sub(1)
     }
 
     fn checkpoint_seq(&self) -> u64 {

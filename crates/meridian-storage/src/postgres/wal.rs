@@ -116,7 +116,8 @@ impl WalBackend for PgWal {
         .fetch_one(&self.pool)
         .await?;
 
-        let seq = seq as u64;
+        let seq = u64::try_from(seq)
+            .map_err(|_| StorageError::InvalidKey(format!("corrupt WAL seq returned by DB: {seq}")))?;
         self.last_seq.fetch_max(seq, Ordering::Relaxed);
         Ok(seq)
     }

@@ -1,9 +1,9 @@
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tracing::{debug, warn};
 
 use crate::{
-    error::{Result, StorageError},
+    error::Result,
     utils::now_ms,
     wal_backend::{WalBackend, WalEntry},
 };
@@ -22,11 +22,8 @@ use crate::{
 /// entries with `seq > last_snapshot_seq`. After replay, truncate stale entries.
 pub struct SledWal {
     tree: sled::Tree,
-    /// Monotonic counter; wrapped in Mutex because the lock is
-    /// never held across an `.await` point.
-    next_seq: Mutex<u64>,
-    /// Last compacted sequence number — entries < this are gone.
-    checkpoint_seq: Mutex<u64>,
+    next_seq: AtomicU64,
+    checkpoint_seq: AtomicU64,
 }
 
 impl SledWal {
@@ -52,8 +49,8 @@ impl SledWal {
 
         Ok(Self {
             tree,
-            next_seq: Mutex::new(last + 1),
-            checkpoint_seq: Mutex::new(checkpoint),
+            next_seq: AtomicU64::new(last + 1),
+            checkpoint_seq: AtomicU64::new(checkpoint),
         })
     }
 
@@ -73,12 +70,7 @@ impl SledWal {
 
 impl WalBackend for SledWal {
     async fn append(&self, namespace: &str, crdt_id: &str, op_bytes: Vec<u8>) -> Result<u64> {
-        let seq = {
-            let mut guard = self.next_seq.lock().map_err(|_| StorageError::LockPoisoned)?;
-            let s = *guard;
-            *guard = s + 1;
-            s
-        };
+        let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
 
         let entry = WalEntry {
             seq,
@@ -133,24 +125,20 @@ impl WalBackend for SledWal {
             let (k, _) = kv?;
             self.tree.remove(k)?;
         }
+        self.checkpoint_seq.fetch_max(before_seq, Ordering::Relaxed);
         Ok(())
     }
 
     fn last_seq(&self) -> u64 {
-        self.next_seq
-            .lock()
-            .map(|g| g.saturating_sub(1))
-            .unwrap_or(0)
+        self.next_seq.load(Ordering::Relaxed).saturating_sub(1)
     }
 
     fn checkpoint_seq(&self) -> u64 {
-        self.checkpoint_seq.lock().map(|g| *g).unwrap_or(0)
+        self.checkpoint_seq.load(Ordering::Relaxed)
     }
 
     async fn set_checkpoint_seq(&self, seq: u64) -> Result<()> {
-        if let Ok(mut guard) = self.checkpoint_seq.lock() {
-            *guard = seq;
-        }
+        self.checkpoint_seq.store(seq, Ordering::Relaxed);
         self.tree.insert(b"_checkpoint", &seq.to_be_bytes())?;
         Ok(())
     }
