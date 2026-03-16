@@ -141,5 +141,6 @@ run(Config::from_env(), prometheus_handle, store, wal).await?;
 | `append(ns, id, bytes)` | Append entry, return monotonic seq number |
 | `replay_from(seq)` | Return all entries with `seq >= from_seq`, ordered by seq |
 | `replay_until(seq, ms)` | Return entries with `seq >= from_seq` AND `timestamp_ms <= until_ms` |
-| `truncate_before(seq)` | Remove all entries with `seq < before_seq` |
+| `scan_prefix(ns)` | `ns` is an exact namespace — not a glob or substring match |
+| `truncate_before(seq)` | Remove all entries with `seq < before_seq`; also advances `checkpoint_seq` |
 | `set_checkpoint_seq(seq)` | Persist the compaction watermark durably |
