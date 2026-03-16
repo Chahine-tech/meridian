@@ -32,7 +32,8 @@
             "pages": [
               "self-hosting/docker",
               "self-hosting/configuration",
-              "self-hosting/tokens"
+              "self-hosting/tokens",
+              "self-hosting/storage"
             ]
           },
           {

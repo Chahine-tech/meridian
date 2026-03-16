@@ -11,7 +11,17 @@ path = "src/main.rs"
 name = "meridian_server"
 path = "src/lib.rs"
 
+[features]
+default = ["storage-sled"]
+storage-sled = ["meridian-storage/storage-sled"]
+storage-memory = ["meridian-storage/storage-memory"]
+storage-postgres = ["meridian-storage/storage-postgres"]
+storage-redis = ["meridian-storage/storage-redis"]
+
 [dependencies]
+# Storage abstraction layer
+meridian-storage = { path = "../crates/meridian-storage", default-features = false }
+
 # Async runtime
 tokio = { version = "1.50", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
@@ -20,9 +30,6 @@ tokio-util = { version = "0.7", features = ["rt"] }
 axum = { version = "0.8", features = ["ws", "macros"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
-
-# Storage (0.34 is the last stable; 1.x is alpha — pinning stable)
-sled = "0.34"
 
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }
