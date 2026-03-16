@@ -70,7 +70,7 @@ async fn init_storage_and_run(
         info!(path = config.data_dir, "sled backend selected");
         let store = Arc::new(SledStore::open(&config.data_dir)?);
         let wal = Arc::new(SledWal::new(store.db())?);
-        return run(config, metrics, store, wal).await;
+        run(config, metrics, store, wal).await
     }
 
     #[cfg(not(any(feature = "storage-sled", feature = "storage-postgres", feature = "storage-redis")))]
