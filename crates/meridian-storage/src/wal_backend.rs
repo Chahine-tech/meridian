@@ -41,6 +41,16 @@ pub trait WalBackend: Send + Sync + 'static {
         from_seq: u64,
     ) -> impl std::future::Future<Output = Result<Vec<WalEntry>>> + Send;
 
+    /// Replay all entries with `seq >= from_seq` and `timestamp_ms <= until_ms`.
+    ///
+    /// Used for point-in-time recovery: replay the WAL up to a specific wall-clock
+    /// timestamp to reconstruct CRDT state as it was at that moment.
+    fn replay_until(
+        &self,
+        from_seq: u64,
+        until_ms: u64,
+    ) -> impl std::future::Future<Output = Result<Vec<WalEntry>>> + Send;
+
     /// Remove all entries with `seq < before_seq`.
     fn truncate_before(
         &self,

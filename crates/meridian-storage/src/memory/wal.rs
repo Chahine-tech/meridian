@@ -39,6 +39,10 @@ impl WalBackend for NoopWal {
         Ok(vec![])
     }
 
+    async fn replay_until(&self, _from_seq: u64, _until_ms: u64) -> Result<Vec<WalEntry>> {
+        Ok(vec![])
+    }
+
     async fn truncate_before(&self, _before_seq: u64) -> Result<()> {
         Ok(())
     }

@@ -10,6 +10,10 @@ pub enum StorageError {
     #[error("postgres error: {0}")]
     Postgres(#[from] sqlx::Error),
 
+    #[cfg(feature = "storage-redis")]
+    #[error("redis error: {0}")]
+    Redis(#[from] redis::RedisError),
+
     #[error("serialization error: {0}")]
     Serialization(#[from] rmp_serde::encode::Error),
 

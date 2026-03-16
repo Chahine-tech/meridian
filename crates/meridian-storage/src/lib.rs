@@ -12,6 +12,9 @@ pub mod memory;
 #[cfg(feature = "storage-postgres")]
 pub mod postgres;
 
+#[cfg(feature = "storage-redis")]
+pub mod redis_backend;
+
 // Re-exports for convenience
 pub use error::{Result, StorageError};
 pub use store::Store;
@@ -25,3 +28,6 @@ pub use memory::{MemoryStore, NoopWal};
 
 #[cfg(feature = "storage-postgres")]
 pub use postgres::{PgStore, PgWal};
+
+#[cfg(feature = "storage-redis")]
+pub use redis_backend::{RedisStore, RedisWal};

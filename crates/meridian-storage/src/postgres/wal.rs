@@ -77,6 +77,8 @@ impl PgWal {
                 op_bytes     BYTEA NOT NULL,
                 timestamp_ms BIGINT NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS wal_entries_namespace_seq_idx
+                ON wal_entries (namespace, seq);
             CREATE TABLE IF NOT EXISTS wal_checkpoint (
                 id  INT PRIMARY KEY DEFAULT 1,
                 seq BIGINT NOT NULL DEFAULT 0,
@@ -124,6 +126,29 @@ impl WalBackend for PgWal {
             "SELECT seq, namespace, crdt_id, op_bytes, timestamp_ms FROM wal_entries WHERE seq >= $1 ORDER BY seq",
         )
         .bind(from_seq as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let entries = rows
+            .into_iter()
+            .map(|(seq, namespace, crdt_id, op_bytes, timestamp_ms)| WalEntry {
+                seq: seq as u64,
+                namespace,
+                crdt_id,
+                op_bytes,
+                timestamp_ms: timestamp_ms as u64,
+            })
+            .collect();
+
+        Ok(entries)
+    }
+
+    async fn replay_until(&self, from_seq: u64, until_ms: u64) -> Result<Vec<WalEntry>> {
+        let rows: Vec<(i64, String, String, Vec<u8>, i64)> = sqlx::query_as(
+            "SELECT seq, namespace, crdt_id, op_bytes, timestamp_ms FROM wal_entries WHERE seq >= $1 AND timestamp_ms <= $2 ORDER BY seq",
+        )
+        .bind(from_seq as i64)
+        .bind(until_ms as i64)
         .fetch_all(&self.pool)
         .await?;
 

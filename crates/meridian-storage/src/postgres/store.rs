@@ -45,7 +45,9 @@ impl PgStore {
                 data       BYTEA NOT NULL,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 PRIMARY KEY (namespace, crdt_id)
-            )
+            );
+            CREATE INDEX IF NOT EXISTS crdt_snapshots_namespace_idx
+                ON crdt_snapshots (namespace);
             "#,
         )
         .execute(pool)
@@ -119,9 +121,9 @@ where
     #[instrument(skip(self), fields(prefix))]
     async fn scan_prefix(&self, prefix: &str) -> Result<Vec<(String, V)>> {
         let rows: Vec<(String, String, Vec<u8>)> = sqlx::query_as(
-            "SELECT namespace, crdt_id, data FROM crdt_snapshots WHERE namespace || '/' || crdt_id LIKE $1 ORDER BY namespace, crdt_id",
+            "SELECT namespace, crdt_id, data FROM crdt_snapshots WHERE namespace = $1 ORDER BY crdt_id",
         )
-        .bind(format!("{}%", prefix))
+        .bind(prefix)
         .fetch_all(&self.pool)
         .await?;
 

@@ -8,6 +8,7 @@ default = ["storage-sled"]
 storage-sled = ["dep:sled", "dep:tokio"]
 storage-memory = []
 storage-postgres = ["dep:sqlx", "dep:tokio"]
+storage-redis = ["dep:redis", "dep:tokio"]
 
 [dependencies]
 # Async runtime — only needed for sled (spawn_blocking) and postgres adapters
@@ -16,6 +17,7 @@ tokio = { version = "1.50", features = ["full"], optional = true }
 # Storage backends
 sled = { version = "0.34", optional = true }
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "macros"], optional = true }
+redis = { version = "0.28", features = ["tokio-comp", "streams"], optional = true }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -27,3 +29,7 @@ thiserror = "2"
 
 # Observability
 tracing = "0.1"
+
+[dev-dependencies]
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["postgres"] }

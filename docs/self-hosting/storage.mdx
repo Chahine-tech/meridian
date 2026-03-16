@@ -1,0 +1,149 @@
+---
+title: Storage Backends
+description: Configure Meridian's persistence layer — sled, PostgreSQL, Redis, or bring your own.
+---
+
+Meridian delegates all persistence to the `meridian-storage` crate, which exposes two traits:
+
+- **`Store<V>`** — CRDT snapshot storage (get / put / delete / scan)
+- **`WalBackend`** — append-only Write-Ahead Log (append / replay / truncate)
+
+All built-in backends are feature-gated. Pick the one that matches your deployment.
+
+---
+
+## Built-in backends
+
+### sled (default)
+
+Embedded key-value store. Zero infrastructure, single binary. Best for single-node deployments.
+
+```toml
+# Cargo.toml (server)
+meridian-server = { features = ["storage-sled"] }
+```
+
+```bash
+# Environment
+MERIDIAN_DATA_DIR=./data  # path to the sled data directory
+```
+
+### PostgreSQL
+
+Fully managed, horizontally scalable. Requires a Postgres 14+ instance.
+
+```toml
+meridian-server = { features = ["storage-postgres"] }
+```
+
+```bash
+DATABASE_URL=postgres://user:password@host:5432/meridian
+```
+
+Meridian runs `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS` on startup — no manual migration needed.
+
+**Schema created automatically:**
+
+```sql
+-- CRDT snapshots
+CREATE TABLE crdt_snapshots (
+    namespace  TEXT NOT NULL,
+    crdt_id    TEXT NOT NULL,
+    data       BYTEA NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (namespace, crdt_id)
+);
+CREATE INDEX crdt_snapshots_namespace_idx ON crdt_snapshots (namespace);
+
+-- Write-Ahead Log
+CREATE TABLE wal_entries (
+    seq          BIGSERIAL PRIMARY KEY,
+    namespace    TEXT NOT NULL,
+    crdt_id      TEXT NOT NULL,
+    op_bytes     BYTEA NOT NULL,
+    timestamp_ms BIGINT NOT NULL
+);
+CREATE INDEX wal_entries_namespace_seq_idx ON wal_entries (namespace, seq);
+```
+
+### Redis
+
+Uses Redis for snapshots (`GET`/`SET`) and Redis Streams for the WAL (`XADD`/`XRANGE`/`XTRIM`).
+
+```toml
+meridian-server = { features = ["storage-redis"] }
+```
+
+```bash
+REDIS_URL=redis://localhost:6379
+```
+
+<Note>
+`last_seq()` and `checkpoint_seq()` always return `0` in the Redis WAL — the WAL compactor uses them as hints only. Full production hardening (AtomicU64 caching) is planned.
+</Note>
+
+---
+
+## WAL replay and point-in-time recovery
+
+Every write goes through the WAL before being applied to the snapshot store. On restart:
+
+1. The server loads CRDT snapshots directly from the store (already up-to-date).
+2. WAL entries written after the last compaction are replayed to catch up.
+
+To replay entries up to a specific point in time:
+
+```rust
+// Replay all WAL entries between checkpoint and a past timestamp
+let entries = wal.replay_until(wal.checkpoint_seq(), until_ms).await?;
+```
+
+The WAL compactor runs every 60 seconds and truncates entries older than the current snapshot checkpoint, keeping the WAL bounded.
+
+---
+
+## Custom backend
+
+Implement `Store<V>` and `WalBackend` for any storage engine:
+
+```rust
+use meridian_storage::{store::Store, wal_backend::{WalBackend, WalEntry}, error::Result};
+use serde::{Serialize, Deserialize};
+
+pub struct MyStore { /* ... */ }
+
+impl<V> Store<V> for MyStore
+where
+    V: Serialize + for<'de> Deserialize<'de> + Send + Sync + 'static,
+{
+    async fn get(&self, ns: &str, id: &str) -> Result<Option<V>> { todo!() }
+    async fn put(&self, ns: &str, id: &str, value: &V) -> Result<()> { todo!() }
+    async fn delete(&self, ns: &str, id: &str) -> Result<()> { todo!() }
+    async fn scan_prefix(&self, prefix: &str) -> Result<Vec<(String, V)>> { todo!() }
+}
+```
+
+Pass your implementation to `server::run()`:
+
+```rust
+use std::sync::Arc;
+use meridian_server::server::{run, Config};
+
+let store = Arc::new(MyStore::new());
+let wal = Arc::new(MyWal::new());
+run(Config::from_env(), prometheus_handle, store, wal).await?;
+```
+
+### Contract
+
+| Method | Semantics |
+|---|---|
+| `get(ns, id)` | Return `None` if missing, deserialize if present |
+| `put(ns, id, value)` | Upsert — overwrite if exists |
+| `delete(ns, id)` | No-op if missing |
+| `scan_prefix(ns)` | Return all `(key, value)` pairs where key starts with `ns` |
+| `append(ns, id, bytes)` | Append entry, return monotonic seq number |
+| `replay_from(seq)` | Return all entries with `seq >= from_seq`, ordered by seq |
+| `replay_until(seq, ms)` | Return entries with `seq >= from_seq` AND `timestamp_ms <= until_ms` |
+| `truncate_before(seq)` | Remove all entries with `seq < before_seq` |
+| `set_checkpoint_seq(seq)` | Persist the compaction watermark durably |

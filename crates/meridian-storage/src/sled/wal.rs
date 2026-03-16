@@ -111,6 +111,22 @@ impl WalBackend for SledWal {
         Ok(entries)
     }
 
+    async fn replay_until(&self, from_seq: u64, until_ms: u64) -> Result<Vec<WalEntry>> {
+        let start = Self::seq_to_key(from_seq);
+        let mut entries = Vec::new();
+
+        for kv in self.tree.range(start..) {
+            let (_, v) = kv?;
+            match rmp_serde::decode::from_slice::<WalEntry>(&v) {
+                Ok(entry) if entry.timestamp_ms <= until_ms => entries.push(entry),
+                Ok(_) => break, // entries are ordered by seq ≈ time
+                Err(e) => warn!(error = %e, "skipping corrupt WAL entry"),
+            }
+        }
+
+        Ok(entries)
+    }
+
     async fn truncate_before(&self, before_seq: u64) -> Result<()> {
         let end = Self::seq_to_key(before_seq);
         for kv in self.tree.range(..end) {
