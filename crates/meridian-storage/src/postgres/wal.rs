@@ -129,18 +129,18 @@ impl WalBackend for PgWal {
         .fetch_all(&self.pool)
         .await?;
 
-        let entries = rows
-            .into_iter()
-            .map(|(seq, namespace, crdt_id, op_bytes, timestamp_ms)| WalEntry {
-                seq: seq as u64,
-                namespace,
-                crdt_id,
-                op_bytes,
-                timestamp_ms: timestamp_ms as u64,
+        rows.into_iter()
+            .map(|(seq, namespace, crdt_id, op_bytes, timestamp_ms)| {
+                Ok(WalEntry {
+                    seq: u64::try_from(seq)
+                        .map_err(|_| StorageError::InvalidKey(format!("corrupt WAL seq: {seq}")))?,
+                    namespace,
+                    crdt_id,
+                    op_bytes,
+                    timestamp_ms: u64::try_from(timestamp_ms).unwrap_or(0),
+                })
             })
-            .collect();
-
-        Ok(entries)
+            .collect()
     }
 
     async fn replay_until(&self, from_seq: u64, until_ms: u64) -> Result<Vec<WalEntry>> {
@@ -152,18 +152,18 @@ impl WalBackend for PgWal {
         .fetch_all(&self.pool)
         .await?;
 
-        let entries = rows
-            .into_iter()
-            .map(|(seq, namespace, crdt_id, op_bytes, timestamp_ms)| WalEntry {
-                seq: seq as u64,
-                namespace,
-                crdt_id,
-                op_bytes,
-                timestamp_ms: timestamp_ms as u64,
+        rows.into_iter()
+            .map(|(seq, namespace, crdt_id, op_bytes, timestamp_ms)| {
+                Ok(WalEntry {
+                    seq: u64::try_from(seq)
+                        .map_err(|_| StorageError::InvalidKey(format!("corrupt WAL seq: {seq}")))?,
+                    namespace,
+                    crdt_id,
+                    op_bytes,
+                    timestamp_ms: u64::try_from(timestamp_ms).unwrap_or(0),
+                })
             })
-            .collect();
-
-        Ok(entries)
+            .collect()
     }
 
     async fn truncate_before(&self, before_seq: u64) -> Result<()> {
@@ -171,6 +171,10 @@ impl WalBackend for PgWal {
             .bind(before_seq as i64)
             .execute(&self.pool)
             .await?;
+        // Keep checkpoint_seq in sync — if the caller truncates beyond the
+        // current checkpoint, advance the atomic so last_seq/checkpoint_seq
+        // comparisons in the compactor remain correct.
+        self.checkpoint_seq.fetch_max(before_seq, Ordering::Relaxed);
         Ok(())
     }
 

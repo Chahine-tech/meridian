@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
-use std::sync::RwLock;
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 
 use crate::{
-    error::{Result, StorageError},
+    error::Result,
     store::Store,
 };
 
@@ -40,27 +40,24 @@ where
     V: Serialize + for<'de> Deserialize<'de> + Clone + Send + Sync + 'static,
 {
     async fn get(&self, ns: &str, id: &str) -> Result<Option<V>> {
-        let key = Self::make_key(ns, id);
-        let data = self.data.read().map_err(|_| StorageError::LockPoisoned)?;
-        Ok(data.get(&key).cloned())
+        let data = self.data.read().await;
+        Ok(data.get(&Self::make_key(ns, id)).cloned())
     }
 
     async fn put(&self, ns: &str, id: &str, value: &V) -> Result<()> {
-        let key = Self::make_key(ns, id);
-        let mut data = self.data.write().map_err(|_| StorageError::LockPoisoned)?;
-        data.insert(key, value.clone());
+        let mut data = self.data.write().await;
+        data.insert(Self::make_key(ns, id), value.clone());
         Ok(())
     }
 
     async fn delete(&self, ns: &str, id: &str) -> Result<()> {
-        let key = Self::make_key(ns, id);
-        let mut data = self.data.write().map_err(|_| StorageError::LockPoisoned)?;
-        data.remove(&key);
+        let mut data = self.data.write().await;
+        data.remove(&Self::make_key(ns, id));
         Ok(())
     }
 
     async fn scan_prefix(&self, prefix: &str) -> Result<Vec<(String, V)>> {
-        let data = self.data.read().map_err(|_| StorageError::LockPoisoned)?;
+        let data = self.data.read().await;
         let results = data
             .range(prefix.to_owned()..)
             .take_while(|(k, _)| k.starts_with(prefix))
