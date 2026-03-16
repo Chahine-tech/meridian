@@ -78,10 +78,6 @@ meridian-server = { features = ["storage-redis"] }
 REDIS_URL=redis://localhost:6379
 ```
 
-<Note>
-`last_seq()` and `checkpoint_seq()` always return `0` in the Redis WAL — the WAL compactor uses them as hints only. Full production hardening (AtomicU64 caching) is planned.
-</Note>
-
 ---
 
 ## WAL replay and point-in-time recovery
