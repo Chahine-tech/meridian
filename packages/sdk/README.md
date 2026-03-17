@@ -5,9 +5,9 @@ TypeScript SDK for [Meridian](../README.md) — Effect-based, fully typed, msgpa
 ## Install
 
 ```bash
-bun add meridian-sdk effect msgpackr
+bun add meridian-sdk
 # or
-npm install meridian-sdk effect msgpackr
+npm install meridian-sdk
 ```
 
 ## Quick start
@@ -16,7 +16,6 @@ npm install meridian-sdk effect msgpackr
 import { Effect, Schema } from "effect";
 import { MeridianClient } from "meridian-sdk";
 
-// MeridianClient.create() parses + validates the token — returns Effect
 const client = await Effect.runPromise(
   MeridianClient.create({
     url: "http://localhost:3000",
@@ -41,6 +40,11 @@ const Cursor = Schema.Struct({ x: Schema.Number, y: Schema.Number });
 const room = client.presence("pr:room", Cursor);
 room.heartbeat({ x: 100, y: 200 }, 30_000);
 room.onChange(entries => console.log("online:", entries));
+
+// CRDTMap — composite document with named CRDT fields
+const doc = client.crdtmap("doc:settings");
+doc.lwwSet("theme", "dark");
+doc.incrementCounter("edits");
 
 // Close WebSocket when done
 client.close();
@@ -89,6 +93,7 @@ await Effect.runPromise(
 | `client.orset(id, schema?)` | `ORSetHandle<T>` | Optional |
 | `client.lwwregister(id, schema?)` | `LwwRegisterHandle<T>` | Optional |
 | `client.presence(id, schema?)` | `PresenceHandle<T>` | Optional |
+| `client.crdtmap(id)` | `CRDTMapHandle` | — |
 
 Without a schema, `T = unknown`. With a schema, incoming deltas are validated at runtime via `Schema.decodeUnknownSync`.
 
@@ -97,10 +102,10 @@ Without a schema, `T = unknown`. With a schema, incoming deltas are validated at
 All methods return `Effect<T, HttpError | NetworkError>`:
 
 ```ts
-client.http.getCrdt(ns, id)           // → Effect<CrdtGetResponse, ...>
-client.http.postOp(ns, id, op)        // → Effect<CrdtOpResponse, ...>
-client.http.syncCrdt(ns, id, sinceVc) // → Effect<CrdtGetResponse, ...>
-client.http.issueToken(ns, opts)      // → Effect<TokenIssueResponse, ...>
+client.http.getCrdt(ns, id)              // → Effect<CrdtGetResponse, ...>
+client.http.postOp(ns, id, op)           // → Effect<CrdtOpResponse, ...>
+client.http.syncCrdt(ns, id, sinceVc?)   // → Effect<CrdtGetResponse, ...>
+client.http.issueToken(ns, opts)         // → Effect<TokenIssueResponse, ...>
 ```
 
 ## Wire protocol
