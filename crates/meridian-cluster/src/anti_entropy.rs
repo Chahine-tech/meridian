@@ -50,10 +50,17 @@ pub trait AntiEntropyApplier: Send + Sync + 'static {
 /// This is the complement to push anti-entropy: instead of broadcasting our
 /// WAL to peers, we pull their WAL entries and apply them locally.
 ///
+/// On startup, `peer_seq` is seeded from `wal.checkpoint_seq()` — everything
+/// before the checkpoint was already compacted locally, so there is no need
+/// to re-pull it. This avoids replaying the full peer WAL history after a
+/// node restart while remaining correct (ops after the checkpoint that were
+/// missed will still be pulled).
+///
 /// Only available with the `transport-http` feature — Redis Pub/Sub is
 /// stateless and doesn't support WAL pull.
 #[cfg(feature = "transport-http")]
-pub async fn run_pull_anti_entropy<A, B>(
+pub async fn run_pull_anti_entropy<W, A, B>(
+    wal: Arc<W>,
     transport: Arc<HttpPushTransport>,
     applier: Arc<A>,
     broadcast: Arc<B>,
@@ -61,14 +68,22 @@ pub async fn run_pull_anti_entropy<A, B>(
     config: Arc<ClusterConfig>,
     cancel: CancellationToken,
 ) where
+    W: WalBackend,
     A: AntiEntropyApplier,
     B: LocalBroadcast,
 {
     use std::collections::HashMap;
 
     let interval = config.anti_entropy_interval;
-    // Track the last seq we pulled from each peer independently.
+
+    // Seed from the local WAL checkpoint — ops before this seq were already
+    // compacted locally, so we know we applied them. This prevents a full
+    // WAL replay from each peer on every node restart.
+    let checkpoint = wal.checkpoint_seq();
     let mut peer_seq: HashMap<String, u64> = HashMap::new();
+    for peer in transport.peers() {
+        peer_seq.insert(peer.to_string(), checkpoint);
+    }
 
     info!(
         node_id = %node_id,

@@ -115,13 +115,15 @@ impl ClusterHandle {
     /// Periodically pulls WAL entries from each peer and applies any ops
     /// this node missed while it was down or partitioned.
     #[cfg(feature = "transport-http")]
-    pub fn spawn_pull_anti_entropy<A, B>(
+    pub fn spawn_pull_anti_entropy<W, A, B>(
         &self,
+        wal: Arc<W>,
         transport: Arc<HttpPushTransport>,
         applier: Arc<A>,
         broadcast: Arc<B>,
         cancel: CancellationToken,
     ) where
+        W: WalBackend,
         A: AntiEntropyApplier,
         B: LocalBroadcast,
     {
@@ -129,6 +131,7 @@ impl ClusterHandle {
         let config = Arc::clone(&self.config);
 
         tokio::spawn(run_pull_anti_entropy(
+            wal,
             transport,
             applier,
             broadcast,

@@ -169,6 +169,7 @@ where
             // Pull anti-entropy: catch up from peers on restart (HTTP only).
             #[cfg(all(feature = "cluster-http", not(feature = "cluster")))]
             handle.spawn_pull_anti_entropy(
+                Arc::clone(&wal),
                 http_transport_ref,
                 Arc::clone(&applier),
                 Arc::clone(&subscriptions),
