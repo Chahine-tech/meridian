@@ -72,8 +72,25 @@ Resolves when the WebSocket reaches `CONNECTED` state. Useful in tests or when y
 
 Throws `Error: WsTransport: connect timeout` if the timeout elapses.
 
+## Offline queue
+
+Operations sent while disconnected are buffered automatically and flushed in order on reconnect — no configuration needed.
+
+```ts
+// Number of ops waiting to be sent
+client.pendingOpCount; // number
+
+// Subscribe to connection state changes (returns an unsubscribe function)
+const unsub = client.onStateChange(state => {
+  // state: "CONNECTED" | "DISCONNECTED" | "CONNECTING" | "CLOSING"
+});
+unsub();
+```
+
+The queue holds up to 500 ops. If the limit is reached, the oldest op is dropped to make room.
+
 ## Close
 
 ```ts
-client.close(); // gracefully closes the WebSocket, no reconnect
+client.close(); // gracefully closes the WebSocket, clears the pending queue
 ```

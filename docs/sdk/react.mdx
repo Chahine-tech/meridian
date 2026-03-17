@@ -15,21 +15,31 @@ bun add meridian-react meridian-sdk effect react
 
 ## Setup
 
-Wrap your app with `MeridianProvider`:
+Create a client and pass it to `MeridianProvider`:
 
 ```tsx
+import { Effect } from "effect";
+import { MeridianClient } from "meridian-sdk";
 import { MeridianProvider } from "meridian-react";
+
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "ws://localhost:3000",
+    namespace: "my-app",
+    token: process.env.MERIDIAN_TOKEN!,
+  })
+);
 
 function App() {
   return (
-    <MeridianProvider url="ws://localhost:3000" token={token}>
+    <MeridianProvider client={client}>
       <YourApp />
     </MeridianProvider>
   );
 }
 ```
 
-The provider opens a single WebSocket connection and reconnects automatically. All hooks in the tree share the same client instance.
+The provider closes the client automatically on unmount. All hooks in the tree share the same connection.
 
 ## Hooks
 
@@ -94,7 +104,45 @@ function Cursors() {
 
 If `data` is omitted, the hook subscribes without sending a heartbeat (observe-only).
 
+### `useCRDTMap`
+
+```tsx
+const { value, lwwSet, incrementCounter } = useCRDTMap("doc:meta");
+
+lwwSet("theme", "dark");
+incrementCounter("views");
+```
+
+### `usePendingOpCount`
+
+Returns the number of operations buffered locally, waiting to be sent on reconnect. Use it to build a "syncing" indicator:
+
+```tsx
+import { usePendingOpCount } from "meridian-react";
+
+function SyncIndicator() {
+  const pending = usePendingOpCount();
+  if (pending === 0) return null;
+  return <span>{pending} change{pending > 1 ? "s" : ""} pending...</span>;
+}
+```
+
+The count is non-zero while disconnected with pending writes, and drops to zero once the connection is restored and all ops are flushed.
+
+### `useMeridianClient`
+
+Access the underlying `MeridianClient` directly:
+
+```tsx
+import { useMeridianClient } from "meridian-react";
+
+function DebugPanel() {
+  const client = useMeridianClient();
+  return <pre>{JSON.stringify(client.claims)}</pre>;
+}
+```
+
 ## Requirements
 
 - React 19+
-- `meridian-sdk` 0.2+
+- `meridian-sdk` 0.3+

@@ -288,6 +288,19 @@ export class MeridianClient {
     return this.transport.waitForConnected(timeoutMs);
   }
 
+  /** Number of ops buffered locally, waiting to be sent on reconnect. */
+  get pendingOpCount(): number {
+    return this.transport.pendingOpCount;
+  }
+
+  /**
+   * Subscribe to connection state changes. Returns an unsubscribe function.
+   * Useful for building "syncing" indicators in the UI.
+   */
+  onStateChange(listener: (state: import("./transport/websocket.js").WsState) => void): () => void {
+    return this.transport.onStateChange(listener);
+  }
+
   /**
    * Closes the underlying WebSocket connection.
    *
