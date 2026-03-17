@@ -58,44 +58,13 @@ Each node connects to the same Redis instance. Deltas are published to `meridian
 
 ### Example: 3-node Docker Compose
 
-```yaml
-version: "3.9"
-services:
-  redis:
-    image: redis:7-alpine
+A ready-to-use compose file is included in the repository:
 
-  meridian-1:
-    image: ghcr.io/your-org/meridian:latest
-    build:
-      args:
-        FEATURES: cluster
-    environment:
-      REDIS_URL: redis://redis:6379
-      MERIDIAN_BIND: "0.0.0.0:3000"
-      MERIDIAN_NODE_ID: "1"
-    ports:
-      - "3000:3000"
-
-  meridian-2:
-    image: ghcr.io/your-org/meridian:latest
-    environment:
-      REDIS_URL: redis://redis:6379
-      MERIDIAN_BIND: "0.0.0.0:3000"
-      MERIDIAN_NODE_ID: "2"
-    ports:
-      - "3001:3000"
-
-  meridian-3:
-    image: ghcr.io/your-org/meridian:latest
-    environment:
-      REDIS_URL: redis://redis:6379
-      MERIDIAN_BIND: "0.0.0.0:3000"
-      MERIDIAN_NODE_ID: "3"
-    ports:
-      - "3002:3000"
+```bash
+MERIDIAN_SIGNING_KEY=your-secret docker compose -f docker-compose.cluster.yml up
 ```
 
-Point your load balancer at ports 3000–3002. Any node can serve any client.
+This starts 3 Meridian nodes (ports 3000–3002) and a Redis instance. All nodes share the same signing key and connect to the same Redis for fan-out. Point your load balancer at ports 3000–3002 — any node can serve any client.
 
 ---
 

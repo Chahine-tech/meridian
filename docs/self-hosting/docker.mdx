@@ -36,6 +36,16 @@ docker run -d \
   ghcr.io/Chahine-tech/meridian:latest
 ```
 
+## Multinode cluster
+
+To run a 3-node cluster with Redis fan-out, use the dedicated compose file:
+
+```bash
+MERIDIAN_SIGNING_KEY=your-secret docker compose -f docker-compose.cluster.yml up -d
+```
+
+See [Clustering](/self-hosting/clustering) for the full setup guide.
+
 ## From source
 
 ```bash
