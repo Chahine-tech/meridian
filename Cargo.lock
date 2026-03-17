@@ -75,6 +75,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-stream"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b5a71a6f37880a80d1d7f19efd781e4b5de42c88f0722cc13bcb6cc2cfe8476"
+dependencies = [
+ "async-stream-impl",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "async-stream-impl"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7c24de15d275a1ecfd47a380fb4d5ec9bfe0933f309ed5e705b775596a3574d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1582,18 +1604,43 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "meridian-cluster"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum",
+ "bytes",
+ "futures",
+ "meridian-storage",
+ "redis 0.27.6",
+ "reqwest",
+ "rmp-serde",
+ "serde",
+ "serde_bytes",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "meridian-server"
 version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
  "base64 0.22.1",
+ "bytes",
  "criterion",
  "dashmap",
  "ed25519-dalek",
  "hex",
  "hmac",
  "http-body-util",
+ "meridian-cluster",
  "meridian-storage",
  "metrics",
  "metrics-exporter-prometheus",
@@ -1620,7 +1667,7 @@ dependencies = [
 name = "meridian-storage"
 version = "0.1.0"
 dependencies = [
- "redis",
+ "redis 0.28.2",
  "rmp-serde",
  "serde",
  "serde_bytes",
@@ -2231,6 +2278,30 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "redis"
+version = "0.27.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09d8f99a4090c89cc489a94833c901ead69bfbf3877b4867d5482e321ee875bc"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "bytes",
+ "combine",
+ "futures-util",
+ "itertools",
+ "itoa",
+ "num-bigint",
+ "percent-encoding",
+ "pin-project-lite",
+ "ryu",
+ "sha1_smol",
+ "socket2 0.5.10",
+ "tokio",
+ "tokio-util",
+ "url",
 ]
 
 [[package]]

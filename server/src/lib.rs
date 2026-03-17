@@ -1,5 +1,7 @@
 pub mod api;
 pub mod auth;
+#[cfg(feature = "cluster")]
+pub mod cluster;
 pub mod crdt;
 pub mod metrics;
 pub mod namespace;
@@ -26,6 +28,9 @@ pub struct AppState<S: CrdtStore, W: WalBackend> {
     pub signer: Arc<TokenSigner>,
     /// `None` when `MERIDIAN_WEBHOOK_URL` is not set.
     pub webhooks: Option<WebhookDispatcher>,
+    /// `None` when `--features cluster` is not enabled or no cluster config found.
+    #[cfg(feature = "cluster")]
+    pub cluster: Option<Arc<meridian_cluster::ClusterHandle>>,
 }
 
 // Manual Clone impl — Arc<S> and Arc<W> are always Clone regardless of S/W bounds.
@@ -37,6 +42,8 @@ impl<S: CrdtStore, W: WalBackend> Clone for AppState<S, W> {
             subscriptions: Arc::clone(&self.subscriptions),
             signer: Arc::clone(&self.signer),
             webhooks: self.webhooks.clone(),
+            #[cfg(feature = "cluster")]
+            cluster: self.cluster.clone(),
         }
     }
 }
@@ -64,6 +71,11 @@ impl<S: CrdtStore, W: WalBackend> AppStateExt for AppState<S, W> {
     fn webhooks(&self) -> Option<&WebhookDispatcher> {
         self.webhooks.as_ref()
     }
+
+    #[cfg(feature = "cluster")]
+    fn cluster(&self) -> Option<&Arc<meridian_cluster::ClusterHandle>> {
+        self.cluster.as_ref()
+    }
 }
 
 impl<S: CrdtStore, W: WalBackend> WsState for AppState<S, W> {
@@ -79,5 +91,10 @@ impl<S: CrdtStore, W: WalBackend> WsState for AppState<S, W> {
 
     fn webhooks(&self) -> Option<&WebhookDispatcher> {
         self.webhooks.as_ref()
+    }
+
+    #[cfg(feature = "cluster")]
+    fn cluster(&self) -> Option<&Arc<meridian_cluster::ClusterHandle>> {
+        self.cluster.as_ref()
     }
 }

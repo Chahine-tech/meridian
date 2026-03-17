@@ -44,6 +44,15 @@ impl Config {
             redis_url: std::env::var("REDIS_URL").ok(),
         }
     }
+
+    #[cfg(feature = "cluster")]
+    fn bind_port(&self) -> u16 {
+        self.bind
+            .rsplit(':')
+            .next()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(3000)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -62,9 +71,9 @@ where
 {
     // ----- Auth -----
     let signer = match config.signing_key_hex {
-        Some(hex) => {
+        Some(ref hex) => {
             info!("using signing key from MERIDIAN_SIGNING_KEY");
-            Arc::new(TokenSigner::from_hex(&hex)?)
+            Arc::new(TokenSigner::from_hex(hex)?)
         }
         None => {
             tracing::warn!("MERIDIAN_SIGNING_KEY not set — generating ephemeral key (dev mode)");
@@ -92,12 +101,50 @@ where
 
     // ----- Shared state -----
     let subscriptions = Arc::new(SubscriptionManager::new());
+
+    // ----- Cluster (optional) -----
+    #[cfg(feature = "cluster")]
+    let cluster = {
+        use meridian_cluster::{ClusterConfig, ClusterHandle, ClusterTransport, RedisTransport};
+        use crate::cluster::anti_entropy::StoreApplier;
+
+        if let Some(cfg) = ClusterConfig::from_env(config.bind_port()) {
+            let node_id = cfg.node_id;
+            let transport: Arc<dyn ClusterTransport> = match &cfg.redis_url {
+                Some(url) => {
+                    info!(node_id = %node_id, "cluster enabled — Redis Pub/Sub transport");
+                    Arc::new(RedisTransport::new(url, node_id).await?)
+                }
+                None => {
+                    anyhow::bail!("cluster requires REDIS_URL for inter-node transport");
+                }
+            };
+            let handle = Arc::new(ClusterHandle::new(cfg, transport));
+            handle.spawn_receiver(Arc::clone(&subscriptions), cancel.clone());
+
+            let applier = Arc::new(StoreApplier::new(Arc::clone(&store)));
+            handle.spawn_anti_entropy(
+                Arc::clone(&wal),
+                applier,
+                Arc::clone(&subscriptions),
+                cancel.clone(),
+            );
+
+            Some(handle)
+        } else {
+            info!("cluster not configured — running in single-node mode");
+            None
+        }
+    };
+
     let state = AppState {
         store: Arc::clone(&store),
         wal: Arc::clone(&wal),
         subscriptions: Arc::clone(&subscriptions),
         signer: Arc::clone(&signer),
         webhooks,
+        #[cfg(feature = "cluster")]
+        cluster,
     };
 
     // ----- Background tasks -----

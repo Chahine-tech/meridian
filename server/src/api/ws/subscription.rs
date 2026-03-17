@@ -78,6 +78,18 @@ impl Default for SubscriptionManager {
     }
 }
 
+#[cfg(feature = "cluster")]
+impl meridian_cluster::LocalBroadcast for SubscriptionManager {
+    fn publish_delta(&self, namespace: &str, crdt_id: &str, delta_bytes: bytes::Bytes) {
+        use serde_bytes::ByteBuf;
+        let msg = Arc::new(ServerMsg::Delta {
+            crdt_id: crdt_id.to_owned(),
+            delta_bytes: ByteBuf::from(delta_bytes.to_vec()),
+        });
+        self.publish(namespace, msg);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

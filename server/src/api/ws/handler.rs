@@ -34,6 +34,11 @@ pub trait WsState: Clone + Send + Sync + 'static {
     fn store(&self) -> &Self::S;
     fn subscriptions(&self) -> &Arc<SubscriptionManager>;
     fn webhooks(&self) -> Option<&WebhookDispatcher>;
+
+    #[cfg(feature = "cluster")]
+    fn cluster(&self) -> Option<&Arc<meridian_cluster::ClusterHandle>> {
+        None
+    }
 }
 
 use crate::auth::claims::TokenClaims;
@@ -202,9 +207,15 @@ async fn handle_client_message<S: WsState>(
                     // Broadcast delta to all namespace subscribers (including this client).
                     let delta_msg = Arc::new(ServerMsg::Delta {
                         crdt_id: crdt_id.clone(),
-                        delta_bytes: delta_bytes.into(),
+                        delta_bytes: delta_bytes.clone().into(),
                     });
                     state.subscriptions().publish(ns, delta_msg);
+
+                    // Fan-out delta to peer nodes via cluster transport (best-effort).
+                    #[cfg(feature = "cluster")]
+                    if let Some(cluster) = state.cluster() {
+                        cluster.on_delta(ns, &crdt_id, bytes::Bytes::from(delta_bytes)).await;
+                    }
 
                     let ack = ServerMsg::Ack { seq: *seq };
                     if let Ok(b) = ack.to_msgpack() {
