@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Chahine-tech/meridian/actions"><img src="https://github.com/Chahine-tech/meridian/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024" />
-  <img src="https://img.shields.io/badge/tests-135-brightgreen" alt="135 tests" />
+  <img src="https://img.shields.io/badge/tests-138-brightgreen" alt="138 tests" />
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
 </p>
 
@@ -105,13 +105,15 @@ client.close();
 
 - **Real-time sync** over WebSocket with automatic reconnection
 - **6 CRDT types** covering the most common collaborative patterns
+- **Multinode clustering** — horizontal scaling with Redis Pub/Sub fan-out or HTTP push transport; anti-entropy gossip for convergence after partitions (`--features cluster` / `--features cluster-http`)
+- **Pluggable storage** — sled (default), PostgreSQL, Redis, in-memory; WAL with point-in-time recovery
 - **Scoped permissions** — token-level read/write access with glob patterns (`allowed:*`)
 - **Rate limiting** — 100 req/s per token, sliding window
 - **Webhooks** — `POST` to your backend on every op, HMAC-SHA256 signed
 - **Prometheus metrics** — ops counter, active WS connections, WAL entries (`GET /metrics`)
 - **WAL compaction** — automatic background truncation
 - **History API** — audit log per CRDT (`GET /v1/namespaces/:ns/crdts/:id/history`)
-- **135 tests** — unit, property-based, and integration
+- **138 tests** — unit, property-based, and integration
 
 ## Configuration
 
@@ -122,9 +124,7 @@ client.close();
 | `MERIDIAN_SIGNING_KEY` | *(random)* | 32-byte hex ed25519 seed |
 | `MERIDIAN_WEBHOOK_URL` | *(unset)* | Webhook endpoint URL |
 | `MERIDIAN_WEBHOOK_SECRET` | *(unset)* | HMAC-SHA256 signing secret |
-
-## Stack
-
-**Server:** Rust · tokio · axum · sled · ed25519 · proptest
-
-**SDK:** TypeScript · Effect 3 · msgpackr · Bun
+| `REDIS_URL` | *(unset)* | Redis URL — enables cluster mode (`--features cluster`) |
+| `MERIDIAN_PEERS` | *(unset)* | Comma-separated peer URLs — enables HTTP cluster mode (`--features cluster-http`) |
+| `MERIDIAN_NODE_ID` | *(auto)* | Unique node ID — auto-derived from hostname+port if unset |
+| `MERIDIAN_ANTI_ENTROPY_SECS` | `30` | Gossip interval in seconds |
