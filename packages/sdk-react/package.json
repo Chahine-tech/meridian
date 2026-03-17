@@ -30,5 +30,15 @@
     "meridian-sdk": "^0.3.0",
     "react": "^19.0.0",
     "typescript": ">=5.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Chahine-tech/meridian.git",
+    "directory": "packages/sdk-react"
+  },
+  "homepage": "https://github.com/Chahine-tech/meridian#readme",
+  "bugs": {
+    "url": "https://github.com/Chahine-tech/meridian/issues"
   }
 }
