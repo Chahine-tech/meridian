@@ -37,7 +37,7 @@ impl SledWal {
             .keys()
             .next_back()
             .transpose()?
-            .map(|k| Self::key_to_seq(&k))
+            .and_then(|k| Self::key_to_seq(&k))
             .unwrap_or(0);
 
         let checkpoint = tree
@@ -58,9 +58,9 @@ impl SledWal {
         seq.to_be_bytes()
     }
 
-    fn key_to_seq(key: &[u8]) -> u64 {
-        let arr: [u8; 8] = key.try_into().unwrap_or([0u8; 8]);
-        u64::from_be_bytes(arr)
+    fn key_to_seq(key: &[u8]) -> Option<u64> {
+        let arr: [u8; 8] = key.try_into().ok()?;
+        Some(u64::from_be_bytes(arr))
     }
 }
 
@@ -91,12 +91,14 @@ impl WalBackend for SledWal {
         let mut entries = Vec::new();
 
         for kv in self.tree.range(start..) {
-            let (_, v) = kv?;
+            let (k, v) = kv?;
+            // Skip non-seq keys (e.g. b"_checkpoint") — they sort before u64 keys.
+            if Self::key_to_seq(&k).is_none() {
+                continue;
+            }
             match rmp_serde::decode::from_slice::<WalEntry>(&v) {
                 Ok(entry) => entries.push(entry),
-                Err(e) => {
-                    warn!(error = %e, "skipping corrupt WAL entry");
-                }
+                Err(e) => warn!(error = %e, "skipping corrupt WAL entry"),
             }
         }
 
@@ -108,7 +110,10 @@ impl WalBackend for SledWal {
         let mut entries = Vec::new();
 
         for kv in self.tree.range(start..) {
-            let (_, v) = kv?;
+            let (k, v) = kv?;
+            if Self::key_to_seq(&k).is_none() {
+                continue;
+            }
             match rmp_serde::decode::from_slice::<WalEntry>(&v) {
                 Ok(entry) if entry.timestamp_ms <= until_ms => entries.push(entry),
                 Ok(_) => break, // entries are ordered by seq ≈ time

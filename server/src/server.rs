@@ -140,14 +140,17 @@ where
                     .unwrap_or_else(|_| "0.0.0.0:3001".into());
                 let internal_router = t.router();
                 let cancel_clone = cancel.clone();
+                // Bind before spawning so startup failures surface immediately.
+                let internal_listener = TcpListener::bind(&internal_bind).await
+                    .map_err(|e| anyhow::anyhow!("failed to bind internal cluster port {internal_bind}: {e}"))?;
+                info!(addr = internal_bind, "cluster internal API listening");
                 tokio::spawn(async move {
-                    let listener = TcpListener::bind(&internal_bind).await
-                        .expect("failed to bind internal cluster port");
-                    info!(addr = internal_bind, "cluster internal API listening");
-                    axum::serve(listener, internal_router)
+                    if let Err(e) = axum::serve(internal_listener, internal_router)
                         .with_graceful_shutdown(async move { cancel_clone.cancelled().await })
                         .await
-                        .expect("internal cluster server failed");
+                    {
+                        tracing::error!(error = %e, "internal cluster server failed");
+                    }
                 });
 
                 let transport_dyn: Arc<dyn ClusterTransport> = t.clone();
@@ -219,15 +222,20 @@ where
 
     axum::serve(listener, router)
         .with_graceful_shutdown(async move {
-            tokio::signal::ctrl_c()
-                .await
-                .expect("failed to install Ctrl-C handler");
+            // ctrl_c() only fails if the platform doesn't support SIGINT — treat
+            // that as a non-fatal condition and rely on SIGTERM / process kill.
+            if let Err(e) = tokio::signal::ctrl_c().await {
+                tracing::warn!(error = %e, "failed to install Ctrl-C handler — server will not shut down gracefully on SIGINT");
+            }
             info!("shutdown signal received");
             cancel.cancel();
         })
         .await?;
 
-    let _ = tokio::join!(gc_handle, flush_handle, compact_handle);
+    let (gc, flush, compact) = tokio::join!(gc_handle, flush_handle, compact_handle);
+    if let Err(e) = gc      { tracing::error!(error = %e, "presence GC task panicked"); }
+    if let Err(e) = flush   { tracing::error!(error = %e, "snapshot flusher task panicked"); }
+    if let Err(e) = compact { tracing::error!(error = %e, "WAL compactor task panicked"); }
 
     info!("Meridian stopped cleanly");
     Ok(())
