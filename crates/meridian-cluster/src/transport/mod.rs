@@ -68,3 +68,6 @@ pub trait ClusterTransport: Send + Sync + 'static {
 
 #[cfg(feature = "transport-redis")]
 pub mod redis_pubsub;
+
+#[cfg(feature = "transport-http")]
+pub mod http_push;

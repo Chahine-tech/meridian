@@ -7,7 +7,7 @@ description = "Multinode clustering for Meridian — Redis Pub/Sub fan-out + ant
 [features]
 default = []
 transport-redis = ["dep:redis"]
-transport-http = []
+transport-http = ["dep:reqwest", "dep:axum"]
 
 [dependencies]
 # Async runtime
@@ -23,11 +23,9 @@ bytes = "1"
 # Redis transport (optional)
 redis = { version = "0.27", features = ["tokio-comp", "aio"], optional = true }
 
-# HTTP transport
-reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls"] }
-
-# Web framework (internal API)
-axum = { version = "0.8", features = ["macros"] }
+# HTTP transport (optional)
+reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls"], optional = true }
+axum = { version = "0.8", features = ["macros"], optional = true }
 
 # Utilities
 thiserror = "2"

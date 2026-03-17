@@ -9,10 +9,10 @@ pub struct NodeId(pub u64);
 
 impl NodeId {
     pub fn from_env_or_hostname(port: u16) -> Self {
-        if let Ok(val) = std::env::var("MERIDIAN_NODE_ID") {
-            if let Ok(id) = val.parse::<u64>() {
-                return Self(id);
-            }
+        if let Ok(val) = std::env::var("MERIDIAN_NODE_ID")
+            && let Ok(id) = val.parse::<u64>()
+        {
+            return Self(id);
         }
 
         let hostname = hostname();

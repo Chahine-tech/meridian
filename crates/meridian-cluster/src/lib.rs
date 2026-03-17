@@ -14,3 +14,6 @@ pub use transport::{ClusterTransport, DeltaEnvelope};
 
 #[cfg(feature = "transport-redis")]
 pub use transport::redis_pubsub::RedisTransport;
+
+#[cfg(feature = "transport-http")]
+pub use transport::http_push::HttpPushTransport;

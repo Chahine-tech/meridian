@@ -18,6 +18,7 @@ storage-memory = ["meridian-storage/storage-memory"]
 storage-postgres = ["meridian-storage/storage-postgres"]
 storage-redis = ["meridian-storage/storage-redis"]
 cluster = ["dep:meridian-cluster", "meridian-cluster/transport-redis"]
+cluster-http = ["dep:meridian-cluster", "meridian-cluster/transport-http"]
 
 [dependencies]
 # Storage abstraction layer

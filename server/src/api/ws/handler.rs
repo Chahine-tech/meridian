@@ -35,7 +35,7 @@ pub trait WsState: Clone + Send + Sync + 'static {
     fn subscriptions(&self) -> &Arc<SubscriptionManager>;
     fn webhooks(&self) -> Option<&WebhookDispatcher>;
 
-    #[cfg(feature = "cluster")]
+    #[cfg(any(feature = "cluster", feature = "cluster-http"))]
     fn cluster(&self) -> Option<&Arc<meridian_cluster::ClusterHandle>> {
         None
     }
@@ -212,7 +212,7 @@ async fn handle_client_message<S: WsState>(
                     state.subscriptions().publish(ns, delta_msg);
 
                     // Fan-out delta to peer nodes via cluster transport (best-effort).
-                    #[cfg(feature = "cluster")]
+                    #[cfg(any(feature = "cluster", feature = "cluster-http"))]
                     if let Some(cluster) = state.cluster() {
                         cluster.on_delta(ns, &crdt_id, bytes::Bytes::from(delta_bytes)).await;
                     }

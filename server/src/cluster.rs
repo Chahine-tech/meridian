@@ -2,7 +2,7 @@
 ///
 /// Bridges the cluster crate (which knows only raw bytes) with the server's
 /// CRDT registry (`apply_op`, `CrdtOp`, `CrdtValue`).
-#[cfg(feature = "cluster")]
+#[cfg(any(feature = "cluster", feature = "cluster-http"))]
 pub mod anti_entropy {
     use std::sync::Arc;
 
