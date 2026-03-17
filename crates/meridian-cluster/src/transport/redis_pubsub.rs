@@ -67,12 +67,16 @@ impl RedisTransport {
         let tx = self.inner.tx.clone();
 
         tokio::spawn(async move {
+            let mut backoff = std::time::Duration::from_secs(1);
+            const MAX_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
+
             loop {
                 match run_subscriber(&client, node_id, &tx).await {
                     Ok(()) => break, // clean shutdown (tx dropped)
                     Err(e) => {
-                        warn!(error = %e, "cluster Redis subscriber disconnected, reconnecting in 1s");
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        warn!(error = %e, backoff_secs = backoff.as_secs(), "cluster Redis subscriber disconnected, reconnecting");
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(MAX_BACKOFF);
                     }
                 }
             }

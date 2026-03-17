@@ -57,7 +57,10 @@ impl HttpPushTransport {
             inner: Arc::new(Inner {
                 peers,
                 node_id,
-                client: reqwest::Client::new(),
+                client: reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(5))
+                    .build()
+                    .expect("failed to build reqwest client"),
                 tx,
             }),
         }
@@ -132,7 +135,7 @@ impl ClusterTransport for HttpPushTransport {
                 .client
                 .post(url.as_str())
                 .header("Content-Type", "application/msgpack")
-                .body(payload.clone())
+                .body(Bytes::copy_from_slice(&payload))
                 .send()
                 .await
             {
