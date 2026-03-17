@@ -136,6 +136,12 @@ pub async fn post_op<S: AppStateExt>(
         });
         state.subscriptions().publish(&ns, msg);
 
+        // Fan-out delta to peer nodes via cluster transport (best-effort).
+        #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+        if let Some(cluster) = state.cluster() {
+            cluster.on_delta(&ns, &id, bytes::Bytes::from(bytes.clone())).await;
+        }
+
         axum::response::Response::builder()
             .status(StatusCode::OK)
             .header("Content-Type", "application/msgpack")

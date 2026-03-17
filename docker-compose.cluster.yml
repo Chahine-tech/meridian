@@ -1,0 +1,80 @@
+# Multinode cluster setup — Redis Pub/Sub transport (3 nodes + Redis).
+#
+# Usage:
+#   docker compose -f docker-compose.cluster.yml up
+#
+# Set MERIDIAN_SIGNING_KEY to the same value on all nodes (shared secret).
+# All nodes expose their public API on different host ports (3000, 3001, 3002).
+# Put an L4/L7 load balancer in front of them for production.
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  meridian-1:
+    build:
+      context: .
+      args:
+        FEATURES: cluster
+    ports:
+      - "3000:3000"
+    volumes:
+      - meridian_data_1:/data
+    environment:
+      MERIDIAN_SIGNING_KEY: ${MERIDIAN_SIGNING_KEY:?MERIDIAN_SIGNING_KEY is required}
+      REDIS_URL: redis://redis:6379
+      MERIDIAN_NODE_ID: "1"
+      MERIDIAN_BIND: "0.0.0.0:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  meridian-2:
+    build:
+      context: .
+      args:
+        FEATURES: cluster
+    ports:
+      - "3001:3000"
+    volumes:
+      - meridian_data_2:/data
+    environment:
+      MERIDIAN_SIGNING_KEY: ${MERIDIAN_SIGNING_KEY:?MERIDIAN_SIGNING_KEY is required}
+      REDIS_URL: redis://redis:6379
+      MERIDIAN_NODE_ID: "2"
+      MERIDIAN_BIND: "0.0.0.0:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  meridian-3:
+    build:
+      context: .
+      args:
+        FEATURES: cluster
+    ports:
+      - "3002:3000"
+    volumes:
+      - meridian_data_3:/data
+    environment:
+      MERIDIAN_SIGNING_KEY: ${MERIDIAN_SIGNING_KEY:?MERIDIAN_SIGNING_KEY is required}
+      REDIS_URL: redis://redis:6379
+      MERIDIAN_NODE_ID: "3"
+      MERIDIAN_BIND: "0.0.0.0:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  meridian_data_1:
+  meridian_data_2:
+  meridian_data_3:

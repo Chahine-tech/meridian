@@ -50,6 +50,8 @@ fn build_test_app() -> (axum::Router, Arc<TokenSigner>) {
         subscriptions: Arc::new(SubscriptionManager::new()),
         signer: Arc::clone(&signer),
         webhooks: None,
+        #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+        cluster: None,
     };
     let router = build_router(state, auth_state)
         .layer(axum::extract::Extension(prometheus_handle()));

@@ -21,8 +21,17 @@ jobs:
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: clippy (cluster features)
+        run: cargo clippy --all-targets --features cluster -- -D warnings
+
+      - name: clippy (cluster-http features)
+        run: cargo clippy --all-targets --features cluster-http -- -D warnings
+
       - name: test
         run: cargo test
+
+      - name: test (cluster features)
+        run: cargo test --features cluster
 
   sdk:
     name: SDK

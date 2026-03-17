@@ -17,4 +17,10 @@ pub trait AppStateExt: Clone + Send + Sync + 'static {
     fn signer(&self) -> &Arc<TokenSigner>;
     fn wal(&self) -> &Arc<Self::W>;
     fn webhooks(&self) -> Option<&WebhookDispatcher>;
+
+    /// Returns the cluster handle if clustering is enabled.
+    #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+    fn cluster(&self) -> Option<&Arc<meridian_cluster::ClusterHandle>> {
+        None
+    }
 }
