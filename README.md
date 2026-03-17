@@ -5,7 +5,8 @@
 
 <p align="center">
   Self-hosted real-time CRDT sync server.<br/>
-  Open-source alternative to Liveblocks and PartyKit — no vendor lock-in, no merge conflicts.
+  Open-source alternative to Liveblocks and PartyKit — no vendor lock-in, no merge conflicts.<br/>
+  <sub>Built on <a href="https://effect.website">Effect TS</a> — type-safe errors, composable async, runtime schema validation.</sub>
 </p>
 
 <p align="center">
@@ -39,16 +40,14 @@ curl -X POST http://localhost:3000/v1/namespaces/my-room/tokens \
 ### React
 
 ```tsx
+import { Effect } from "effect";
+import { MeridianClient } from "meridian-sdk";
 import { MeridianProvider, useGCounter, usePresence } from "meridian-react";
 import { Schema } from "effect";
 
-function App() {
-  return (
-    <MeridianProvider url="ws://localhost:3000" token={token}>
-      <Room />
-    </MeridianProvider>
-  );
-}
+const client = await Effect.runPromise(
+  MeridianClient.create({ url: "http://localhost:3000", namespace: "my-room", token })
+);
 
 const CursorSchema = Schema.Struct({ x: Schema.Number, y: Schema.Number });
 
@@ -56,27 +55,44 @@ function Room() {
   const { value, increment } = useGCounter("gc:views");
   const { online } = usePresence("pr:cursors", {
     schema: CursorSchema,
-    data: { x: mouseX, y: mouseY },
+    data: { x: mouseX, y: mouseY }, // auto-heartbeat on data change
     ttlMs: 5_000,
   });
 
-  return <p>{value} views · {online.length} online</p>;
+  return <p>{value} views · {online.length} cursors live</p>;
+}
+
+function App() {
+  return (
+    <MeridianProvider client={client}>
+      <Room />
+    </MeridianProvider>
+  );
 }
 ```
 
 ### TypeScript (framework-agnostic)
 
+The SDK exposes a simple imperative API on top of an Effect-based core — use `runPromise` to bridge into your existing async code, or compose with `Effect.gen` for full type-safe pipelines.
+
 ```ts
 import { MeridianClient } from "meridian-sdk";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 
 const client = await Effect.runPromise(
   MeridianClient.create({ url: "http://localhost:3000", namespace: "my-room", token })
 );
 
+// Counters, registers, sets — all conflict-free
 const views = client.gcounter("gc:views");
 views.increment(1);
 views.onChange(v => console.log("views:", v.total));
+
+// Live cursors — schema-validated at runtime
+const CursorSchema = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+const cursors = client.presence("pr:cursors", CursorSchema);
+cursors.heartbeat({ x: 120, y: 80 }, 5_000);
+cursors.onChange(users => console.log("live cursors:", users));
 
 client.close();
 ```
