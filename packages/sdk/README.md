@@ -97,6 +97,23 @@ await Effect.runPromise(
 
 Without a schema, `T = unknown`. With a schema, incoming deltas are validated at runtime via `Schema.decodeUnknownSync`.
 
+### Offline queue
+
+Operations sent while disconnected are buffered automatically and flushed in order on reconnect. No configuration needed — it works transparently for all CRDT handles.
+
+```ts
+// Check how many ops are pending (e.g. for a UI indicator)
+client.pendingOpCount; // number
+
+// Subscribe to connection state changes
+const unsub = client.onStateChange(state => {
+  console.log("connection state:", state); // "CONNECTED" | "DISCONNECTED" | "CONNECTING" | "CLOSING"
+});
+unsub(); // unsubscribe
+```
+
+The queue holds up to 500 ops. If the limit is reached, the oldest op is dropped to make room for the newest.
+
 ### HTTP client (`client.http`)
 
 All methods return `Effect<T, HttpError | NetworkError>`:

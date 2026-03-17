@@ -7,6 +7,7 @@ import {
   BACKOFF_MULTIPLIER,
   JITTER_MULTIPLIER,
   DEFAULT_TIMEOUT_MS,
+  OFFLINE_QUEUE_MAX,
 } from "../constants.js";
 
 export type WsState =
@@ -34,6 +35,7 @@ export class WsTransport {
   private closed = false;
 
   private readonly subscriptions = new Map<string, VectorClock>();
+  private readonly pendingOps: Parameters<typeof encodeClientMsg>[0][] = [];
 
   constructor(config: WsTransportConfig) {
     this.config = config;
@@ -48,6 +50,7 @@ export class WsTransport {
 
   close(): void {
     this.closed = true;
+    this.pendingOps.length = 0;
     this.clearReconnectTimer();
     this.transitionTo("CLOSING");
     this.ws?.close(1000, "client close");
@@ -66,9 +69,36 @@ export class WsTransport {
 
   send(msg: Parameters<typeof encodeClientMsg>[0]): void {
     if (this.state !== "CONNECTED" || this.ws === null) {
-      throw new Error("WsTransport: not connected");
+      if (this.pendingOps.length >= OFFLINE_QUEUE_MAX) {
+        this.pendingOps.shift(); // drop oldest to make room
+      }
+      this.pendingOps.push(msg);
+      return;
     }
     this.ws.send(encodeClientMsg(msg));
+  }
+
+  get pendingOpCount(): number {
+    return this.pendingOps.length;
+  }
+
+  /**
+   * Subscribe to connection state changes. Returns an unsubscribe function.
+   * Compatible with React's `useSyncExternalStore` subscribe parameter.
+   */
+  onStateChange(listener: (state: WsState) => void): () => void {
+    const prev = this.config.onStateChange;
+    this.config.onStateChange = (s) => {
+      prev?.(s);
+      listener(s);
+    };
+    return () => {
+      if (prev !== undefined) {
+        this.config.onStateChange = prev;
+      } else {
+        delete (this.config as Partial<WsTransportConfig>).onStateChange;
+      }
+    };
   }
 
   get currentState(): WsState {
@@ -167,6 +197,20 @@ export class WsTransport {
   private resubscribeAll(): void {
     for (const [crdtId, vc] of this.subscriptions) {
       this.sendSubscribe(crdtId, vc);
+    }
+    this.flushPendingOps();
+  }
+
+  private flushPendingOps(): void {
+    const ops = this.pendingOps.splice(0);
+    for (let i = 0; i < ops.length; i++) {
+      try {
+        this.ws!.send(encodeClientMsg(ops[i]!));
+      } catch {
+        // WebSocket closed between open and flush — re-queue remaining ops.
+        this.pendingOps.unshift(...ops.slice(i));
+        break;
+      }
     }
   }
 

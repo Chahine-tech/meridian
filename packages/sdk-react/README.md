@@ -108,6 +108,20 @@ lwwSet("theme", "dark");
 incrementCounter("views");
 ```
 
+### `usePendingOpCount`
+
+Returns the number of operations buffered locally, waiting to be sent on reconnect. Useful for building a "syncing" or "offline" indicator.
+
+```tsx
+import { usePendingOpCount } from "meridian-react";
+
+function SyncIndicator() {
+  const pending = usePendingOpCount();
+  if (pending === 0) return null;
+  return <span>{pending} change{pending > 1 ? "s" : ""} pending...</span>;
+}
+```
+
 ### `useMeridianClient`
 
 Access the underlying `MeridianClient` directly when needed:
