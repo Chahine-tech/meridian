@@ -40,4 +40,5 @@ serde_bytes = "0.11"
 meridian-storage = { path = "../meridian-storage", default-features = false }
 
 [dev-dependencies]
-tokio = { version = "1.45", features = ["full", "test-util"] }
+# tokio: add test-util on top of the "full" already in [dependencies]
+tokio = { version = "1.45", features = ["test-util"] }

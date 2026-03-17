@@ -65,11 +65,10 @@ impl HttpPushTransport {
 
     /// Returns an Axum router that peers use to push deltas to this node.
     ///
-    /// Mount this on the internal bind address:
-    /// ```
-    /// let internal_router = transport.router();
+    /// Mount this on the internal bind address (e.g. `MERIDIAN_INTERNAL_BIND`):
+    /// ```text
     /// let listener = TcpListener::bind("0.0.0.0:3001").await?;
-    /// axum::serve(listener, internal_router).await?;
+    /// axum::serve(listener, transport.router()).await?;
     /// ```
     pub fn router(&self) -> Router {
         Router::new()
