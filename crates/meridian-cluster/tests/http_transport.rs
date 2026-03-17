@@ -6,7 +6,7 @@
 ///   1. Bind N listeners on 127.0.0.1:0 (random available ports).
 ///   2. Create N transports, each pointing at the others as peers.
 ///   3. Serve the internal router on each listener.
-///   4. Subscribe / broadcast / assert.
+///   4. Wait for each server to accept connections, then assert.
 #[cfg(feature = "transport-http")]
 mod tests {
     use std::sync::Arc;
@@ -45,6 +45,22 @@ mod tests {
         });
     }
 
+    /// Poll `GET /internal/cluster/wal?from_seq=0` until the server responds,
+    /// timing out after 2 seconds. This replaces a fixed sleep and makes tests
+    /// deterministic regardless of how quickly the Axum task is scheduled.
+    async fn wait_for_server(url: &Url) {
+        let probe = url.join("/internal/cluster/wal?from_seq=0").unwrap();
+        let client = reqwest::Client::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if client.get(probe.as_str()).send().await.is_ok() {
+                return;
+            }
+            assert!(std::time::Instant::now() < deadline, "server did not start within 2s");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Test: A broadcasts → B receives
     // -------------------------------------------------------------------------
@@ -60,9 +76,9 @@ mod tests {
         serve(listener_a, Arc::clone(&transport_a));
         serve(listener_b, Arc::clone(&transport_b));
 
-        let mut stream_b = transport_b.subscribe_deltas();
+        wait_for_server(&url_b).await;
 
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut stream_b = transport_b.subscribe_deltas();
 
         let envelope = make_envelope(1, "my-ns", "counter-1", b"delta-payload");
         transport_a.broadcast_delta(envelope).await.unwrap();
@@ -88,10 +104,9 @@ mod tests {
         let transport_b = make_transport(vec![], 2);
 
         serve(listener_b, Arc::clone(&transport_b));
+        wait_for_server(&url_b).await;
 
         let mut stream_b = transport_b.subscribe_deltas();
-
-        tokio::time::sleep(Duration::from_millis(50)).await;
 
         // Manually POST a delta that claims to originate from node 2 (itself).
         let self_envelope = make_envelope(2, "ns", "crdt", b"self-delta");
@@ -131,10 +146,11 @@ mod tests {
         serve(listener_b, Arc::clone(&transport_b));
         serve(listener_c, Arc::clone(&transport_c));
 
+        wait_for_server(&url_b).await;
+        wait_for_server(&url_c).await;
+
         let mut stream_b = transport_b.subscribe_deltas();
         let mut stream_c = transport_c.subscribe_deltas();
-
-        tokio::time::sleep(Duration::from_millis(50)).await;
 
         let envelope = make_envelope(10, "shared-ns", "orset-1", b"fanout-delta");
         transport_a.broadcast_delta(envelope).await.unwrap();
@@ -165,8 +181,7 @@ mod tests {
         let transport = make_transport(vec![], 99);
 
         serve(listener, transport);
-
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        wait_for_server(&url).await;
 
         let client = reqwest::Client::new();
         let resp = client
@@ -186,7 +201,6 @@ mod tests {
 
     #[tokio::test]
     async fn unreachable_peer_returns_error() {
-        // Point at a port that has no listener
         let dead_url = Url::parse("http://127.0.0.1:1").unwrap();
         let transport = make_transport(vec![dead_url], 50);
 

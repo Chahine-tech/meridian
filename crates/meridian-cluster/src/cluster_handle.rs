@@ -14,6 +14,12 @@ use crate::{
     transport::{ClusterTransport, DeltaEnvelope},
 };
 
+#[cfg(feature = "transport-http")]
+use crate::{
+    anti_entropy::run_pull_anti_entropy,
+    transport::http_push::HttpPushTransport,
+};
+
 // ---------------------------------------------------------------------------
 // SubscriptionManager re-export shim
 // ---------------------------------------------------------------------------
@@ -102,6 +108,34 @@ impl ClusterHandle {
                 }
             }
         });
+    }
+
+    /// Spawns the pull anti-entropy task (HTTP transport only).
+    ///
+    /// Periodically pulls WAL entries from each peer and applies any ops
+    /// this node missed while it was down or partitioned.
+    #[cfg(feature = "transport-http")]
+    pub fn spawn_pull_anti_entropy<A, B>(
+        &self,
+        transport: Arc<HttpPushTransport>,
+        applier: Arc<A>,
+        broadcast: Arc<B>,
+        cancel: CancellationToken,
+    ) where
+        A: AntiEntropyApplier,
+        B: LocalBroadcast,
+    {
+        let node_id = self.node_id;
+        let config = Arc::clone(&self.config);
+
+        tokio::spawn(run_pull_anti_entropy(
+            transport,
+            applier,
+            broadcast,
+            node_id,
+            config,
+            cancel,
+        ));
     }
 
     /// Spawns the anti-entropy background task.

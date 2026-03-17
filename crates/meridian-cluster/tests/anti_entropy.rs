@@ -2,17 +2,19 @@
 ///
 /// Uses in-memory fakes for WalBackend, AntiEntropyApplier, and LocalBroadcast
 /// so the test has no external dependencies.
+///
+/// Time is controlled via `tokio::time::pause` + `advance` — no real sleeps.
 #[cfg(feature = "transport-http")]
 mod tests {
     use std::sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
+        Mutex,
     };
     use std::time::Duration;
 
     use bytes::Bytes;
     use futures::stream::BoxStream;
-    use tokio::sync::Mutex;
     use tokio_util::sync::CancellationToken;
 
     use meridian_cluster::{
@@ -55,6 +57,7 @@ mod tests {
     }
 
     struct EchoApplier {
+        /// std::sync::Mutex — safe to use in sync context (publish_delta trait method).
         calls: Mutex<Vec<(String, String)>>,
         response: Option<Vec<u8>>,
     }
@@ -66,36 +69,35 @@ mod tests {
         fn noop() -> Self {
             Self { calls: Mutex::new(vec![]), response: None }
         }
-        async fn call_count(&self) -> usize { self.calls.lock().await.len() }
+        fn call_count(&self) -> usize { self.calls.lock().unwrap().len() }
     }
 
     impl AntiEntropyApplier for EchoApplier {
         async fn apply_wal_op(
             &self, namespace: &str, crdt_id: &str, _op_bytes: Vec<u8>,
         ) -> Result<Option<Vec<u8>>, String> {
-            self.calls.lock().await.push((namespace.to_owned(), crdt_id.to_owned()));
+            self.calls.lock().unwrap().push((namespace.to_owned(), crdt_id.to_owned()));
             Ok(self.response.clone())
         }
     }
 
     struct RecordingBroadcast {
+        /// std::sync::Mutex — publish_delta is a sync trait method; no async context here.
         published: Mutex<Vec<(String, String, Vec<u8>)>>,
     }
 
     impl RecordingBroadcast {
         fn new() -> Self { Self { published: Mutex::new(vec![]) } }
-        async fn count(&self) -> usize { self.published.lock().await.len() }
+        fn count(&self) -> usize { self.published.lock().unwrap().len() }
     }
 
     impl LocalBroadcast for RecordingBroadcast {
         fn publish_delta(&self, namespace: &str, crdt_id: &str, delta_bytes: Bytes) {
-            futures::executor::block_on(async {
-                self.published.lock().await.push((
-                    namespace.to_owned(),
-                    crdt_id.to_owned(),
-                    delta_bytes.to_vec(),
-                ));
-            });
+            self.published.lock().unwrap().push((
+                namespace.to_owned(),
+                crdt_id.to_owned(),
+                delta_bytes.to_vec(),
+            ));
         }
     }
 
@@ -105,13 +107,13 @@ mod tests {
 
     impl RecordingTransport {
         fn new() -> Arc<Self> { Arc::new(Self { sent: Mutex::new(vec![]) }) }
-        async fn count(&self) -> usize { self.sent.lock().await.len() }
+        fn count(&self) -> usize { self.sent.lock().unwrap().len() }
     }
 
     #[async_trait::async_trait]
     impl ClusterTransport for RecordingTransport {
         async fn broadcast_delta(&self, envelope: DeltaEnvelope) -> ClusterResult<()> {
-            self.sent.lock().await.push(envelope);
+            self.sent.lock().unwrap().push(envelope);
             Ok(())
         }
         fn subscribe_deltas(&self) -> BoxStream<'static, DeltaEnvelope> {
@@ -129,10 +131,15 @@ mod tests {
     }
 
     fn entry(seq: u64, ns: &str, crdt_id: &str) -> WalEntry {
-        WalEntry { seq, namespace: ns.to_owned(), crdt_id: crdt_id.to_owned(), op_bytes: b"op".to_vec(), timestamp_ms: 0 }
+        WalEntry {
+            seq,
+            namespace: ns.to_owned(),
+            crdt_id: crdt_id.to_owned(),
+            op_bytes: b"op".to_vec(),
+            timestamp_ms: 0,
+        }
     }
 
-    // Spawn anti-entropy and return a cancel token.
     fn spawn(
         wal: Arc<FakeWal>,
         applier: Arc<EchoApplier>,
@@ -142,7 +149,6 @@ mod tests {
     ) -> CancellationToken {
         let cancel = CancellationToken::new();
         let cancel_clone = cancel.clone();
-        // coerce to Arc<dyn ClusterTransport>
         let transport_dyn: Arc<dyn ClusterTransport> = transport;
         tokio::spawn(async move {
             run_anti_entropy(wal, applier, broadcast, transport_dyn, NodeId(1), cfg, cancel_clone).await;
@@ -154,7 +160,7 @@ mod tests {
     // Test: WAL entries replayed → applier called, deltas published + broadcast
     // -------------------------------------------------------------------------
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn replays_wal_and_broadcasts() {
         let wal = Arc::new(FakeWal::with_last_zero(vec![
             entry(1, "ns-a", "crdt-1"),
@@ -173,60 +179,76 @@ mod tests {
             config(50),
         );
 
-        // Yield to let anti-entropy record last_replayed=0 at startup,
-        // then advance the WAL so the next tick sees new entries.
+        // Yield so anti-entropy records last_replayed = 0 before we advance the WAL.
         tokio::task::yield_now().await;
         wal.last.store(2, Ordering::Relaxed);
 
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Advance mock time past one anti-entropy interval and yield to let it run.
+        tokio::time::advance(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
         cancel.cancel();
 
-        assert_eq!(applier.call_count().await, 2, "applier called for each entry");
-        assert_eq!(broadcast.count().await, 2, "2 deltas published locally");
-        assert_eq!(transport.count().await, 2, "2 deltas broadcast to peers");
+        assert_eq!(applier.call_count(), 2, "applier called for each entry");
+        assert_eq!(broadcast.count(), 2, "2 deltas published locally");
+        assert_eq!(transport.count(), 2, "2 deltas broadcast to peers");
     }
 
     // -------------------------------------------------------------------------
     // Test: no-op applier → nothing published or broadcast
     // -------------------------------------------------------------------------
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn noop_op_not_published() {
         let wal = Arc::new(FakeWal::with_last_zero(vec![entry(1, "ns", "crdt")]));
         let applier = Arc::new(EchoApplier::noop());
         let broadcast = Arc::new(RecordingBroadcast::new());
         let transport = RecordingTransport::new();
 
-        let cancel = spawn(Arc::clone(&wal), Arc::clone(&applier), Arc::clone(&broadcast), Arc::clone(&transport), config(50));
+        let cancel = spawn(
+            Arc::clone(&wal),
+            Arc::clone(&applier),
+            Arc::clone(&broadcast),
+            Arc::clone(&transport),
+            config(50),
+        );
 
         tokio::task::yield_now().await;
         wal.last.store(1, Ordering::Relaxed);
-        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        tokio::time::advance(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
         cancel.cancel();
 
-        assert_eq!(applier.call_count().await, 1, "applier still called");
-        assert_eq!(broadcast.count().await, 0, "no-op → nothing published");
-        assert_eq!(transport.count().await, 0, "no-op → nothing broadcast");
+        assert_eq!(applier.call_count(), 1, "applier still called");
+        assert_eq!(broadcast.count(), 0, "no-op → nothing published");
+        assert_eq!(transport.count(), 0, "no-op → nothing broadcast");
     }
 
     // -------------------------------------------------------------------------
     // Test: WAL not advanced → no replay at all
     // -------------------------------------------------------------------------
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn no_replay_when_wal_unchanged() {
         let wal = Arc::new(FakeWal::new(vec![]));
         let applier = Arc::new(EchoApplier::returning(b"d"));
         let broadcast = Arc::new(RecordingBroadcast::new());
         let transport = RecordingTransport::new();
 
-        let cancel = spawn(Arc::clone(&wal), Arc::clone(&applier), Arc::clone(&broadcast), Arc::clone(&transport), config(50));
+        let cancel = spawn(
+            Arc::clone(&wal),
+            Arc::clone(&applier),
+            Arc::clone(&broadcast),
+            Arc::clone(&transport),
+            config(50),
+        );
 
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::advance(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
         cancel.cancel();
 
-        assert_eq!(applier.call_count().await, 0, "no replay when WAL unchanged");
-        assert_eq!(broadcast.count().await, 0);
-        assert_eq!(transport.count().await, 0);
+        assert_eq!(applier.call_count(), 0, "no replay when WAL unchanged");
+        assert_eq!(broadcast.count(), 0);
+        assert_eq!(transport.count(), 0);
     }
 }

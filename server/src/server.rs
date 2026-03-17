@@ -115,26 +115,27 @@ where
             let node_id = cfg.node_id;
 
             #[cfg(feature = "cluster")]
-            let transport: Arc<dyn ClusterTransport> = {
+            let (transport, cfg) = {
                 use meridian_cluster::RedisTransport;
                 match &cfg.redis_url {
                     Some(url) => {
                         info!(node_id = %node_id, "cluster enabled — Redis Pub/Sub transport");
-                        Arc::new(RedisTransport::new(url, node_id).await?)
+                        let t: Arc<dyn ClusterTransport> = Arc::new(RedisTransport::new(url, node_id).await?);
+                        (t, cfg)
                     }
-                    None => {
-                        anyhow::bail!("--features cluster requires REDIS_URL");
-                    }
+                    None => anyhow::bail!("--features cluster requires REDIS_URL"),
                 }
             };
 
             #[cfg(all(feature = "cluster-http", not(feature = "cluster")))]
-            let transport: Arc<dyn ClusterTransport> = {
+            let (transport, cfg, http_transport_ref) = {
                 use meridian_cluster::HttpPushTransport;
                 info!(node_id = %node_id, peers = cfg.peers.len(), "cluster enabled — HTTP push transport");
-                let t = Arc::new(HttpPushTransport::new(cfg.peers.clone(), node_id));
 
-                // Spawn the internal API server for incoming delta pushes.
+                let t = Arc::new(
+                    HttpPushTransport::with_wal(cfg.peers.clone(), node_id, Arc::clone(&wal))
+                );
+
                 let internal_bind = std::env::var("MERIDIAN_INTERNAL_BIND")
                     .unwrap_or_else(|_| "0.0.0.0:3001".into());
                 let internal_router = t.router();
@@ -149,16 +150,27 @@ where
                         .expect("internal cluster server failed");
                 });
 
-                t
+                let transport_dyn: Arc<dyn ClusterTransport> = t.clone();
+                (transport_dyn, cfg, t)
             };
 
             let handle = Arc::new(ClusterHandle::new(cfg, transport));
+
             handle.spawn_receiver(Arc::clone(&subscriptions), cancel.clone());
 
             let applier = Arc::new(StoreApplier::new(Arc::clone(&store)));
             handle.spawn_anti_entropy(
                 Arc::clone(&wal),
-                applier,
+                Arc::clone(&applier),
+                Arc::clone(&subscriptions),
+                cancel.clone(),
+            );
+
+            // Pull anti-entropy: catch up from peers on restart (HTTP only).
+            #[cfg(all(feature = "cluster-http", not(feature = "cluster")))]
+            handle.spawn_pull_anti_entropy(
+                http_transport_ref,
+                Arc::clone(&applier),
                 Arc::clone(&subscriptions),
                 cancel.clone(),
             );

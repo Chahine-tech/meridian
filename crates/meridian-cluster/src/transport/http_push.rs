@@ -4,16 +4,19 @@ use async_stream::stream;
 use async_trait::async_trait;
 use axum::{
     Router,
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::post,
+    routing::{get, post},
 };
+use serde::Deserialize;
 use bytes::Bytes;
-use futures::stream::BoxStream;
+use futures::{future::BoxFuture, stream::BoxStream};
 use tokio::sync::broadcast;
 use tracing::{debug, instrument, warn};
 use url::Url;
+
+use meridian_storage::{WalBackend, WalEntry};
 
 use crate::{
     error::{ClusterError, Result},
@@ -24,6 +27,13 @@ use crate::{
 // ---------------------------------------------------------------------------
 // HttpPushTransport
 // ---------------------------------------------------------------------------
+
+/// Type-erased WAL replay function stored inside `Inner`.
+///
+/// `WalBackend` uses `impl Future` return types (not dyn-compatible), so we
+/// erase the concrete type at construction time and store a closure instead.
+type WalReplayFn =
+    dyn Fn(u64) -> BoxFuture<'static, meridian_storage::Result<Vec<WalEntry>>> + Send + Sync;
 
 /// Cluster transport backed by direct HTTP POST to peer nodes.
 ///
@@ -48,10 +58,25 @@ struct Inner {
     client: reqwest::Client,
     /// Incoming deltas from peers are forwarded here.
     tx: broadcast::Sender<DeltaEnvelope>,
+    /// Type-erased WAL replay for pull anti-entropy (`GET /internal/cluster/wal`).
+    wal_replay: Option<Box<WalReplayFn>>,
 }
 
 impl HttpPushTransport {
     pub fn new(peers: Vec<Url>, node_id: NodeId) -> Self {
+        Self::build(peers, node_id, None)
+    }
+
+    /// Create a transport that also exposes this node's WAL for pull anti-entropy.
+    pub fn with_wal<W: WalBackend>(peers: Vec<Url>, node_id: NodeId, wal: Arc<W>) -> Self {
+        let replay: Box<WalReplayFn> = Box::new(move |from_seq| {
+            let wal = Arc::clone(&wal);
+            Box::pin(async move { wal.replay_from(from_seq).await })
+        });
+        Self::build(peers, node_id, Some(replay))
+    }
+
+    fn build(peers: Vec<Url>, node_id: NodeId, wal_replay: Option<Box<WalReplayFn>>) -> Self {
         let (tx, _) = broadcast::channel(1024);
         Self {
             inner: Arc::new(Inner {
@@ -62,8 +87,49 @@ impl HttpPushTransport {
                     .build()
                     .expect("failed to build reqwest client"),
                 tx,
+                wal_replay,
             }),
         }
+    }
+
+    /// Fetch WAL entries from a peer node starting at `from_seq`.
+    ///
+    /// Used by pull anti-entropy to catch up after a node restart.
+    pub async fn pull_wal_from(&self, peer: &Url, from_seq: u64) -> Result<Vec<WalEntry>> {
+        let url = peer
+            .join(&format!("/internal/cluster/wal?from_seq={from_seq}"))
+            .map_err(|e| ClusterError::Transport(e.to_string()))?;
+
+        let resp = self
+            .inner
+            .client
+            .get(url.as_str())
+            .send()
+            .await
+            .map_err(|e| ClusterError::Transport(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            return Err(ClusterError::Transport(format!(
+                "peer {} returned {} for WAL pull",
+                peer,
+                resp.status()
+            )));
+        }
+
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| ClusterError::Transport(e.to_string()))?;
+
+        let entries: Vec<WalEntry> =
+            rmp_serde::decode::from_slice(&bytes).map_err(ClusterError::Deserialization)?;
+
+        Ok(entries)
+    }
+
+    /// Returns the list of configured peers.
+    pub fn peers(&self) -> &[Url] {
+        &self.inner.peers
     }
 
     /// Returns an Axum router that peers use to push deltas to this node.
@@ -76,6 +142,7 @@ impl HttpPushTransport {
     pub fn router(&self) -> Router {
         Router::new()
             .route("/internal/cluster/delta", post(handle_incoming_delta))
+            .route("/internal/cluster/wal", get(handle_wal_pull))
             .with_state(Arc::clone(&self.inner))
     }
 }
@@ -111,6 +178,38 @@ async fn handle_incoming_delta(
     // Lagged receivers are fine — anti-entropy recovers.
     let _ = inner.tx.send(envelope);
     StatusCode::OK
+}
+
+// ---------------------------------------------------------------------------
+// WAL pull handler
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct WalQuery {
+    from_seq: u64,
+}
+
+async fn handle_wal_pull(
+    State(inner): State<Arc<Inner>>,
+    Query(params): Query<WalQuery>,
+) -> impl IntoResponse {
+    let Some(replay) = &inner.wal_replay else {
+        return (StatusCode::NOT_IMPLEMENTED, Bytes::new());
+    };
+
+    match replay(params.from_seq).await {
+        Ok(entries) => match rmp_serde::encode::to_vec_named(&entries) {
+            Ok(bytes) => (StatusCode::OK, Bytes::from(bytes)),
+            Err(e) => {
+                warn!(error = %e, "failed to encode WAL entries for pull response");
+                (StatusCode::INTERNAL_SERVER_ERROR, Bytes::new())
+            }
+        },
+        Err(e) => {
+            warn!(error = %e, from_seq = params.from_seq, "WAL replay_from failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, Bytes::new())
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

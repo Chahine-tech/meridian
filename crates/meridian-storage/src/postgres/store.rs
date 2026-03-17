@@ -106,6 +106,77 @@ where
         Ok(())
     }
 
+    /// Atomic read-merge-write using `SELECT FOR UPDATE` inside a transaction.
+    ///
+    /// Prevents lost updates when multiple nodes share the same PostgreSQL
+    /// database and write to the same CRDT concurrently. The row is locked
+    /// for the duration of the merge, ensuring linearizable updates.
+    #[instrument(skip(self, new_value, merge_fn), fields(ns, id))]
+    async fn merge_put<F>(&self, ns: &str, id: &str, new_value: V, merge_fn: F) -> Result<()>
+    where
+        F: FnOnce(Option<V>, V) -> V + Send,
+    {
+        self.merge_put_with(ns, id, new_value, |existing, new| {
+            (merge_fn(existing, new), ())
+        })
+        .await
+    }
+
+    /// Atomic read-merge-write with side-output, using `SELECT FOR UPDATE`.
+    #[instrument(skip(self, new_value, merge_fn), fields(ns, id))]
+    async fn merge_put_with<F, R>(
+        &self,
+        ns: &str,
+        id: &str,
+        new_value: V,
+        merge_fn: F,
+    ) -> Result<R>
+    where
+        F: FnOnce(Option<V>, V) -> (V, R) + Send,
+        R: Send,
+    {
+        let mut tx = self.pool.begin().await?;
+
+        // Lock the row (or nothing if it doesn't exist yet).
+        let existing: Option<(Vec<u8>,)> = sqlx::query_as(
+            "SELECT data FROM crdt_snapshots WHERE namespace = $1 AND crdt_id = $2 FOR UPDATE",
+        )
+        .bind(ns)
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let existing_value = match existing {
+            Some((bytes,)) => {
+                let v = rmp_serde::decode::from_slice::<V>(&bytes)
+                    .map_err(StorageError::Deserialization)?;
+                Some(v)
+            }
+            None => None,
+        };
+
+        let (merged, result) = merge_fn(existing_value, new_value);
+        let bytes =
+            rmp_serde::encode::to_vec_named(&merged).map_err(StorageError::Serialization)?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO crdt_snapshots (namespace, crdt_id, data, updated_at)
+            VALUES ($1, $2, $3, now())
+            ON CONFLICT (namespace, crdt_id)
+            DO UPDATE SET data = EXCLUDED.data, updated_at = now()
+            "#,
+        )
+        .bind(ns)
+        .bind(id)
+        .bind(bytes)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(result)
+    }
+
     #[instrument(skip(self), fields(ns, id))]
     async fn delete(&self, ns: &str, id: &str) -> Result<()> {
         sqlx::query(

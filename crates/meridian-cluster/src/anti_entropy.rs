@@ -12,6 +12,9 @@ use crate::{
     node_id::NodeId,
 };
 
+#[cfg(feature = "transport-http")]
+use crate::transport::http_push::HttpPushTransport;
+
 // ---------------------------------------------------------------------------
 // AntiEntropyApplier — server-side callback to re-apply a WAL op
 // ---------------------------------------------------------------------------
@@ -36,6 +39,109 @@ pub trait AntiEntropyApplier: Send + Sync + 'static {
 // ---------------------------------------------------------------------------
 // run_anti_entropy — background task
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// run_pull_anti_entropy — pull WAL from peers (HTTP transport only)
+// ---------------------------------------------------------------------------
+
+/// Periodically pulls WAL entries from each peer and applies any ops this
+/// node missed while it was down or partitioned.
+///
+/// This is the complement to push anti-entropy: instead of broadcasting our
+/// WAL to peers, we pull their WAL entries and apply them locally.
+///
+/// Only available with the `transport-http` feature — Redis Pub/Sub is
+/// stateless and doesn't support WAL pull.
+#[cfg(feature = "transport-http")]
+pub async fn run_pull_anti_entropy<A, B>(
+    transport: Arc<HttpPushTransport>,
+    applier: Arc<A>,
+    broadcast: Arc<B>,
+    node_id: NodeId,
+    config: Arc<ClusterConfig>,
+    cancel: CancellationToken,
+) where
+    A: AntiEntropyApplier,
+    B: LocalBroadcast,
+{
+    use std::collections::HashMap;
+
+    let interval = config.anti_entropy_interval;
+    // Track the last seq we pulled from each peer independently.
+    let mut peer_seq: HashMap<String, u64> = HashMap::new();
+
+    info!(
+        node_id = %node_id,
+        peers = transport.peers().len(),
+        "pull anti-entropy task started"
+    );
+
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                debug!(node_id = %node_id, "pull anti-entropy task shutting down");
+                break;
+            }
+            _ = tokio::time::sleep(interval) => {}
+        }
+
+        for peer in transport.peers() {
+            let from_seq = peer_seq.get(peer.as_str()).copied().unwrap_or(0);
+
+            let entries = match transport.pull_wal_from(peer, from_seq).await {
+                Ok(e) => e,
+                Err(e) => {
+                    warn!(peer = %peer, error = %e, "pull anti-entropy: failed to pull WAL from peer");
+                    continue;
+                }
+            };
+
+            if entries.is_empty() {
+                continue;
+            }
+
+            let last_seq = entries.last().map(|e| e.seq).unwrap_or(from_seq);
+            let count = entries.len();
+
+            for entry in entries {
+                match applier.apply_wal_op(&entry.namespace, &entry.crdt_id, entry.op_bytes).await {
+                    Ok(Some(delta_bytes)) => {
+                        broadcast.publish_delta(
+                            &entry.namespace,
+                            &entry.crdt_id,
+                            bytes::Bytes::from(delta_bytes),
+                        );
+                    }
+                    Ok(None) => {
+                        debug!(
+                            ns = %entry.namespace,
+                            crdt_id = %entry.crdt_id,
+                            seq = entry.seq,
+                            "pull anti-entropy: op already applied"
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            ns = %entry.namespace,
+                            crdt_id = %entry.crdt_id,
+                            "pull anti-entropy: apply_wal_op failed"
+                        );
+                    }
+                }
+            }
+
+            peer_seq.insert(peer.to_string(), last_seq);
+            info!(
+                node_id = %node_id,
+                peer = %peer,
+                pulled = count,
+                up_to_seq = last_seq,
+                "pull anti-entropy: tick complete"
+            );
+        }
+    }
+}
 
 /// Periodically replays recent WAL entries and re-publishes any deltas that
 /// peers may have missed due to Redis disconnections or node restarts.

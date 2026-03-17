@@ -54,6 +54,15 @@ fn parse_peers() -> Vec<Url> {
         .unwrap_or_default()
         .split(',')
         .filter(|s| !s.is_empty())
-        .filter_map(|s| Url::parse(s.trim()).ok())
+        .filter_map(|s| {
+            let trimmed = s.trim();
+            match Url::parse(trimmed) {
+                Ok(url) => Some(url),
+                Err(e) => {
+                    tracing::warn!(peer = trimmed, error = %e, "ignoring invalid peer URL in MERIDIAN_PEERS");
+                    None
+                }
+            }
+        })
         .collect()
 }

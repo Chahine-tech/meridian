@@ -11,7 +11,8 @@ use crate::{
     auth::ClaimsExt,
     crdt::{
         clock::now_ms,
-        registry::{apply_op, CrdtOp, CrdtType, CrdtValue},
+        ops::{apply_op_atomic, ApplyError},
+        registry::CrdtOp,
         VectorClock,
     },
     metrics,
@@ -91,32 +92,22 @@ pub async fn post_op<S: AppStateExt>(
         }
     }
 
-    let crdt_type: CrdtType = op.crdt_type();
-    let mut crdt = match state.store().get(&ns, &id).await {
-        Ok(Some(c)) => c,
-        Ok(None) => CrdtValue::new(crdt_type),
-        Err(e) => {
-            tracing::error!(error = %e, "store.get failed");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-
-    let delta_bytes = match apply_op(&mut crdt, op) {
+    let delta_bytes = match apply_op_atomic(state.store(), &ns, &id, op).await {
         Ok(d) => d,
-        Err(e) => {
+        Err(ApplyError::Crdt(e)) => {
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({ "error": "apply_failed", "detail": e.to_string() })),
             )
                 .into_response();
         }
+        Err(ApplyError::Storage(e)) => {
+            tracing::error!(error = %e, "store failed during apply");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     };
 
     if let Some(ref bytes) = delta_bytes {
-        if let Err(e) = state.store().put(&ns, &id, &crdt).await {
-            tracing::error!(error = %e, "store.put failed");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
 
         metrics::record_op(&ns, &id, "http");
 

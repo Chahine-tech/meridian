@@ -96,19 +96,21 @@ Each node exposes `POST /internal/cluster/delta` on `MERIDIAN_INTERNAL_BIND`. Th
 
 ### Example: 3-node setup
 
-Node A (`node-a:3000`, `node-a:3001`):
+Node A (`node-a:3000` public, `node-a:3001` internal):
 ```bash
-MERIDIAN_PEERS=http://node-b:3000,http://node-c:3000
+MERIDIAN_PEERS=http://node-b:3001,http://node-c:3001
 MERIDIAN_INTERNAL_BIND=0.0.0.0:3001
 ```
 
-Node B (`node-b:3000`, `node-b:3001`):
+Node B (`node-b:3000` public, `node-b:3001` internal):
 ```bash
-MERIDIAN_PEERS=http://node-a:3000,http://node-c:3000
+MERIDIAN_PEERS=http://node-a:3001,http://node-c:3001
 MERIDIAN_INTERNAL_BIND=0.0.0.0:3001
 ```
 
 Node C similarly.
+
+`MERIDIAN_PEERS` must point to each peer's **internal** port (`MERIDIAN_INTERNAL_BIND`), not the public client-facing port.
 
 ---
 
@@ -129,6 +131,30 @@ Node C similarly.
 Clients can connect to any node — all nodes share the same state via the transport layer. Use any L4/L7 load balancer (nginx, Caddy, AWS ALB, etc.) in round-robin or least-connections mode.
 
 WebSocket connections are sticky per-session by nature (the connection persists), but there is **no requirement** for session affinity — a client reconnecting to a different node will receive the current CRDT state immediately.
+
+---
+
+## Known limitations
+
+### Node restart catch-up (Redis mode)
+
+In Redis Pub/Sub mode, each node has its own WAL and anti-entropy pushes its WAL entries to peers — but there is no pull mechanism. A node that was down for an extended period will not automatically pull the ops it missed from peers. It will catch up as new writes arrive and as its own WAL is replayed to peers on restart. For most deployments (short outages, active traffic) this is acceptable.
+
+In **HTTP push mode** (`cluster-http`), pull anti-entropy is fully implemented: on startup and periodically, each node pulls WAL entries it missed from each peer via `GET /internal/cluster/wal`. A restarted node catches up completely within one anti-entropy interval (`MERIDIAN_ANTI_ENTROPY_SECS`).
+
+### Shared PostgreSQL and concurrent writes
+
+Concurrent writes to the same CRDT from different nodes on a **shared** PostgreSQL database are safe. The `PgStore` implementation uses `SELECT FOR UPDATE` inside a transaction for all write operations (`merge_put_with`), which prevents lost updates and ensures linearizable per-key updates.
+
+If you use separate PostgreSQL databases per node (or sled), the cluster transport layer handles convergence via delta fan-out — nodes converge within one gossip interval.
+
+### Redis as a single point of failure
+
+If Redis goes down, real-time delta propagation stops. Nodes continue to serve local clients normally, but peers stop receiving updates. When Redis recovers, the next anti-entropy tick (within `MERIDIAN_ANTI_ENTROPY_SECS`, default 30s) replays all missed WAL entries to peers. No data is lost as long as the WAL is intact.
+
+### Clock skew and Presence TTL
+
+Presence TTL expiry is evaluated using each node's local clock. With significant clock skew between nodes, a presence entry may expire on one node before another. This is acceptable for typical NTP-synchronized infrastructure (< 10ms skew). Ensure NTP is configured on all cluster nodes.
 
 ---
 

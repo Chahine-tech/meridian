@@ -1,5 +1,6 @@
 pub mod clock;
 pub mod crdtmap;
+pub mod ops;
 pub mod gcounter;
 pub mod lwwregister;
 pub mod orset;

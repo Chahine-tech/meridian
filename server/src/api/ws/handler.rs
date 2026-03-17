@@ -12,7 +12,11 @@ use tracing::{debug, info, warn};
 
 use crate::{
     auth::ClaimsExt,
-    crdt::{clock::now_ms, registry::{apply_op, CrdtOp, CrdtType, CrdtValue}},
+    crdt::{
+        clock::now_ms,
+        ops::{apply_op_atomic, ApplyError},
+        registry::CrdtOp,
+    },
     metrics,
     storage::{CrdtStore, Store},
     webhooks::{WebhookDispatcher, WebhookEvent},
@@ -190,7 +194,7 @@ async fn handle_client_message<S: WsState>(
                 }
             };
 
-            match apply_and_persist(state, ns, &crdt_id, op).await {
+            match apply_op_atomic(state.store(), ns, &crdt_id, op).await {
                 Ok(Some(delta_bytes)) => {
                     *seq += 1;
                     metrics::record_op(ns, &crdt_id, "ws");
@@ -229,8 +233,12 @@ async fn handle_client_message<S: WsState>(
                         let _ = socket.send(Message::Binary(b.into())).await;
                     }
                 }
-                Err(e) => {
-                    warn!(error = %e, "apply_op failed");
+                Err(ApplyError::Crdt(e)) => {
+                    warn!(error = %e, "crdt op rejected");
+                    send_error(socket, 400, &e.to_string()).await;
+                }
+                Err(ApplyError::Storage(e)) => {
+                    warn!(error = %e, "store failed during apply");
                     send_error(socket, 500, "internal error").await;
                 }
             }
@@ -277,29 +285,6 @@ async fn handle_client_message<S: WsState>(
     true
 }
 
-/// Load CRDT (or create if new), apply op, persist.
-async fn apply_and_persist<S: WsState>(
-    state: &S,
-    ns: &str,
-    crdt_id: &str,
-    op: CrdtOp,
-) -> Result<Option<Vec<u8>>, crate::storage::StorageError> {
-    let crdt_type: CrdtType = op.crdt_type();
-    let mut crdt = state
-        .store()
-        .get(ns, crdt_id)
-        .await?
-        .unwrap_or_else(|| CrdtValue::new(crdt_type));
-
-    let delta_bytes = apply_op(&mut crdt, op)
-        .map_err(|e| crate::storage::StorageError::Codec(e.into()))?;
-
-    if delta_bytes.is_some() {
-        state.store().put(ns, crdt_id, &crdt).await?;
-    }
-
-    Ok(delta_bytes)
-}
 
 async fn send_error(socket: &mut WebSocket, code: u16, message: &str) {
     let err = ServerMsg::Error { code, message: message.to_owned() };

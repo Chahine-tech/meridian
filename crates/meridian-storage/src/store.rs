@@ -45,6 +45,62 @@ where
         prefix: &str,
     ) -> impl std::future::Future<Output = Result<Vec<(String, V)>>> + Send;
 
+    /// Atomic read-merge-write: load the current value, apply `merge_fn(existing, new)`,
+    /// and persist the result in a single atomic operation.
+    ///
+    /// This is the safe way to update a shared CRDT when multiple nodes or
+    /// writers may write to the same key concurrently (e.g. shared PostgreSQL).
+    /// The default implementation is a non-atomic read-then-write — backends
+    /// that support transactions (e.g. `PgStore`) override this with a
+    /// `SELECT FOR UPDATE` inside a transaction.
+    ///
+    /// Use this instead of `put()` whenever concurrent writes are possible.
+    /// If you need to extract a value computed during the merge (e.g. a delta),
+    /// use [`merge_put_with`](Store::merge_put_with) instead.
+    fn merge_put<F>(
+        &self,
+        ns: &str,
+        id: &str,
+        new_value: V,
+        merge_fn: F,
+    ) -> impl std::future::Future<Output = Result<()>> + Send
+    where
+        F: FnOnce(Option<V>, V) -> V + Send,
+    {
+        async move {
+            let existing = self.get(ns, id).await?;
+            let merged = merge_fn(existing, new_value);
+            self.put(ns, id, &merged).await
+        }
+    }
+
+    /// Like [`merge_put`](Store::merge_put), but the closure also returns a
+    /// side-output `R` (e.g. computed delta bytes) alongside the merged value.
+    ///
+    /// The closure signature is `FnOnce(existing: Option<V>, new: V) -> (merged: V, output: R)`.
+    /// The merged value is persisted; `R` is returned to the caller.
+    ///
+    /// Backends that override `merge_put` for atomicity (e.g. `PgStore`) should
+    /// also override this method so the same transaction guarantee applies.
+    fn merge_put_with<F, R>(
+        &self,
+        ns: &str,
+        id: &str,
+        new_value: V,
+        merge_fn: F,
+    ) -> impl std::future::Future<Output = Result<R>> + Send
+    where
+        F: FnOnce(Option<V>, V) -> (V, R) + Send,
+        R: Send,
+    {
+        async move {
+            let existing = self.get(ns, id).await?;
+            let (merged, result) = merge_fn(existing, new_value);
+            self.put(ns, id, &merged).await?;
+            Ok(result)
+        }
+    }
+
     /// Flush pending writes to durable storage. No-op for backends that
     /// don't buffer writes (e.g. `MemoryStore`).
     fn flush(&self) -> impl std::future::Future<Output = Result<()>> + Send {

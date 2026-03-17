@@ -15,12 +15,10 @@ pub mod anti_entropy {
 
     /// Wraps a `CrdtStore` and implements `AntiEntropyApplier`.
     ///
-    /// On each call, it:
-    /// 1. Decodes `op_bytes` as a `CrdtOp` (msgpack).
-    /// 2. Loads (or creates) the target CRDT from the store.
-    /// 3. Applies the op — returns `Ok(None)` if it's a no-op.
-    /// 4. Persists the updated state.
-    /// 5. Returns the raw delta bytes.
+    /// Anti-entropy runs as a single background task per node, so concurrent
+    /// access is not a concern here. `get` + `put` is safe in this context.
+    /// Concurrent writes from multiple clients go through the HTTP/WS handlers
+    /// which use `merge_put` for atomic read-merge-write on shared Postgres.
     pub struct StoreApplier<S> {
         store: Arc<S>,
     }
