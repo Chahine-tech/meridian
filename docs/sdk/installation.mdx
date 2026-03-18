@@ -17,19 +17,18 @@ bun add meridian-sdk
 - Node 18+, Bun 1+, or any modern browser
 - A running Meridian server (see [Docker](/self-hosting/docker))
 
-## Example
+## Examples
 
-A full working example (ORSet tasks, PNCounter votes, LWWRegister title, Presence) is available in the repository:
-
-```
-examples/collaborative-workspace/
-```
+**Collaborative workspace** — ORSet tasks, PNCounter votes, LWWRegister title, Presence (vanilla TypeScript):
 
 ```bash
 cd examples/collaborative-workspace
-npm install && npm run dev
-# or
-pnpm install && pnpm dev
-# or
+bun install && bun dev
+```
+
+**Live cursors** — real-time cursor tracking with `usePresence` (React):
+
+```bash
+cd examples/cursors
 bun install && bun dev
 ```

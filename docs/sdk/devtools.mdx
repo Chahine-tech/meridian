@@ -61,6 +61,14 @@ All active handles are listed with their current value as JSON, color-coded by t
 | Pink | `presence` |
 | Green | `crdtmap` |
 
+**Events section**
+
+The last 20 incoming deltas from the server are listed in reverse-chronological order, with the CRDT type, ID, and timestamp. This gives a live view of which CRDTs are receiving updates and how frequently.
+
+**Refresh button**
+
+A `↻` button in the panel header forces a manual snapshot refresh — useful if the panel appears stale between auto-updates.
+
 The panel updates in real time as values change or the connection state transitions.
 
 ## Production

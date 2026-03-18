@@ -110,6 +110,12 @@ const unsub = client.onStateChange(state => {
   console.log("connection state:", state); // "CONNECTED" | "DISCONNECTED" | "CONNECTING" | "CLOSING"
 });
 unsub(); // unsubscribe
+
+// Subscribe to incoming deltas (devtools / debugging)
+const unsubDelta = client.onDelta(event => {
+  console.log(event.crdtId, event.type, event.at); // "gc:views", "gcounter", 1718000000000
+});
+unsubDelta();
 ```
 
 The queue holds up to 500 ops. If the limit is reached, the oldest op is dropped to make room for the newest.
