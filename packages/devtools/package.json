@@ -1,6 +1,6 @@
 {
   "name": "meridian-devtools",
-  "version": "0.3.2",
+  "version": "0.1.0",
   "description": "React devtools overlay for Meridian CRDT state",
   "type": "module",
   "main": "./dist/index.js",

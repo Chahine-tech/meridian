@@ -1,6 +1,6 @@
 {
   "name": "meridian-react",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "React hooks for Meridian CRDT server",
   "type": "module",
   "main": "./dist/index.js",
