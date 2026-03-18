@@ -4,6 +4,7 @@
   "workspaces": [
     "packages/sdk",
     "packages/sdk-react",
+    "packages/devtools",
     "examples/collaborative-workspace"
   ]
 }

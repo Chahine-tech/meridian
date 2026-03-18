@@ -17,9 +17,24 @@
         "vite": "^7.1.7",
       },
     },
+    "packages/devtools": {
+      "name": "meridian-devtools",
+      "version": "0.3.2",
+      "devDependencies": {
+        "@biomejs/biome": "^2.4.7",
+        "@types/react": "^19.0.0",
+        "meridian-sdk": "workspace:*",
+        "typescript": "^5.8.0",
+      },
+      "peerDependencies": {
+        "meridian-sdk": "^0.3.0",
+        "react": "^19.0.0",
+        "typescript": ">=5.0.0",
+      },
+    },
     "packages/sdk": {
       "name": "meridian-sdk",
-      "version": "0.3.0",
+      "version": "0.3.2",
       "dependencies": {
         "@msgpack/msgpack": "^3.0.0",
         "effect": "^3.19.0",
@@ -35,7 +50,7 @@
     },
     "packages/sdk-react": {
       "name": "meridian-react",
-      "version": "0.3.0",
+      "version": "0.3.2",
       "dependencies": {
         "effect": "^3.19.0",
       },
@@ -198,6 +213,8 @@
     "fdir": ["fdir@6.5.0", "", { "peerDependencies": { "picomatch": "^3 || ^4" }, "optionalPeers": ["picomatch"] }, "sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg=="],
 
     "fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
+
+    "meridian-devtools": ["meridian-devtools@workspace:packages/devtools"],
 
     "meridian-example-collaborative-workspace": ["meridian-example-collaborative-workspace@workspace:examples/collaborative-workspace"],
 

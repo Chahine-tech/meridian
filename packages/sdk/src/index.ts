@@ -1,7 +1,17 @@
 // Public SDK surface
 
 export { MeridianClient } from "./client.js";
-export type { MeridianClientConfig } from "./client.js";
+export type {
+  MeridianClientConfig,
+  ClientSnapshot,
+  CRDTSnapshotEntry,
+  GCounterSnapshotEntry,
+  PNCounterSnapshotEntry,
+  ORSetSnapshotEntry,
+  LwwRegisterSnapshotEntry,
+  PresenceSnapshotEntry,
+  CRDTMapSnapshotEntry,
+} from "./client.js";
 
 // CRDT handles
 export { GCounterHandle } from "./crdt/gcounter.js";

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useMemo, useRef, useSyncExternalStore } from "react";
+import { useMountEffect } from "./useMountEffect.js";
 import type { Schema } from "effect";
 import type { PresenceEntry } from "meridian-sdk";
 import { useMeridianClient } from "../context.js";
@@ -73,7 +74,7 @@ export const usePresence = <T = unknown>(
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
-  useEffect(() => {
+  useMountEffect(() => {
     if (optsRef.current?.data === undefined) return;
 
     const ttlMs = optsRef.current.ttlMs ?? DEFAULT_PRESENCE_TTL_MS;
@@ -91,7 +92,7 @@ export const usePresence = <T = unknown>(
       clearInterval(timer);
       handle.leave();
     };
-  }, [handle]);
+  });
 
   return {
     online,

@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, type ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
+import { useMountEffect } from "./hooks/useMountEffect.js";
 import type { MeridianClient } from "meridian-sdk";
 
 interface MeridianProviderProps {
@@ -37,11 +38,11 @@ const MeridianContext = createContext<MeridianClient | null>(null);
  * ```
  */
 export const MeridianProvider = ({ client, children }: MeridianProviderProps) => {
-  useEffect(() => {
+  useMountEffect(() => {
     return () => {
       client.close();
     };
-  }, [client]);
+  });
 
   return (
     <MeridianContext.Provider value={client}>

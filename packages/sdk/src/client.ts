@@ -1,5 +1,7 @@
 import { Effect, type Schema } from "effect";
+import type { WsState } from "./transport/websocket.js";
 import { WsTransport } from "./transport/websocket.js";
+import type { CrdtMapValue } from "./crdt/crdtmap.js";
 import { HttpClient } from "./transport/http.js";
 import { GCounterHandle } from "./crdt/gcounter.js";
 import { PNCounterHandle } from "./crdt/pncounter.js";
@@ -18,6 +20,56 @@ import {
 import { parseAndValidateToken } from "./auth/token.js";
 import type { ServerMsg, TokenClaims } from "./schema.js";
 import type { TokenParseError, TokenExpiredError } from "./errors.js";
+
+// --- Devtools snapshot types ---
+
+export interface GCounterSnapshotEntry {
+  type: "gcounter";
+  crdtId: string;
+  value: number;
+  counts: Readonly<Record<string, number>>;
+}
+export interface PNCounterSnapshotEntry {
+  type: "pncounter";
+  crdtId: string;
+  value: number;
+}
+export interface ORSetSnapshotEntry {
+  type: "orset";
+  crdtId: string;
+  elements: unknown[];
+}
+export interface LwwRegisterSnapshotEntry {
+  type: "lwwregister";
+  crdtId: string;
+  value: unknown;
+  meta: { updatedAtMs: number; author: number } | null;
+}
+export interface PresenceSnapshotEntry {
+  type: "presence";
+  crdtId: string;
+  online: { clientId: number; data: unknown; expiresAtMs: number }[];
+}
+export interface CRDTMapSnapshotEntry {
+  type: "crdtmap";
+  crdtId: string;
+  value: Readonly<CrdtMapValue>;
+}
+export type CRDTSnapshotEntry =
+  | GCounterSnapshotEntry
+  | PNCounterSnapshotEntry
+  | ORSetSnapshotEntry
+  | LwwRegisterSnapshotEntry
+  | PresenceSnapshotEntry
+  | CRDTMapSnapshotEntry;
+
+export interface ClientSnapshot {
+  namespace: string;
+  clientId: number;
+  wsState: WsState;
+  pendingOpCount: number;
+  crdts: CRDTSnapshotEntry[];
+}
 
 export interface MeridianClientConfig {
   url: string;
@@ -68,6 +120,9 @@ export class MeridianClient {
   private readonly prHandles = new Map<string, PresenceHandle<unknown>>();
   private readonly cmHandles = new Map<string, CRDTMapHandle>();
 
+  private readonly anyListeners = new Set<() => void>();
+  private readonly handleUnsubs: Array<() => void> = [];
+
   private constructor(config: MeridianClientConfig, claims: TokenClaims) {
     this.namespace = config.namespace;
     this.claims = claims;
@@ -88,6 +143,10 @@ export class MeridianClient {
     if (config.autoConnect !== false) {
       this.transport.connect();
     }
+
+    // Internal listener: routes transport state changes through onAnyChange
+    // so devtools only needs one subscription (avoids WsTransport chaining issue).
+    this.transport.onStateChange(() => { this.notifyAnyChange(); });
   }
 
   /**
@@ -140,6 +199,7 @@ export class MeridianClient {
       handle = new GCounterHandle({ ns: this.namespace, crdtId, clientId: this.clientId, transport: this.transport });
       this.gcHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
+      this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
     }
     return handle;
   }
@@ -166,6 +226,7 @@ export class MeridianClient {
       handle = new PNCounterHandle({ ns: this.namespace, crdtId, clientId: this.clientId, transport: this.transport });
       this.pnHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
+      this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
     }
     return handle;
   }
@@ -195,6 +256,7 @@ export class MeridianClient {
       handle = schema ? new ORSetHandle<T>({ ...base, schema }) : new ORSetHandle<T>(base);
       this.orHandles.set(crdtId, handle as ORSetHandle<unknown>);
       this.transport.subscribe(crdtId);
+      this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
     }
     return handle;
   }
@@ -224,6 +286,7 @@ export class MeridianClient {
       handle = schema ? new LwwRegisterHandle<T>({ ...base, schema }) : new LwwRegisterHandle<T>(base);
       this.lwHandles.set(crdtId, handle as LwwRegisterHandle<unknown>);
       this.transport.subscribe(crdtId);
+      this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
     }
     return handle;
   }
@@ -254,6 +317,7 @@ export class MeridianClient {
       handle = schema ? new PresenceHandle<T>({ ...base, schema }) : new PresenceHandle<T>(base);
       this.prHandles.set(crdtId, handle as PresenceHandle<unknown>);
       this.transport.subscribe(crdtId);
+      this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
     }
     return handle;
   }
@@ -280,6 +344,7 @@ export class MeridianClient {
       handle = new CRDTMapHandle({ ns: this.namespace, crdtId, clientId: this.clientId, transport: this.transport });
       this.cmHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
+      this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
     }
     return handle;
   }
@@ -297,8 +362,45 @@ export class MeridianClient {
    * Subscribe to connection state changes. Returns an unsubscribe function.
    * Useful for building "syncing" indicators in the UI.
    */
-  onStateChange(listener: (state: import("./transport/websocket.js").WsState) => void): () => void {
+  onStateChange(listener: (state: WsState) => void): () => void {
     return this.transport.onStateChange(listener);
+  }
+
+  /**
+   * Subscribe to any state change (CRDT value or connection state).
+   * Fires whenever any handle emits or the WebSocket transitions.
+   * Used by `<MeridianDevtools>` to avoid multiple `onStateChange` subscriptions.
+   */
+  onAnyChange(listener: () => void): () => void {
+    this.anyListeners.add(listener);
+    return () => { this.anyListeners.delete(listener); };
+  }
+
+  /**
+   * Returns a point-in-time snapshot of all active CRDT handles and transport state.
+   * Intended for devtools — not for production data flows.
+   */
+  snapshot(): ClientSnapshot {
+    const crdts: CRDTSnapshotEntry[] = [];
+    for (const [crdtId, h] of this.gcHandles)
+      crdts.push({ type: "gcounter", crdtId, value: h.value(), counts: h.counts() });
+    for (const [crdtId, h] of this.pnHandles)
+      crdts.push({ type: "pncounter", crdtId, value: h.value() });
+    for (const [crdtId, h] of this.orHandles)
+      crdts.push({ type: "orset", crdtId, elements: h.elements() as unknown[] });
+    for (const [crdtId, h] of this.lwHandles)
+      crdts.push({ type: "lwwregister", crdtId, value: h.value(), meta: h.meta() });
+    for (const [crdtId, h] of this.prHandles)
+      crdts.push({ type: "presence", crdtId, online: h.online() as { clientId: number; data: unknown; expiresAtMs: number }[] });
+    for (const [crdtId, h] of this.cmHandles)
+      crdts.push({ type: "crdtmap", crdtId, value: h.value() });
+    return {
+      namespace: this.namespace,
+      clientId: this.clientId,
+      wsState: this.transport.currentState,
+      pendingOpCount: this.transport.pendingOpCount,
+      crdts,
+    };
   }
 
   /**
@@ -309,7 +411,14 @@ export class MeridianClient {
    * on unmount.
    */
   close(): void {
+    for (const unsub of this.handleUnsubs) unsub();
+    this.handleUnsubs.length = 0;
+    this.anyListeners.clear();
     this.transport.close();
+  }
+
+  private notifyAnyChange(): void {
+    for (const fn of this.anyListeners) fn();
   }
 
   private handleServerMsg(msg: ServerMsg): void {

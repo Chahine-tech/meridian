@@ -42,7 +42,8 @@
               "sdk/installation",
               "sdk/client",
               "sdk/error-handling",
-              "sdk/react"
+              "sdk/react",
+              "sdk/devtools"
             ]
           },
           {
