@@ -63,6 +63,12 @@ export type CRDTSnapshotEntry =
   | PresenceSnapshotEntry
   | CRDTMapSnapshotEntry;
 
+export interface DeltaEvent {
+  crdtId: string;
+  type: CRDTSnapshotEntry["type"];
+  at: number; // Date.now()
+}
+
 export interface ClientSnapshot {
   namespace: string;
   clientId: number;
@@ -121,6 +127,7 @@ export class MeridianClient {
   private readonly cmHandles = new Map<string, CRDTMapHandle>();
 
   private readonly anyListeners = new Set<() => void>();
+  private readonly deltaListeners = new Set<(event: DeltaEvent) => void>();
   private readonly handleUnsubs: Array<() => void> = [];
 
   private constructor(config: MeridianClientConfig, claims: TokenClaims) {
@@ -377,6 +384,16 @@ export class MeridianClient {
   }
 
   /**
+   * Subscribe to incoming CRDT deltas from the server.
+   * Fires after each delta is applied to the local handle.
+   * Intended for devtools — not for production data flows.
+   */
+  onDelta(listener: (event: DeltaEvent) => void): () => void {
+    this.deltaListeners.add(listener);
+    return () => { this.deltaListeners.delete(listener); };
+  }
+
+  /**
    * Returns a point-in-time snapshot of all active CRDT handles and transport state.
    * Intended for devtools — not for production data flows.
    */
@@ -414,6 +431,7 @@ export class MeridianClient {
     for (const unsub of this.handleUnsubs) unsub();
     this.handleUnsubs.length = 0;
     this.anyListeners.clear();
+    this.deltaListeners.clear();
     this.transport.close();
   }
 
@@ -428,31 +446,43 @@ export class MeridianClient {
     const gcHandle = this.gcHandles.get(crdt_id);
     if (gcHandle) {
       try { gcHandle.applyDelta(decodeGCounterDelta(delta_bytes)); } catch { /* stale */ }
+      this.notifyDelta(crdt_id, "gcounter");
       return;
     }
     const pnHandle = this.pnHandles.get(crdt_id);
     if (pnHandle) {
       try { pnHandle.applyDelta(decodePNCounterDelta(delta_bytes)); } catch { /* stale */ }
+      this.notifyDelta(crdt_id, "pncounter");
       return;
     }
     const orHandle = this.orHandles.get(crdt_id);
     if (orHandle) {
       try { orHandle.applyDelta(decodeORSetDelta(delta_bytes)); } catch { /* stale */ }
+      this.notifyDelta(crdt_id, "orset");
       return;
     }
     const lwHandle = this.lwHandles.get(crdt_id);
     if (lwHandle) {
       try { lwHandle.applyDelta(decodeLwwDelta(delta_bytes)); } catch { /* stale */ }
+      this.notifyDelta(crdt_id, "lwwregister");
       return;
     }
     const prHandle = this.prHandles.get(crdt_id);
     if (prHandle) {
       try { prHandle.applyDelta(decodePresenceDelta(delta_bytes)); } catch { /* stale */ }
+      this.notifyDelta(crdt_id, "presence");
       return;
     }
     const cmHandle = this.cmHandles.get(crdt_id);
     if (cmHandle) {
       try { cmHandle.applyDelta(decodeCRDTMapDelta(delta_bytes)); } catch { /* stale */ }
+      this.notifyDelta(crdt_id, "crdtmap");
     }
+  }
+
+  private notifyDelta(crdtId: string, type: CRDTSnapshotEntry["type"]): void {
+    if (this.deltaListeners.size === 0) return;
+    const event: DeltaEvent = { crdtId, type, at: Date.now() };
+    for (const fn of this.deltaListeners) fn(event);
   }
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ComponentType } from "react";
-import type { MeridianClient, ClientSnapshot, CRDTSnapshotEntry } from "meridian-sdk";
+import type { MeridianClient, ClientSnapshot, CRDTSnapshotEntry, DeltaEvent } from "meridian-sdk";
 import { useDevtoolsState } from "./useDevtoolsState.js";
 import { styles, wsStateColor } from "./styles.js";
 
@@ -69,9 +69,28 @@ function CRDTsSection({ crdts }: { crdts: CRDTSnapshotEntry[] }) {
   );
 }
 
+function EventsSection({ events }: { events: DeltaEvent[] }) {
+  return (
+    <div style={styles.section}>
+      <div style={styles.sectionTitle}>Events ({events.length})</div>
+      {events.length === 0 ? (
+        <div style={{ color: "#52525b", fontStyle: "italic" }}>No events yet</div>
+      ) : (
+        [...events].reverse().map((e) => (
+          <div key={`${e.at}-${e.crdtId}`} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", borderBottom: "1px solid #18181b" }}>
+            <span style={styles.typeBadge(e.type)}>{e.type}</span>
+            <span style={{ color: "#a78bfa", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.crdtId}</span>
+            <span style={{ color: "#52525b", fontSize: 10 }}>{new Date(e.at).toLocaleTimeString()}</span>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 function MeridianDevtoolsImpl({ client, defaultOpen = false }: MeridianDevtoolsProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
-  const [snapshot, refresh] = useDevtoolsState(client);
+  const [snapshot, events, refresh] = useDevtoolsState(client);
 
   return (
     <>
@@ -90,6 +109,7 @@ function MeridianDevtoolsImpl({ client, defaultOpen = false }: MeridianDevtoolsP
           <div style={styles.body}>
             <ConnectionSection snapshot={snapshot} />
             <CRDTsSection crdts={snapshot.crdts} />
+            <EventsSection events={events} />
           </div>
         </div>
       )}

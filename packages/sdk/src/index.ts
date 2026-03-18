@@ -4,6 +4,7 @@ export { MeridianClient } from "./client.js";
 export type {
   MeridianClientConfig,
   ClientSnapshot,
+  DeltaEvent,
   CRDTSnapshotEntry,
   GCounterSnapshotEntry,
   PNCounterSnapshotEntry,
