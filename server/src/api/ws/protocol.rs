@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn client_msg_op_roundtrip() {
-        let msg = ClientMsg::Op { crdt_id: "set".into(), op_bytes: ByteBuf::from(vec![1, 2, 3]) };
+        let msg = ClientMsg::Op { crdt_id: "set".into(), op_bytes: ByteBuf::from(vec![1, 2, 3]), ttl_ms: None };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ClientMsg::from_msgpack(&bytes).unwrap();
         assert!(matches!(decoded, ClientMsg::Op { op_bytes, .. } if op_bytes.as_ref() == [1, 2, 3]));
