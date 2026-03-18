@@ -8,6 +8,7 @@ import { useEffect } from "react";
  * Only use this for syncing with external systems (DOM, timers, subscriptions).
  * For all other cases, prefer derived state, event handlers, or data-fetching libraries.
  */
-export function useMountEffect(effect: () => void | (() => void)): void {
+export function useMountEffect(effect: () => (() => void) | undefined): void {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only by design
   useEffect(effect, []);
 }
