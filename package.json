@@ -5,6 +5,7 @@
     "packages/sdk",
     "packages/sdk-react",
     "packages/devtools",
-    "examples/collaborative-workspace"
+    "examples/collaborative-workspace",
+    "examples/cursors"
   ]
 }

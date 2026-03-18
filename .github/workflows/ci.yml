@@ -79,3 +79,26 @@ jobs:
       - name: typecheck
         working-directory: packages/sdk-react
         run: bun run typecheck
+
+  devtools:
+    name: Devtools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: install
+        run: bun install
+
+      - name: build sdk
+        working-directory: packages/sdk
+        run: bun run build
+
+      - name: lint
+        working-directory: packages/devtools
+        run: bun run lint
+
+      - name: typecheck
+        working-directory: packages/devtools
+        run: bun run typecheck

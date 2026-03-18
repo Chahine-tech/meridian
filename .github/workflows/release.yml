@@ -109,6 +109,39 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+  devtools-publish:
+    name: Publish Devtools to npm
+    needs: sdk-publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: install
+        run: bun install
+
+      - name: build sdk
+        working-directory: packages/sdk
+        run: bun run build
+
+      - name: typecheck
+        working-directory: packages/devtools
+        run: bun run typecheck
+
+      - name: build
+        working-directory: packages/devtools
+        run: bun run build
+
+      - name: publish
+        working-directory: packages/devtools
+        run: bun publish --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
   docker:
     name: Docker image
     runs-on: ubuntu-latest
@@ -141,7 +174,7 @@ jobs:
 
   github-release:
     name: GitHub Release
-    needs: [server, sdk-publish, sdk-react-publish, docker]
+    needs: [server, sdk-publish, sdk-react-publish, devtools-publish, docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write
