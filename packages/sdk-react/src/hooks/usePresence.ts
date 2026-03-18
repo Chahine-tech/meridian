@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useMemo, useRef, useSyncExternalStore } from "react";
+import { useMountEffect } from "./useMountEffect.js";
 import type { Schema } from "effect";
 import type { PresenceEntry } from "meridian-sdk";
 import { useMeridianClient } from "../context.js";
@@ -64,16 +65,27 @@ export const usePresence = <T = unknown>(
     [client, crdtId, opts?.schema],
   );
 
+  const snapshotRef = useRef<PresenceEntry<T>[]>([]);
+  const getSnapshot = useMemo(() => () => {
+    const next = handle.online();
+    const prev = snapshotRef.current;
+    if (next.length === prev.length && next.every((e, i) => e === prev[i])) {
+      return prev;
+    }
+    snapshotRef.current = next;
+    return next;
+  }, [handle]);
+
   const online = useSyncExternalStore(
     (notify) => handle.onChange(() => notify()),
-    () => handle.online(),
-    () => handle.online(),
+    getSnapshot,
+    getSnapshot,
   );
 
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
-  useEffect(() => {
+  useMountEffect(() => {
     if (optsRef.current?.data === undefined) return;
 
     const ttlMs = optsRef.current.ttlMs ?? DEFAULT_PRESENCE_TTL_MS;
@@ -91,7 +103,7 @@ export const usePresence = <T = unknown>(
       clearInterval(timer);
       handle.leave();
     };
-  }, [handle]);
+  });
 
   return {
     online,

@@ -1,7 +1,7 @@
 {
-  "name": "meridian-sdk",
-  "version": "0.3.3",
-  "description": "TypeScript SDK for Meridian CRDT server",
+  "name": "meridian-devtools",
+  "version": "0.1.0",
+  "description": "React devtools overlay for Meridian CRDT state",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,32 +13,25 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "bun test",
-    "test:watch": "bun test --watch",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint ./src",
     "format": "biome format --write ./src"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.7",
-    "@types/bun": "latest",
-    "typescript": "^5.7.0"
-  },
-  "dependencies": {
-    "effect": "^3.19.0",
-    "@msgpack/msgpack": "^3.0.0"
+    "@types/react": "^19.0.0",
+    "meridian-sdk": "workspace:*",
+    "typescript": "^5.8.0"
   },
   "peerDependencies": {
+    "meridian-sdk": "^0.3.0",
+    "react": "^19.0.0",
     "typescript": ">=5.0.0"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/Chahine-tech/meridian.git",
-    "directory": "packages/sdk"
-  },
-  "homepage": "https://github.com/Chahine-tech/meridian#readme",
-  "bugs": {
-    "url": "https://github.com/Chahine-tech/meridian/issues"
+    "directory": "packages/devtools"
   }
 }

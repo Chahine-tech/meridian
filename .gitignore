@@ -11,6 +11,15 @@ packages/sdk/bun.lock
 packages/sdk-react/node_modules/
 packages/sdk-react/dist/
 packages/sdk-react/bun.lock
+packages/devtools/node_modules/
+packages/devtools/dist/
+packages/devtools/bun.lock
+
+# Examples
+examples/collaborative-workspace/node_modules/
+examples/collaborative-workspace/dist/
+examples/cursors/node_modules/
+examples/cursors/dist/
 
 # Env
 .env

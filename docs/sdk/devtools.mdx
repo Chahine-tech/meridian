@@ -1,0 +1,76 @@
+---
+title: Devtools
+description: Inspect live CRDT state, connection status, and pending ops during development.
+---
+
+`meridian-devtools` adds a floating overlay to your React app that shows the current state of all active CRDTs and the WebSocket connection. It renders nothing in production.
+
+## Installation
+
+```bash
+npm install meridian-devtools
+# or
+bun add meridian-devtools
+```
+
+Requires `react ^19.0.0` and `meridian-sdk ^0.3.0` as peer dependencies.
+
+## Setup
+
+Drop `<MeridianDevtools />` anywhere in your component tree, passing the same `client` instance used by `MeridianProvider`:
+
+```tsx
+import { MeridianDevtools } from "meridian-devtools";
+
+function App() {
+  return (
+    <MeridianProvider client={client}>
+      <YourApp />
+      <MeridianDevtools client={client} />
+    </MeridianProvider>
+  );
+}
+```
+
+A floating **M** button appears in the bottom-right corner. Click it to toggle the panel.
+
+## Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `client` | `MeridianClient` | required | The client instance to inspect |
+| `defaultOpen` | `boolean` | `false` | Open the panel on first render |
+
+## What the panel shows
+
+**Connection section**
+- WebSocket state: `CONNECTED`, `CONNECTING`, `DISCONNECTED`, or `CLOSING`
+- Current namespace and client ID
+- Pending ops count — non-zero when disconnected with buffered writes
+
+**CRDTs section**
+
+All active handles are listed with their current value as JSON, color-coded by type:
+
+| Color | Type |
+|-------|------|
+| Blue | `gcounter` |
+| Teal | `pncounter` |
+| Amber | `orset` |
+| Violet | `lwwregister` |
+| Pink | `presence` |
+| Green | `crdtmap` |
+
+**Events section**
+
+The last 20 incoming deltas from the server are listed in reverse-chronological order, with the CRDT type, ID, and timestamp. This gives a live view of which CRDTs are receiving updates and how frequently.
+
+**Refresh button**
+
+A `↻` button in the panel header forces a manual snapshot refresh — useful if the panel appears stale between auto-updates.
+
+The panel updates in real time as values change or the connection state transitions.
+
+## Production
+
+The component and all its code are excluded from production builds. Bundlers (Vite, Next.js, webpack) eliminate the implementation via `NODE_ENV` dead-code analysis — there is zero runtime overhead in deployed applications.
