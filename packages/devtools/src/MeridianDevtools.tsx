@@ -109,7 +109,7 @@ function MeridianDevtoolsImpl({ client, defaultOpen = false }: MeridianDevtoolsP
 // In production builds the entire MeridianDevtoolsImpl is tree-shaken away.
 declare const process: { env: Record<string, string | undefined> } | undefined;
 const isProduction =
-  typeof process !== "undefined" && process.env["NODE_ENV"] === "production";
+  typeof process !== "undefined" && process.env.NODE_ENV === "production";
 
 export const MeridianDevtools: ComponentType<MeridianDevtoolsProps> =
   isProduction ? () => null : MeridianDevtoolsImpl;
