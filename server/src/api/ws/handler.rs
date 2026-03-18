@@ -179,7 +179,7 @@ async fn handle_client_message<S: WsState>(
             }
         }
 
-        ClientMsg::Op { crdt_id, op_bytes } => {
+        ClientMsg::Op { crdt_id, op_bytes, ttl_ms } => {
             if !claims.can_write_key(&crdt_id) {
                 send_error(socket, 403, "insufficient permissions for key").await;
                 return true;
@@ -194,7 +194,7 @@ async fn handle_client_message<S: WsState>(
                 }
             };
 
-            match apply_op_atomic(state.store(), ns, &crdt_id, op).await {
+            match apply_op_atomic(state.store(), ns, &crdt_id, op, ttl_ms).await {
                 Ok(Some(delta_bytes)) => {
                     *seq += 1;
                     metrics::record_op(ns, &crdt_id, "ws");
@@ -242,6 +242,16 @@ async fn handle_client_message<S: WsState>(
                     send_error(socket, 500, "internal error").await;
                 }
             }
+        }
+
+        ClientMsg::AwarenessUpdate { key, data } => {
+            // Stateless fan-out — no persistence, no ack.
+            let broadcast_msg = Arc::new(ServerMsg::AwarenessBroadcast {
+                client_id,
+                key,
+                data,
+            });
+            state.subscriptions().publish(ns, broadcast_msg);
         }
 
         ClientMsg::Sync { crdt_id, since_vc } => {

@@ -9,6 +9,7 @@ import { ORSetHandle } from "./crdt/orset.js";
 import { LwwRegisterHandle } from "./crdt/lwwregister.js";
 import { PresenceHandle } from "./crdt/presence.js";
 import { CRDTMapHandle } from "./crdt/crdtmap.js";
+import { AwarenessHandle } from "./crdt/awareness.js";
 import {
   decodeGCounterDelta,
   decodePNCounterDelta,
@@ -125,6 +126,7 @@ export class MeridianClient {
   private readonly lwHandles = new Map<string, LwwRegisterHandle<unknown>>();
   private readonly prHandles = new Map<string, PresenceHandle<unknown>>();
   private readonly cmHandles = new Map<string, CRDTMapHandle>();
+  private readonly awHandles = new Map<string, AwarenessHandle<unknown>>();
 
   private readonly anyListeners = new Set<() => void>();
   private readonly deltaListeners = new Set<(event: DeltaEvent) => void>();
@@ -356,6 +358,38 @@ export class MeridianClient {
     return handle;
   }
 
+  /**
+   * Returns a handle for an ephemeral awareness channel.
+   *
+   * Awareness updates are fanned out to all other subscribers in the namespace
+   * in real time but are **not** persisted. Use this for high-frequency,
+   * transient UI state like cursor positions or "is typing" indicators.
+   *
+   * Handles are cached by `key`; the same handle is returned for repeated calls
+   * with the same key.
+   *
+   * @param key    - Logical channel name (e.g. `"cursors"`, `"selection:doc-1"`).
+   * @param schema - Optional Effect schema used to decode peer payloads at runtime.
+   *
+   * @example
+   * ```ts
+   * import { Schema } from 'effect';
+   *
+   * const CursorSchema = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+   * const cursors = client.awareness('cursors', CursorSchema);
+   * cursors.update({ x: 42, y: 100 });
+   * cursors.onChange(peers => console.log(peers));
+   * ```
+   */
+  awareness<T = unknown>(key: string, schema?: Schema.Schema<T>): AwarenessHandle<T> {
+    const existing = this.awHandles.get(key);
+    if (existing) return existing as AwarenessHandle<T>;
+    const handle = new AwarenessHandle<T>(key, this.transport, this.clientId, schema);
+    this.awHandles.set(key, handle as AwarenessHandle<unknown>);
+    this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
+    return handle;
+  }
+
   waitForConnected(timeoutMs = 5_000): Promise<void> {
     return this.transport.waitForConnected(timeoutMs);
   }
@@ -432,6 +466,7 @@ export class MeridianClient {
     this.handleUnsubs.length = 0;
     this.anyListeners.clear();
     this.deltaListeners.clear();
+    this.awHandles.clear();
     this.transport.close();
   }
 
@@ -445,6 +480,12 @@ export class MeridianClient {
   }
 
   private handleServerMsg(msg: ServerMsg): void {
+    if ("AwarenessBroadcast" in msg) {
+      const { client_id, key, data } = msg.AwarenessBroadcast;
+      this.awHandles.get(key)?.applyBroadcast(client_id, data);
+      return;
+    }
+
     if (!("Delta" in msg)) return;
     const { crdt_id, delta_bytes } = msg.Delta;
 

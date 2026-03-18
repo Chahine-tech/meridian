@@ -209,8 +209,10 @@ export class WsTransport {
   private flushPendingOps(): void {
     const ops = this.pendingOps.splice(0);
     for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      if (op === undefined) continue;
       try {
-        this.ws!.send(encodeClientMsg(ops[i]!));
+        this.ws?.send(encodeClientMsg(op));
       } catch {
         // WebSocket closed between open and flush — re-queue remaining ops.
         this.pendingOps.unshift(...ops.slice(i));

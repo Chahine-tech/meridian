@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use tokio::time;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, instrument};
+use tracing::{debug, error, instrument, warn};
 
 use crate::{
     api::ws::SubscriptionManager,
@@ -13,16 +13,17 @@ use crate::{
 
 const GC_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Background task: prunes expired Presence entries every 5 seconds.
+/// Background task: runs two GC sweeps every 5 seconds.
 ///
-/// For each Presence CRDT in all namespaces:
-/// 1. Load from store
-/// 2. Call `.gc(now_ms())` → returns a delta of removed entries
-/// 3. If changed: persist updated state + publish delta to subscribers
+/// 1. **Presence GC** — for each Presence CRDT: load, call `.gc(now_ms())`,
+///    persist if changed, publish tombstone delta to subscribers.
+///
+/// 2. **TTL GC** — delete any CRDT entry whose `expires_at_ms` has passed
+///    via `Store::delete_expired`.  On PostgreSQL this is a single indexed
+///    DELETE; for in-memory / sled backends it is a no-op.
 ///
 /// The GC task holds no in-memory locks across store calls — each cycle
-/// is a fresh read-modify-write. The CAS-like safety comes from sled's
-/// single-writer guarantee per key at the storage level.
+/// is a fresh read-modify-write.
 #[instrument(skip(store, subscriptions, cancel))]
 pub async fn run_presence_gc<S: CrdtStore>(
     store: Arc<S>,
@@ -47,10 +48,14 @@ pub async fn run_presence_gc<S: CrdtStore>(
     }
 }
 
-async fn gc_tick<S: CrdtStore>(store: &S, subscriptions: &SubscriptionManager) -> Result<()> {
+async fn gc_tick<S: CrdtStore>(
+    store: &S,
+    subscriptions: &SubscriptionManager,
+) -> Result<()> {
     let now = now_ms();
-    let all = store.scan_prefix("").await?;
 
+    // --- Pass 1: Presence CRDT entry expiry (removes individual entries) ----
+    let all = store.scan_prefix("").await?;
     for (key, mut crdt) in all {
         let CrdtValue::Presence(ref mut presence) = crdt else {
             continue;
@@ -78,6 +83,21 @@ async fn gc_tick<S: CrdtStore>(store: &S, subscriptions: &SubscriptionManager) -
         }
 
         debug!(key, "gc: pruned expired presence entries");
+    }
+
+    // --- Pass 2: TTL-based CRDT expiry (deletes whole CRDT rows) -----------
+    match store.delete_expired(now).await {
+        Ok(deleted) => {
+            for (ns, crdt_id) in deleted {
+                debug!(ns, crdt_id, "gc: deleted TTL-expired CRDT");
+                // Subscribers don't need a delta for a fully deleted CRDT —
+                // they will simply stop receiving future updates.  Logging is
+                // sufficient for now.
+            }
+        }
+        Err(e) => {
+            warn!(error = %e, "gc: delete_expired failed");
+        }
     }
 
     Ok(())

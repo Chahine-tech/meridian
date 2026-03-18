@@ -30,9 +30,13 @@ pub enum ApplyError {
 
 /// Load a CRDT, apply `op`, and persist the result atomically.
 ///
-/// Uses [`Store::merge_put_with`] so that on shared PostgreSQL the
+/// Uses [`Store::merge_put_with_expiry`] so that on shared PostgreSQL the
 /// read-merge-write is protected by a `SELECT FOR UPDATE` transaction,
 /// preventing lost updates from concurrent writes across nodes.
+///
+/// `ttl_ms` — if `Some(n)`, the CRDT entry will be marked for deletion by
+/// the GC task after `n` milliseconds from now.  Pass `None` for permanent
+/// entries (the default).
 ///
 /// Returns `Ok(Some(delta_bytes))` if the op produced a delta,
 /// `Ok(None)` if it was a no-op, or `Err` on storage/CRDT failure.
@@ -41,15 +45,28 @@ pub async fn apply_op_atomic<S: CrdtStore>(
     ns: &str,
     crdt_id: &str,
     op: CrdtOp,
+    ttl_ms: Option<u64>,
 ) -> Result<Option<Vec<u8>>, ApplyError> {
     let crdt_type = op.crdt_type();
 
+    // Compute expires_at_ms once so the storage layer doesn't need to know
+    // about wall-clock time.
+    let expires_at_ms = ttl_ms.map(|ms| {
+        crate::crdt::clock::now_ms().saturating_add(ms)
+    });
+
     let delta = store
-        .merge_put_with(ns, crdt_id, CrdtValue::new(crdt_type), |existing, default| {
-            let mut crdt = existing.unwrap_or(default);
-            let delta = apply_op(&mut crdt, op);
-            (crdt, delta)
-        })
+        .merge_put_with_expiry(
+            ns,
+            crdt_id,
+            CrdtValue::new(crdt_type),
+            expires_at_ms,
+            |existing, default| {
+                let mut crdt = existing.unwrap_or(default);
+                let delta = apply_op(&mut crdt, op);
+                (crdt, delta)
+            },
+        )
         .await
         .map_err(ApplyError::Storage)?
         .map_err(ApplyError::Crdt)?;

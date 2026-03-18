@@ -1,6 +1,6 @@
 import { useCallback, useRef } from "react";
 import { Schema } from "effect";
-import { usePresence, useMeridianClient } from "meridian-react";
+import { useAwareness, useMeridianClient } from "meridian-react";
 import { colorForClient } from "./colors.js";
 
 const CursorSchema = Schema.Struct({
@@ -70,26 +70,22 @@ export function Canvas() {
   const myName = `Client #${client.clientId}`;
   const myColor = colorForClient(client.clientId);
 
-  const { online, heartbeat } = usePresence<CursorData>("pr:cursors", {
-    schema: CursorSchema,
-    ttlMs: 5_000,
-  });
+  const { peers, update, clear } = useAwareness<CursorData>("cursors", CursorSchema);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    heartbeat(
-      { x: e.clientX - rect.left, y: e.clientY - rect.top, name: myName },
-      5_000
-    );
-  }, [heartbeat, myName]);
+    update({ x: e.clientX - rect.left, y: e.clientY - rect.top, name: myName });
+  }, [update, myName]);
 
-  const others = online.filter((entry) => entry.clientId !== client.clientId);
+  // Clear our cursor when the mouse leaves the canvas
+  const handleMouseLeave = useCallback(() => { clear(); }, [clear]);
 
   return (
     <div
       ref={containerRef}
       onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
       style={{
         width: "100%",
         height: "100%",
@@ -116,7 +112,7 @@ export function Canvas() {
         {myName} (you)
       </div>
 
-      <VisitorCount count={online.length} />
+      <VisitorCount count={peers.length + 1} />
 
       {/* Hint */}
       <div style={{
@@ -135,7 +131,7 @@ export function Canvas() {
       </div>
 
       {/* Remote cursors */}
-      {others.map((entry) => (
+      {peers.map((entry) => (
         <RemoteCursor
           key={entry.clientId}
           clientId={entry.clientId}

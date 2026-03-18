@@ -22,3 +22,6 @@ use crate::crdt::registry::CrdtValue;
 
 pub trait CrdtStore: Store<CrdtValue> {}
 impl<T: Store<CrdtValue>> CrdtStore for T {}
+
+// `delete_expired` is a default method on `Store<V>` (in meridian-storage).
+// `CrdtStore` inherits it via `Store<CrdtValue>` — no extra trait needed.
