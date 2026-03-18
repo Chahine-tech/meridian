@@ -435,6 +435,11 @@ export class MeridianClient {
     this.transport.close();
   }
 
+  /** Re-opens the WebSocket after a `close()`. Used by MeridianProvider to survive React StrictMode double-mount. */
+  reopen(): void {
+    this.transport.reopen();
+  }
+
   private notifyAnyChange(): void {
     for (const fn of this.anyListeners) fn();
   }

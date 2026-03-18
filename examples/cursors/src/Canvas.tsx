@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { Schema } from "effect";
-import { usePresence, useGCounter, useMeridianClient } from "meridian-react";
+import { usePresence, useMeridianClient } from "meridian-react";
 import { colorForClient } from "./colors.js";
 
 const CursorSchema = Schema.Struct({
@@ -44,8 +44,7 @@ function RemoteCursor({ x, y, name, clientId }: CursorData & { clientId: number 
   );
 }
 
-function VisitorCount() {
-  const { value } = useGCounter("gc:visitors");
+function VisitorCount({ count }: { count: number }) {
   return (
     <div style={{
       position: "fixed",
@@ -59,7 +58,7 @@ function VisitorCount() {
       fontFamily: "monospace",
       color: "#a1a1aa",
     }}>
-      {value} visitor{value !== 1 ? "s" : ""} connected
+      {count} visitor{count !== 1 ? "s" : ""} connected
     </div>
   );
 }
@@ -75,10 +74,6 @@ export function Canvas() {
     schema: CursorSchema,
     ttlMs: 5_000,
   });
-
-  const visitors = useGCounter("gc:visitors");
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { visitors.increment(1); }, []);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -121,7 +116,7 @@ export function Canvas() {
         {myName} (you)
       </div>
 
-      <VisitorCount />
+      <VisitorCount count={online.length} />
 
       {/* Hint */}
       <div style={{

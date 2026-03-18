@@ -56,6 +56,11 @@ export class WsTransport {
     this.ws?.close(1000, "client close");
   }
 
+  reopen(): void {
+    this.closed = false;
+    this.doConnect();
+  }
+
   subscribe(crdtId: string, sinceVc: VectorClock = {}): void {
     this.subscriptions.set(crdtId, sinceVc);
     if (this.state === "CONNECTED") {

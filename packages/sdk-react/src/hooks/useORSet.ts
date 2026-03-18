@@ -1,4 +1,4 @@
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo, useRef, useSyncExternalStore } from "react";
 import type { Schema } from "effect";
 import { useMeridianClient } from "../context.js";
 
@@ -54,10 +54,19 @@ export const useORSet = <T = unknown>(
     [client, crdtId, schema],
   );
 
+  const snapshotRef = useRef<T[]>([]);
+  const getSnapshot = useMemo(() => () => {
+    const next = handle.elements();
+    const prev = snapshotRef.current;
+    if (next.length === prev.length && next.every((e, i) => e === prev[i])) return prev;
+    snapshotRef.current = next;
+    return next;
+  }, [handle]);
+
   const elements = useSyncExternalStore(
     (notify) => handle.onChange(() => notify()),
-    () => handle.elements(),
-    () => handle.elements(),
+    getSnapshot,
+    getSnapshot,
   );
 
   return {

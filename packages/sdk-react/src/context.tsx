@@ -39,6 +39,7 @@ const MeridianContext = createContext<MeridianClient | null>(null);
  */
 export const MeridianProvider = ({ client, children }: MeridianProviderProps) => {
   useMountEffect(() => {
+    client.reopen();
     return () => {
       client.close();
     };

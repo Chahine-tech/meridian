@@ -65,10 +65,21 @@ export const usePresence = <T = unknown>(
     [client, crdtId, opts?.schema],
   );
 
+  const snapshotRef = useRef<PresenceEntry<T>[]>([]);
+  const getSnapshot = useMemo(() => () => {
+    const next = handle.online();
+    const prev = snapshotRef.current;
+    if (next.length === prev.length && next.every((e, i) => e === prev[i])) {
+      return prev;
+    }
+    snapshotRef.current = next;
+    return next;
+  }, [handle]);
+
   const online = useSyncExternalStore(
     (notify) => handle.onChange(() => notify()),
-    () => handle.online(),
-    () => handle.online(),
+    getSnapshot,
+    getSnapshot,
   );
 
   const optsRef = useRef(opts);
