@@ -71,7 +71,7 @@ function CRDTsSection({ crdts }: { crdts: CRDTSnapshotEntry[] }) {
 
 function MeridianDevtoolsImpl({ client, defaultOpen = false }: MeridianDevtoolsProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
-  const snapshot = useDevtoolsState(client);
+  const [snapshot, refresh] = useDevtoolsState(client);
 
   return (
     <>
@@ -80,6 +80,12 @@ function MeridianDevtoolsImpl({ client, defaultOpen = false }: MeridianDevtoolsP
           <div style={styles.header}>
             <span>M</span>
             <span>Meridian Devtools</span>
+            <button
+              type="button"
+              onClick={refresh}
+              title="Refresh snapshot"
+              style={{ marginLeft: "auto", background: "none", border: "none", color: "#a1a1aa", cursor: "pointer", fontSize: 14, padding: "0 4px" }}
+            >↻</button>
           </div>
           <div style={styles.body}>
             <ConnectionSection snapshot={snapshot} />

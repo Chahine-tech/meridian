@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Schema } from "effect";
 import { usePresence, useGCounter, useMeridianClient } from "meridian-react";
 import { colorForClient } from "./colors.js";
@@ -76,13 +76,9 @@ export function Canvas() {
     ttlMs: 5_000,
   });
 
-  // Increment visitor count once on mount via ref to avoid double-increment in StrictMode
-  const countedRef = useRef(false);
   const visitors = useGCounter("gc:visitors");
-  if (!countedRef.current) {
-    countedRef.current = true;
-    visitors.increment(1);
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { visitors.increment(1); }, []);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = containerRef.current?.getBoundingClientRect();
