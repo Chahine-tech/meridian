@@ -1,5 +1,14 @@
 # meridian-example-cursors
 
+## 0.0.3
+
+### Patch Changes
+
+- Updated dependencies [c7f86c9]
+  - meridian-sdk@1.0.0
+  - meridian-devtools@2.0.0
+  - meridian-react@2.0.0
+
 ## 0.0.2
 
 ### Patch Changes
