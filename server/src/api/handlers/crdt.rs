@@ -92,7 +92,8 @@ pub async fn post_op<S: AppStateExt>(
         }
     }
 
-    let delta_bytes = match apply_op_atomic(state.store(), &ns, &id, op).await {
+    // HTTP API does not expose TTL — pass None (permanent entry).
+    let delta_bytes = match apply_op_atomic(state.store(), &ns, &id, op, None).await {
         Ok(d) => d,
         Err(ApplyError::Crdt(e)) => {
             return (

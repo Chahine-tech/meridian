@@ -1,6 +1,6 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Schema } from "effect";
-import { usePresence, useMeridianClient } from "meridian-react";
+import { useAwareness, useMeridianClient, usePresence } from "meridian-react";
 import { colorForClient } from "./colors.js";
 
 const CursorSchema = Schema.Struct({
@@ -70,26 +70,40 @@ export function Canvas() {
   const myName = `Client #${client.clientId}`;
   const myColor = colorForClient(client.clientId);
 
-  const { online, heartbeat } = usePresence<CursorData>("pr:cursors", {
-    schema: CursorSchema,
-    ttlMs: 5_000,
-  });
+  const { peers, update, clear } = useAwareness<CursorData>("cursors", CursorSchema);
+  const { online } = usePresence("visitors", { data: {}, ttlMs: 15_000 });
+
+  // Track last known position so we can re-broadcast periodically.
+  // Awareness is stateless — new peers won't see our cursor until we move again.
+  const lastPosRef = useRef<CursorData | null>(null);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    heartbeat(
-      { x: e.clientX - rect.left, y: e.clientY - rect.top, name: myName },
-      5_000
-    );
-  }, [heartbeat, myName]);
+    const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top, name: myName };
+    lastPosRef.current = pos;
+    update(pos);
+  }, [update, myName]);
 
-  const others = online.filter((entry) => entry.clientId !== client.clientId);
+  // Clear our cursor when the mouse leaves the canvas
+  const handleMouseLeave = useCallback(() => {
+    lastPosRef.current = null;
+    clear();
+  }, [clear]);
+
+  // Re-broadcast our position every 3 s so late-joining peers see us immediately.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (lastPosRef.current) update(lastPosRef.current);
+    }, 3_000);
+    return () => clearInterval(id);
+  }, [update]);
 
   return (
     <div
       ref={containerRef}
       onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
       style={{
         width: "100%",
         height: "100%",
@@ -135,7 +149,7 @@ export function Canvas() {
       </div>
 
       {/* Remote cursors */}
-      {others.map((entry) => (
+      {peers.map((entry) => (
         <RemoteCursor
           key={entry.clientId}
           clientId={entry.clientId}

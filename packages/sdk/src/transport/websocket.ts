@@ -57,6 +57,11 @@ export class WsTransport {
   }
 
   reopen(): void {
+    // Disown the current ws before creating a new one so its close event
+    // fires with ws !== this.ws and does not trigger scheduleReconnect.
+    const old = this.ws;
+    this.ws = null;
+    old?.close(1000, "reopen");
     this.closed = false;
     this.doConnect();
   }
@@ -209,8 +214,10 @@ export class WsTransport {
   private flushPendingOps(): void {
     const ops = this.pendingOps.splice(0);
     for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      if (op === undefined) continue;
       try {
-        this.ws!.send(encodeClientMsg(ops[i]!));
+        this.ws?.send(encodeClientMsg(op));
       } catch {
         // WebSocket closed between open and flush — re-queue remaining ops.
         this.pendingOps.unshift(...ops.slice(i));

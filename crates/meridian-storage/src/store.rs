@@ -74,6 +74,22 @@ where
         }
     }
 
+    /// Delete all entries whose TTL has expired (i.e. `expires_at_ms < before_ms`).
+    ///
+    /// Returns the `(namespace, crdt_id)` pairs that were removed so the caller
+    /// can broadcast tombstone deltas via the subscription manager.
+    ///
+    /// The default implementation is a no-op (returns an empty list). Backends
+    /// that store an indexed `expires_at_ms` column (e.g. `PgStore`) should
+    /// override this with a single efficient DELETE query.
+    fn delete_expired(
+        &self,
+        before_ms: u64,
+    ) -> impl std::future::Future<Output = Result<Vec<(String, String)>>> + Send {
+        let _ = before_ms;
+        async { Ok(vec![]) }
+    }
+
     /// Like [`merge_put`](Store::merge_put), but the closure also returns a
     /// side-output `R` (e.g. computed delta bytes) alongside the merged value.
     ///
@@ -105,5 +121,28 @@ where
     /// don't buffer writes (e.g. `MemoryStore`).
     fn flush(&self) -> impl std::future::Future<Output = Result<()>> + Send {
         async { Ok(()) }
+    }
+
+    /// Like [`merge_put_with`](Store::merge_put_with) but also sets an optional
+    /// `expires_at_ms` column for TTL-based GC.
+    ///
+    /// The default implementation ignores `expires_at_ms` (safe for backends
+    /// that don't support it). `PgStore` overrides this to persist the expiry
+    /// timestamp in the dedicated indexed column.
+    fn merge_put_with_expiry<F, R>(
+        &self,
+        ns: &str,
+        id: &str,
+        new_value: V,
+        expires_at_ms: Option<u64>,
+        merge_fn: F,
+    ) -> impl std::future::Future<Output = Result<R>> + Send
+    where
+        F: FnOnce(Option<V>, V) -> (V, R) + Send,
+        R: Send,
+    {
+        // Default: ignore `expires_at_ms`, delegate to the standard path.
+        let _ = expires_at_ms;
+        self.merge_put_with(ns, id, new_value, merge_fn)
     }
 }

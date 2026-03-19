@@ -43,10 +43,20 @@ export type VectorClock = typeof VectorClock.Type;
 export const ClientMsg = Schema.Union(
   Schema.Struct({ Subscribe: Schema.Struct({ crdt_id: Schema.String }) }),
   Schema.Struct({
-    Op: Schema.Struct({ crdt_id: Schema.String, op_bytes: Schema.Uint8ArrayFromSelf }),
+    Op: Schema.Struct({
+      crdt_id: Schema.String,
+      op_bytes: Schema.Uint8ArrayFromSelf,
+      ttl_ms: Schema.optional(Schema.Number),
+    }),
   }),
   Schema.Struct({
     Sync: Schema.Struct({ crdt_id: Schema.String, since_vc: Schema.Uint8ArrayFromSelf }),
+  }),
+  Schema.Struct({
+    AwarenessUpdate: Schema.Struct({
+      key: Schema.String,
+      data: Schema.Uint8ArrayFromSelf,
+    }),
   }),
 );
 export type ClientMsg = typeof ClientMsg.Type;
@@ -61,6 +71,13 @@ export const ServerMsg = Schema.Union(
   Schema.Struct({ Ack: Schema.Struct({ seq: Schema.Number }) }),
   Schema.Struct({
     Error: Schema.Struct({ code: Schema.Number, message: Schema.String }),
+  }),
+  Schema.Struct({
+    AwarenessBroadcast: Schema.Struct({
+      client_id: ClientId,
+      key: Schema.String,
+      data: Schema.Uint8ArrayFromSelf,
+    }),
   }),
 );
 export type ServerMsg = typeof ServerMsg.Type;

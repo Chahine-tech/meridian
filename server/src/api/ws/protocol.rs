@@ -14,11 +14,26 @@ pub enum ClientMsg {
 
     /// Apply an operation to a CRDT.
     /// `op_bytes` is msgpack-encoded `CrdtOp`.
-    Op { crdt_id: String, op_bytes: ByteBuf },
+    /// `ttl_ms` — optional TTL in milliseconds.  When set, the CRDT entry is
+    /// scheduled for deletion by the GC task after `ttl_ms` ms.
+    Op {
+        crdt_id: String,
+        op_bytes: ByteBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ttl_ms: Option<u64>,
+    },
 
     /// Request a delta since a vector clock checkpoint.
     /// `since_vc` is msgpack-encoded `VectorClock`.
     Sync { crdt_id: String, since_vc: ByteBuf },
+
+    /// Broadcast an ephemeral awareness update to all other clients in the
+    /// same namespace.  The server does **not** persist this — it is a
+    /// stateless fan-out only.
+    ///
+    /// `key`  — logical channel name (e.g. `"cursors"`, `"selection:doc-1"`).
+    /// `data` — msgpack-encoded payload; the server forwards it verbatim.
+    AwarenessUpdate { key: String, data: ByteBuf },
 }
 
 // ---------------------------------------------------------------------------
@@ -38,6 +53,14 @@ pub enum ServerMsg {
 
     /// Error response. `code` mirrors HTTP status codes where applicable.
     Error { code: u16, message: String },
+
+    /// Fan-out of an [`ClientMsg::AwarenessUpdate`] to all other subscribers
+    /// in the same namespace.  Not persisted; fire-and-forget.
+    ///
+    /// `client_id` — the sender's client ID (from their token).
+    /// `key`       — the awareness channel name forwarded verbatim.
+    /// `data`      — the raw payload forwarded verbatim.
+    AwarenessBroadcast { client_id: u64, key: String, data: ByteBuf },
 }
 
 impl ServerMsg {
@@ -80,7 +103,7 @@ mod tests {
 
     #[test]
     fn client_msg_op_roundtrip() {
-        let msg = ClientMsg::Op { crdt_id: "set".into(), op_bytes: ByteBuf::from(vec![1, 2, 3]) };
+        let msg = ClientMsg::Op { crdt_id: "set".into(), op_bytes: ByteBuf::from(vec![1, 2, 3]), ttl_ms: None };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ClientMsg::from_msgpack(&bytes).unwrap();
         assert!(matches!(decoded, ClientMsg::Op { op_bytes, .. } if op_bytes.as_ref() == [1, 2, 3]));

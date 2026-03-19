@@ -6,7 +6,6 @@
 
 #![cfg(feature = "storage-postgres")]
 
-use meridian_storage::store::Store;
 use meridian_storage::{
     postgres::{PgStore, PgWal},
     store::Store,
@@ -107,6 +106,62 @@ async fn pg_store_scan_prefix_returns_namespace_entries() {
     assert_eq!(results.len(), 2);
     assert!(results.iter().any(|(k, _)| k == "ns1/id1"));
     assert!(results.iter().any(|(k, _)| k == "ns1/id2"));
+}
+
+// ---------------------------------------------------------------------------
+// TTL / delete_expired tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn pg_store_delete_expired_removes_expired_rows() {
+    let (pool, _container) = setup().await;
+    PgStore::migrate(&pool).await.unwrap();
+    let store = PgStore::new(pool);
+
+    let v = TestValue { data: "expires".into(), count: 1 };
+    let keep = TestValue { data: "keep".into(), count: 2 };
+
+    // Insert one row with expires_at_ms in the past and one without expiry.
+    store
+        .merge_put_with_expiry("ns", "expired", v.clone(), Some(1), |_, new| (new, ()))
+        .await
+        .unwrap();
+    store.put("ns", "permanent", &keep).await.unwrap();
+
+    // Delete everything expired before a timestamp well in the future.
+    let deleted = Store::<TestValue>::delete_expired(&store, u64::MAX).await.unwrap();
+
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0], ("ns".to_string(), "expired".to_string()));
+
+    // Expired row is gone; permanent row survives.
+    let gone: Option<TestValue> = store.get("ns", "expired").await.unwrap();
+    assert!(gone.is_none());
+
+    let still_there: Option<TestValue> = store.get("ns", "permanent").await.unwrap();
+    assert_eq!(still_there, Some(keep));
+}
+
+#[tokio::test]
+async fn pg_store_delete_expired_does_not_remove_future_expiry() {
+    let (pool, _container) = setup().await;
+    PgStore::migrate(&pool).await.unwrap();
+    let store = PgStore::new(pool);
+
+    let v = TestValue { data: "future".into(), count: 1 };
+
+    // expires_at_ms = u64::MAX — far future.
+    store
+        .merge_put_with_expiry("ns", "future", v.clone(), Some(u64::MAX), |_, new| (new, ()))
+        .await
+        .unwrap();
+
+    // GC with before_ms = 1 — nothing should be deleted.
+    let deleted = Store::<TestValue>::delete_expired(&store, 1).await.unwrap();
+    assert!(deleted.is_empty());
+
+    let still_there: Option<TestValue> = store.get("ns", "future").await.unwrap();
+    assert_eq!(still_there, Some(v));
 }
 
 // ---------------------------------------------------------------------------

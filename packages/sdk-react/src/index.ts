@@ -6,3 +6,4 @@ export { useLwwRegister } from "./hooks/useLwwRegister.js";
 export { usePresence } from "./hooks/usePresence.js";
 export { useCRDTMap } from "./hooks/useCRDTMap.js";
 export { usePendingOpCount } from "./hooks/usePendingOpCount.js";
+export { useAwareness } from "./hooks/useAwareness.js";
