@@ -1,6 +1,6 @@
 {
   "name": "meridian-react",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "React hooks for Meridian CRDT server",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,14 +20,14 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.7",
     "@types/react": "^19.0.0",
-    "meridian-sdk": "^0.4.0",
+    "meridian-sdk": "^1.0.1",
     "typescript": "^5.8.0"
   },
   "dependencies": {
     "effect": "^3.19.0"
   },
   "peerDependencies": {
-    "meridian-sdk": "^0.4.0",
+    "meridian-sdk": "^1.0.1",
     "react": "^19.0.0",
     "typescript": ">=5.0.0"
   },
