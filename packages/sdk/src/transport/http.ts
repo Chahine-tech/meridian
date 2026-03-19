@@ -52,7 +52,61 @@ export class HttpClient {
     ns: string,
     opts: { client_id: number; ttl_ms: number; permissions: Permissions },
   ): Effect.Effect<TokenIssueResponse, HttpError | NetworkError> {
-    return this.request(TokenIssueResponse, "POST", `/v1/namespaces/${ns}/tokens`, opts);
+    return this.requestJson(TokenIssueResponse, "POST", `/v1/namespaces/${ns}/tokens`, opts);
+  }
+
+  private requestJson<A, I>(
+    responseSchema: Schema.Schema<A, I>,
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Effect.Effect<A, HttpError | NetworkError> {
+    const url = `${this.baseUrl}${path}`;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.token}`,
+    };
+
+    let bodyStr: string | undefined;
+    if (body !== undefined) {
+      bodyStr = JSON.stringify(body);
+      headers["Content-Type"] = "application/json";
+    }
+
+    const fetchEffect = Effect.tryPromise({
+      try: async () => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+        try {
+          const response = await fetch(url, { method, headers, body: bodyStr, signal: controller.signal });
+          const text = await response.text();
+          return { response, text };
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+      catch: (e) =>
+        new NetworkError({ message: e instanceof Error ? e.message : "fetch failed", cause: e }),
+    });
+
+    return fetchEffect.pipe(
+      Effect.flatMap(({ response, text }): Effect.Effect<A, HttpError | NetworkError> => {
+        if (!response.ok) {
+          let errBody: ErrorResponse;
+          try {
+            errBody = Schema.decodeUnknownSync(ErrorResponse)(JSON.parse(text));
+          } catch {
+            errBody = { error: "unknown", message: `HTTP ${response.status}` };
+          }
+          return Effect.fail(new HttpError({ status: response.status, body: errBody }));
+        }
+        const raw = JSON.parse(text);
+        return Schema.decodeUnknown(responseSchema)(raw).pipe(
+          Effect.mapError((e) =>
+            new NetworkError({ message: `Response schema validation failed: ${e.message}` }),
+          ),
+        );
+      }),
+    );
   }
 
   private request<A, I>(

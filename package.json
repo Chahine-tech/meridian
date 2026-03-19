@@ -6,7 +6,9 @@
     "packages/sdk-react",
     "packages/devtools",
     "examples/collaborative-workspace",
-    "examples/cursors"
+    "examples/cursors",
+    "examples/ai-agents",
+    "examples/ai-agents/ui"
   ],
   "scripts": {
     "release": "changeset publish"

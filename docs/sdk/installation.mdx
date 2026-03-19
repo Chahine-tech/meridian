@@ -32,3 +32,18 @@ bun install && bun dev
 cd examples/cursors
 bun install && bun dev
 ```
+
+**Collaborative AI agents** — multiple Claude agents summarize a document in parallel, a coordinator aggregates the results. Live dashboard via `useCRDTMap` + `usePresence` (React + Node.js):
+
+```bash
+cd examples/ai-agents
+bun install
+
+# Terminal 1 — UI
+cd ui && bun run dev
+
+# Terminal 2 — agents
+MERIDIAN_ADMIN_TOKEN=xxx ANTHROPIC_API_KEY=xxx bun run agents
+```
+
+See [`examples/ai-agents/README.md`](https://github.com/Chahine-tech/meridian/tree/main/examples/ai-agents) for full setup instructions.
