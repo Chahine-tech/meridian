@@ -99,6 +99,30 @@ const { online, heartbeat, leave } = usePresence("pr:cursors", {
 | `ttlMs` | `number?` | Entry lifetime in ms (default: 30 000) |
 | `heartbeatIntervalMs` | `number?` | Override heartbeat send interval |
 
+### `useAwareness`
+
+Ephemeral pub/sub channel for high-frequency transient state (cursors, selections, "is typing"). Updates are fanned out in real time but **not** persisted — new peers won't see your state until you send another update.
+
+```tsx
+import { Schema } from "effect";
+
+// Define schema outside the component for a stable reference
+const CursorSchema = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+
+const { peers, update, clear } = useAwareness("cursors", CursorSchema);
+
+// peers: AwarenessEntry<{ x, y }>[] — other clients only, self excluded
+// update({ x, y }) — send our position
+// clear()         — remove our entry (e.g. on mouse leave)
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `key` | `string` | Awareness channel name (e.g. `"cursors"`, `"selection:doc-1"`) |
+| `schema` | `Schema<T>?` | Decode peer payloads at runtime |
+
+`peers` excludes the current client. Use `peers.length + 1` for a total visitor count — or combine with `usePresence` for an accurate count that includes clients who haven't moved yet.
+
 ### `useCRDTMap`
 
 ```tsx

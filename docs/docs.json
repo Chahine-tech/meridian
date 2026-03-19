@@ -43,6 +43,7 @@
               "sdk/client",
               "sdk/error-handling",
               "sdk/react",
+              "sdk/ttl",
               "sdk/devtools"
             ]
           },
@@ -54,7 +55,8 @@
               "sdk/crdts/orset",
               "sdk/crdts/lwwregister",
               "sdk/crdts/presence",
-              "sdk/crdts/crdtmap"
+              "sdk/crdts/crdtmap",
+              "sdk/crdts/awareness"
             ]
           }
         ]

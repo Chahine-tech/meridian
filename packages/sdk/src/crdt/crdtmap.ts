@@ -57,7 +57,7 @@ export class CRDTMapHandle {
   }
 
   /** Increment a GCounter key by `amount` (default `1`). */
-  incrementCounter(key: string, amount: number = 1): void {
+  incrementCounter(key: string, amount: number = 1, ttlMs?: number): void {
     if (amount <= 0) throw new RangeError("CRDTMap.incrementCounter: amount must be > 0");
     const op = encode({
       CRDTMap: {
@@ -66,11 +66,11 @@ export class CRDTMapHandle {
         op: { GCounter: { client_id: this.clientId, amount } },
       },
     });
-    this.transport.send({ Op: { crdt_id: this.crdtId, op_bytes: op } });
+    this.transport.send({ Op: { crdt_id: this.crdtId, op_bytes: op, ...(ttlMs !== undefined && { ttl_ms: ttlMs }) } });
   }
 
   /** Increment a PNCounter key by `amount` (default `1`). */
-  incrementPNCounter(key: string, amount: number = 1): void {
+  incrementPNCounter(key: string, amount: number = 1, ttlMs?: number): void {
     if (amount <= 0) throw new RangeError("CRDTMap.incrementPNCounter: amount must be > 0");
     const op = encode({
       CRDTMap: {
@@ -79,11 +79,11 @@ export class CRDTMapHandle {
         op: { PNCounter: { Increment: { client_id: this.clientId, amount } } },
       },
     });
-    this.transport.send({ Op: { crdt_id: this.crdtId, op_bytes: op } });
+    this.transport.send({ Op: { crdt_id: this.crdtId, op_bytes: op, ...(ttlMs !== undefined && { ttl_ms: ttlMs }) } });
   }
 
   /** Decrement a PNCounter key by `amount` (default `1`). */
-  decrementPNCounter(key: string, amount: number = 1): void {
+  decrementPNCounter(key: string, amount: number = 1, ttlMs?: number): void {
     if (amount <= 0) throw new RangeError("CRDTMap.decrementPNCounter: amount must be > 0");
     const op = encode({
       CRDTMap: {
@@ -92,7 +92,7 @@ export class CRDTMapHandle {
         op: { PNCounter: { Decrement: { client_id: this.clientId, amount } } },
       },
     });
-    this.transport.send({ Op: { crdt_id: this.crdtId, op_bytes: op } });
+    this.transport.send({ Op: { crdt_id: this.crdtId, op_bytes: op, ...(ttlMs !== undefined && { ttl_ms: ttlMs }) } });
   }
 
   /** Add an element to an ORSet key. `tag` must be a 16-byte UUID as Uint8Array. */
@@ -120,7 +120,7 @@ export class CRDTMapHandle {
   }
 
   /** Write a value to an LWW-Register key. */
-  lwwSet(key: string, value: unknown): void {
+  lwwSet(key: string, value: unknown, ttlMs?: number): void {
     const wallMs = Date.now();
     const op = encode({
       CRDTMap: {
@@ -135,7 +135,7 @@ export class CRDTMapHandle {
         },
       },
     });
-    this.transport.send({ Op: { crdt_id: this.crdtId, op_bytes: op } });
+    this.transport.send({ Op: { crdt_id: this.crdtId, op_bytes: op, ...(ttlMs !== undefined && { ttl_ms: ttlMs }) } });
   }
 
   applyDelta(delta: CRDTMapDelta): void {

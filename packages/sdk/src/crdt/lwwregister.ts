@@ -65,7 +65,7 @@ export class LwwRegisterHandle<T> {
    * The write is stamped with the current wall-clock time. If a concurrent
    * write from another client has a later timestamp it will win over this one.
    */
-  set(value: T): void {
+  set(value: T, ttlMs?: number): void {
     const wallMs = Date.now();
     const hlc = { wall_ms: wallMs, logical: 0, node_id: this.clientId };
 
@@ -79,6 +79,7 @@ export class LwwRegisterHandle<T> {
       Op: {
         crdt_id: this.crdtId,
         op_bytes: encode({ LwwRegister: { value, hlc: { wall_ms: wallMs, logical: 0, node_id: this.clientId }, author: this.clientId } }),
+        ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
       },
     });
   }

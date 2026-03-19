@@ -94,8 +94,53 @@ await Effect.runPromise(
 | `client.lwwregister(id, schema?)` | `LwwRegisterHandle<T>` | Optional |
 | `client.presence(id, schema?)` | `PresenceHandle<T>` | Optional |
 | `client.crdtmap(id)` | `CRDTMapHandle` | — |
+| `client.awareness(key, schema?)` | `AwarenessHandle<T>` | Optional |
 
 Without a schema, `T = unknown`. With a schema, incoming deltas are validated at runtime via `Schema.decodeUnknownSync`.
+
+### Awareness
+
+Ephemeral pub/sub channel — updates are fanned out to all other subscribers in real time but are **not** persisted. Use this for high-frequency transient state like cursor positions or "is typing" indicators.
+
+```ts
+const CursorSchema = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+const cursors = client.awareness("cursors", CursorSchema);
+
+// Send our state (fire-and-forget)
+cursors.update({ x: 120, y: 80 });
+
+// Listen to peer updates
+const unsub = cursors.onChange(peers => {
+  console.log("peers:", peers); // AwarenessEntry<{ x, y }>[]
+});
+
+// Clear our entry when leaving (e.g. tab hidden, component unmount)
+cursors.clear();
+```
+
+Unlike `presence`, awareness entries are never stored — if a client connects after a peer's last update, it will not see that peer's state until the peer sends another update.
+
+### TTL-based expiry
+
+Any op can include an optional `ttlMs` to schedule automatic server-side deletion after the given duration. The GC task runs every 5 seconds and permanently removes expired entries.
+
+```ts
+// LWW register that auto-deletes after 60 seconds
+const session = client.lwwregister("lw:session:abc");
+session.set({ userId: 42, role: "editor" }, 60_000);
+
+// GCounter with a 1-hour TTL
+const views = client.gcounter("gc:daily-views");
+views.increment(1, 3_600_000);
+
+// ORSet entry with a 5-minute TTL
+const cart = client.orset("or:cart");
+cart.add({ sku: "ABC" }, 300_000);
+
+// CRDTMap with TTL on a single field write
+const doc = client.crdtmap("cm:doc");
+doc.lwwSet("draft", "Hello world", 86_400_000); // 24h
+```
 
 ### Offline queue
 

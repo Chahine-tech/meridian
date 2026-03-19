@@ -60,7 +60,7 @@ export class ORSetHandle<T> {
    * Each call generates a unique tag so concurrent adds of the same value
    * are treated as distinct entries.
    */
-  add(element: T): void {
+  add(element: T, ttlMs?: number): void {
     const tag = crypto.randomUUID();
     const key = JSON.stringify(element);
 
@@ -73,6 +73,7 @@ export class ORSetHandle<T> {
       Op: {
         crdt_id: this.crdtId,
         op_bytes: encode({ ORSet: { Add: { element, tag: uuidToBytes(tag) } } }),
+        ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
       },
     });
   }
@@ -83,7 +84,7 @@ export class ORSetHandle<T> {
    * Only the tags observed locally at the time of this call are removed;
    * concurrently added copies on other clients are left intact.
    */
-  remove(element: T): void {
+  remove(element: T, ttlMs?: number): void {
     const key = JSON.stringify(element);
     const currentTags = Array.from(this.tags.get(key) ?? []);
     if (currentTags.length === 0) return;
@@ -95,6 +96,7 @@ export class ORSetHandle<T> {
       Op: {
         crdt_id: this.crdtId,
         op_bytes: encode({ ORSet: { Remove: { element, known_tags: currentTags.map(uuidToBytes) } } }),
+        ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
       },
     });
   }

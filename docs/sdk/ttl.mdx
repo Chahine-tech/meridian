@@ -1,0 +1,62 @@
+---
+title: TTL-based expiry
+description: Schedule any CRDT for automatic server-side deletion after a given duration.
+---
+
+Any CRDT op sent over WebSocket can include an optional `ttl_ms`. The server stores an `expires_at_ms` timestamp alongside the CRDT value. A background GC task runs every 5 seconds and permanently deletes entries where `expires_at_ms < now()`.
+
+Useful for temporary documents, sessions, short-lived drafts, or any data that should not persist indefinitely.
+
+## How it works
+
+1. Client sends a WebSocket op with `ttl_ms` set.
+2. Server applies the op and records `expires_at_ms = now + ttl_ms` on the CRDT entry.
+3. GC task runs every 5 seconds and calls `delete_expired` — a single indexed `DELETE` on PostgreSQL, no-op on sled/in-memory.
+4. Expired entries are removed from storage permanently.
+
+The CRDT continues to function normally until it expires.
+
+## Usage
+
+Pass `ttlMs` as the last argument to any handle method that sends an op:
+
+```ts
+// LWW register that auto-deletes after 60 seconds
+const session = client.lwwregister("lw:session:abc");
+session.set({ userId: 42, role: "editor" }, 60_000);
+
+// GCounter with a 1-hour TTL
+const views = client.gcounter("gc:daily-views");
+views.increment(1, 3_600_000);
+
+// ORSet entry with a 5-minute TTL
+const cart = client.orset("or:cart");
+cart.add({ sku: "ABC" }, 300_000);
+
+// CRDTMap field with a 24-hour TTL
+const doc = client.crdtmap("cm:doc");
+doc.lwwSet("draft", "Hello world", 86_400_000);
+```
+
+<Note>
+  TTL is attached per-op — not per-CRDT. The last op to set a `ttlMs` wins. Sending a new op without `ttlMs` clears the expiry.
+</Note>
+
+## GC behavior
+
+- GC interval: **5 seconds**
+- An entry may live up to `ttl_ms + 5s` before being deleted.
+- Deletion is permanent — no tombstone delta is broadcast to subscribers.
+- Applies to all CRDT types (GCounter, PNCounter, ORSet, LwwRegister, CRDTMap).
+
+## Presence TTL vs CRDT TTL
+
+These are two distinct mechanisms:
+
+| | Presence TTL | CRDT TTL (`ttl_ms`) |
+|---|---|---|
+| Scope | Per-entry within the Presence CRDT | The entire CRDT entry |
+| Expiry check | Client-side, on each `value()` call | Server-side GC task |
+| Storage cleanup | GC publishes tombstone delta | Entry deleted from DB, no broadcast |
+| Use case | "Who's online" with heartbeats | Temporary documents, sessions |
+

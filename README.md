@@ -42,7 +42,7 @@ curl -X POST http://localhost:3000/v1/namespaces/my-room/tokens \
 ```tsx
 import { Effect } from "effect";
 import { MeridianClient } from "meridian-sdk";
-import { MeridianProvider, useGCounter, usePresence } from "meridian-react";
+import { MeridianProvider, useAwareness, useGCounter } from "meridian-react";
 import { Schema } from "effect";
 
 const client = await Effect.runPromise(
@@ -53,13 +53,10 @@ const CursorSchema = Schema.Struct({ x: Schema.Number, y: Schema.Number });
 
 function Room() {
   const { value, increment } = useGCounter("gc:views");
-  const { online } = usePresence("pr:cursors", {
-    schema: CursorSchema,
-    data: { x: mouseX, y: mouseY }, // auto-heartbeat on data change
-    ttlMs: 5_000,
-  });
+  // Awareness: ephemeral cursor positions, not persisted
+  const { peers, update } = useAwareness("cursors", CursorSchema);
 
-  return <p>{value} views · {online.length} cursors live</p>;
+  return <p>{value} views · {peers.length} peers live</p>;
 }
 
 function App() {
@@ -86,13 +83,13 @@ const client = await Effect.runPromise(
 // Counters, registers, sets — all conflict-free
 const views = client.gcounter("gc:views");
 views.increment(1);
-views.onChange(v => console.log("views:", v.total));
+views.onChange(v => console.log("views:", v));
 
-// Live cursors — schema-validated at runtime
+// Awareness — ephemeral cursors, not persisted, schema-validated at runtime
 const CursorSchema = Schema.Struct({ x: Schema.Number, y: Schema.Number });
-const cursors = client.presence("pr:cursors", CursorSchema);
-cursors.heartbeat({ x: 120, y: 80 }, 5_000);
-cursors.onChange(users => console.log("live cursors:", users));
+const cursors = client.awareness("cursors", CursorSchema);
+cursors.update({ x: 120, y: 80 });
+cursors.onChange(peers => console.log("live cursors:", peers));
 
 client.close();
 ```
@@ -105,8 +102,12 @@ client.close();
 | `PNCounter` | Inventory, votes | `pn:stock` |
 | `ORSet` | Shopping cart, tags | `or:cart` |
 | `LwwRegister` | User profile, config | `lw:title` |
-| `Presence` | Who's online, cursors | `pr:room` |
+| `Presence` | Who's online, visitor count | `pr:room` |
 | `CRDTMap` | Structured document with typed fields | `cm:doc` |
+
+### Awareness
+
+Non-CRDT ephemeral channel for high-frequency transient state (cursors, selections, "is typing"). Updates fan out in real time but are never persisted — use `Presence` when you need durability and TTL-based cleanup, `Awareness` when you need raw speed.
 
 `CRDTMap` lets you assign a different CRDT type to each key within a single document. Each key merges independently using its own conflict resolution semantics.
 
@@ -121,6 +122,8 @@ client.close();
 
 - **Real-time sync** over WebSocket with automatic reconnection
 - **6 CRDT types** covering the most common collaborative patterns
+- **Awareness protocol** — ephemeral pub/sub for cursors, selections, "is typing" — not persisted, zero latency fan-out
+- **TTL-based expiry** — schedule any CRDT for automatic deletion after a given duration
 - **Multinode clustering** — horizontal scaling with Redis Pub/Sub fan-out or HTTP push transport; anti-entropy gossip for convergence after partitions (`--features cluster` / `--features cluster-http`)
 - **Pluggable storage** — sled (default), PostgreSQL, Redis, in-memory; WAL with point-in-time recovery
 - **Scoped permissions** — token-level read/write access with glob patterns (`allowed:*`)

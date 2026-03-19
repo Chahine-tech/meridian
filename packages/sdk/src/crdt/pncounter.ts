@@ -55,12 +55,12 @@ export class PNCounterHandle {
    *
    * @throws {RangeError} If `amount` is not greater than zero.
    */
-  increment(amount: number = 1): void {
+  increment(amount: number = 1, ttlMs?: number): void {
     if (amount <= 0) throw new RangeError("PNCounter: increment amount must be > 0");
     const key = String(this.clientId);
     this.state.p[key] = (this.state.p[key] ?? 0) + amount;
     this.emit();
-    this.sendOp({ Increment: { client_id: this.clientId, amount } });
+    this.sendOp({ Increment: { client_id: this.clientId, amount } }, ttlMs);
   }
 
   /**
@@ -68,12 +68,12 @@ export class PNCounterHandle {
    *
    * @throws {RangeError} If `amount` is not greater than zero.
    */
-  decrement(amount: number = 1): void {
+  decrement(amount: number = 1, ttlMs?: number): void {
     if (amount <= 0) throw new RangeError("PNCounter: decrement amount must be > 0");
     const key = String(this.clientId);
     this.state.n[key] = (this.state.n[key] ?? 0) + amount;
     this.emit();
-    this.sendOp({ Decrement: { client_id: this.clientId, amount } });
+    this.sendOp({ Decrement: { client_id: this.clientId, amount } }, ttlMs);
   }
 
   applyDelta(delta: PNCounterDelta): void {
@@ -89,9 +89,9 @@ export class PNCounterHandle {
     if (changed) this.emit();
   }
 
-  private sendOp(op: unknown): void {
+  private sendOp(op: unknown, ttlMs?: number): void {
     this.transport.send({
-      Op: { crdt_id: this.crdtId, op_bytes: encode({ PNCounter: op }) },
+      Op: { crdt_id: this.crdtId, op_bytes: encode({ PNCounter: op }), ...(ttlMs !== undefined && { ttl_ms: ttlMs }) },
     });
   }
 

@@ -104,6 +104,44 @@ function Cursors() {
 
 If `data` is omitted, the hook subscribes without sending a heartbeat (observe-only).
 
+### `useAwareness`
+
+Ephemeral pub/sub for cursors, selections, and real-time UI state. Updates are fanned out in real time but **not** persisted.
+
+Define the schema **outside the component** for a stable reference:
+
+```tsx
+import { Schema } from "effect";
+
+const CursorSchema = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+
+function Canvas() {
+  const { peers, update, clear } = useAwareness("cursors", CursorSchema);
+
+  return (
+    <div
+      onMouseMove={(e) => update({ x: e.clientX, y: e.clientY })}
+      onMouseLeave={() => clear()}
+    >
+      {peers.map((entry) => (
+        <Cursor key={entry.clientId} x={entry.data.x} y={entry.data.y} />
+      ))}
+    </div>
+  );
+}
+```
+
+`peers` excludes the current client. For an accurate visitor count, combine with `usePresence`:
+
+```tsx
+const { peers } = useAwareness("cursors", CursorSchema);
+const { online } = usePresence("visitors", { data: {}, ttlMs: 15_000 });
+
+// online.length = exact number of connected clients (including self)
+```
+
+See [Awareness](/sdk/crdts/awareness) for full API reference.
+
 ### `useCRDTMap`
 
 ```tsx

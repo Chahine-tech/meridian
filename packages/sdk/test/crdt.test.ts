@@ -10,6 +10,7 @@ import { PNCounterHandle } from "../src/crdt/pncounter.js";
 import { ORSetHandle } from "../src/crdt/orset.js";
 import { LwwRegisterHandle } from "../src/crdt/lwwregister.js";
 import { PresenceHandle } from "../src/crdt/presence.js";
+import { CRDTMapHandle } from "../src/crdt/crdtmap.js";
 import type { WsTransport } from "../src/transport/websocket.js";
 
 // ---------------------------------------------------------------------------
@@ -288,5 +289,75 @@ describe("PresenceHandle", () => {
     h.heartbeat("alice", 30_000);
     h.leave();
     expect(counts).toEqual([1, 0]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TTL — ttl_ms forwarded in Op message
+// ---------------------------------------------------------------------------
+
+describe("ttl_ms forwarding", () => {
+  it("GCounter.increment includes ttl_ms when provided", () => {
+    const t = stubTransport();
+    const h = new GCounterHandle({ ...BASE_OPTS, crdtId: "c", transport: t });
+    h.increment(1, 5_000);
+    expect((t.sent[0] as { Op: { ttl_ms?: number } }).Op.ttl_ms).toBe(5_000);
+  });
+
+  it("GCounter.increment omits ttl_ms when not provided", () => {
+    const t = stubTransport();
+    const h = new GCounterHandle({ ...BASE_OPTS, crdtId: "c", transport: t });
+    h.increment(1);
+    expect((t.sent[0] as { Op: { ttl_ms?: number } }).Op.ttl_ms).toBeUndefined();
+  });
+
+  it("PNCounter.increment includes ttl_ms", () => {
+    const t = stubTransport();
+    const h = new PNCounterHandle({ ...BASE_OPTS, crdtId: "c", transport: t });
+    h.increment(1, 10_000);
+    expect((t.sent[0] as { Op: { ttl_ms?: number } }).Op.ttl_ms).toBe(10_000);
+  });
+
+  it("PNCounter.decrement includes ttl_ms", () => {
+    const t = stubTransport();
+    const h = new PNCounterHandle({ ...BASE_OPTS, crdtId: "c", transport: t });
+    h.decrement(1, 10_000);
+    expect((t.sent[0] as { Op: { ttl_ms?: number } }).Op.ttl_ms).toBe(10_000);
+  });
+
+  it("ORSet.add includes ttl_ms", () => {
+    const t = stubTransport();
+    const h = new ORSetHandle({ ...BASE_OPTS, crdtId: "s", transport: t });
+    h.add("x", 3_000);
+    expect((t.sent[0] as { Op: { ttl_ms?: number } }).Op.ttl_ms).toBe(3_000);
+  });
+
+  it("ORSet.remove includes ttl_ms", () => {
+    const t = stubTransport();
+    const h = new ORSetHandle({ ...BASE_OPTS, crdtId: "s", transport: t });
+    h.add("x");
+    h.remove("x", 3_000);
+    expect((t.sent[1] as { Op: { ttl_ms?: number } }).Op.ttl_ms).toBe(3_000);
+  });
+
+  it("LwwRegister.set includes ttl_ms", () => {
+    const t = stubTransport();
+    const h = new LwwRegisterHandle({ ...BASE_OPTS, crdtId: "r", transport: t });
+    h.set("hello", 60_000);
+    expect((t.sent[0] as { Op: { ttl_ms?: number } }).Op.ttl_ms).toBe(60_000);
+  });
+
+  it("CRDTMap.lwwSet includes ttl_ms", () => {
+    const t = stubTransport();
+    const h = new CRDTMapHandle({ ...BASE_OPTS, crdtId: "m", transport: t });
+    h.lwwSet("key", "val", 7_000);
+    expect((t.sent[0] as { Op: { ttl_ms?: number } }).Op.ttl_ms).toBe(7_000);
+  });
+
+  it("CRDTMap.incrementCounter includes ttl_ms", () => {
+    const t = stubTransport();
+    const h = new CRDTMapHandle({ ...BASE_OPTS, crdtId: "m", transport: t });
+    h.incrementCounter("views", 1, 7_000);
+    expect((t.sent[0] as { Op: { ttl_ms?: number } }).Op.ttl_ms).toBe(7_000);
   });
 });

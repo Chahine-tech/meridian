@@ -48,9 +48,13 @@ client.pncounter("id")              // PNCounterHandle
 client.orset("id", schema?)         // ORSetHandle<T>
 client.lwwregister("id", schema?)   // LwwRegisterHandle<T>
 client.presence("id", schema?)      // PresenceHandle<T>
+client.crdtmap("id")                // CRDTMapHandle
+client.awareness("key", schema?)    // AwarenessHandle<T>
 ```
 
-For `orset`, `lwwregister`, and `presence`, passing an Effect `Schema` enables runtime validation of incoming deltas. Without a schema, `T = unknown`.
+For `orset`, `lwwregister`, `presence`, and `awareness`, passing an Effect `Schema` enables runtime validation of incoming payloads. Without a schema, `T = unknown`.
+
+`awareness` handles are keyed by a logical channel name (e.g. `"cursors"`, `"selection:doc-1"`) rather than a CRDT id — they are ephemeral and not persisted. See [Awareness](/sdk/crdts/awareness).
 
 ## HTTP client
 

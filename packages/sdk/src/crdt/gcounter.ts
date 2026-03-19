@@ -60,7 +60,7 @@ export class GCounterHandle {
    *
    * @throws {RangeError} If `amount` is not greater than zero.
    */
-  increment(amount: number = 1): void {
+  increment(amount: number = 1, ttlMs?: number): void {
     if (amount <= 0) throw new RangeError("GCounter: increment amount must be > 0");
 
     const key = String(this.clientId);
@@ -74,7 +74,7 @@ export class GCounterHandle {
       },
     });
     this.transport.send({
-      Op: { crdt_id: this.crdtId, op_bytes: op },
+      Op: { crdt_id: this.crdtId, op_bytes: op, ...(ttlMs !== undefined && { ttl_ms: ttlMs }) },
     });
   }
 

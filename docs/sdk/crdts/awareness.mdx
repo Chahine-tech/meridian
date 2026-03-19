@@ -1,0 +1,71 @@
+---
+title: Awareness
+description: Ephemeral pub/sub for cursors, selections, and real-time UI state.
+---
+
+Awareness is a stateless fan-out channel. Updates are broadcast to all other subscribers in the namespace in real time but are **never persisted**. Use it for high-frequency transient state — cursor positions, text selections, "is typing" indicators — where speed matters more than durability.
+
+<Note>
+  If a client connects after a peer's last update, it will not see that peer's state until the peer sends another update. For durable presence with TTL-based cleanup, use [Presence](/sdk/crdts/presence) instead.
+</Note>
+
+## Usage
+
+```ts
+import { Schema } from "effect";
+
+const CursorSchema = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+
+const cursors = client.awareness("cursors", CursorSchema);
+
+// Send our state (fire-and-forget — not queued when offline)
+cursors.update({ x: 120, y: 80 });
+
+// Listen to peer updates
+const unsub = cursors.onChange(peers => {
+  for (const entry of peers) {
+    // entry.clientId: number
+    // entry.data: { x: number; y: number }
+    // entry.receivedAt: number (local timestamp)
+    renderCursor(entry.clientId, entry.data.x, entry.data.y);
+  }
+});
+
+// Clear our entry (e.g. on mouse leave, tab hidden, component unmount)
+cursors.clear();
+
+unsub();
+```
+
+## API
+
+| Method | Description |
+|--------|-------------|
+| `update(data: T)` | Broadcast our state to all peers (fire-and-forget) |
+| `clear()` | Remove our entry from all peers |
+| `peers()` | Returns `AwarenessEntry<T>[]` — all peers except self |
+| `onChange(fn)` | Subscribe to peer changes — returns unsubscribe function |
+
+## AwarenessEntry
+
+```ts
+interface AwarenessEntry<T> {
+  clientId: number;   // sender's client ID (from their token)
+  data: T;            // decoded payload
+  receivedAt: number; // local timestamp (ms) when this entry was last received
+}
+```
+
+## Key differences from Presence
+
+| | Awareness | Presence |
+|---|-----------|----------|
+| Persisted | No | Yes |
+| TTL | No | Yes |
+| Late-join sees state | No | Yes |
+| Offline queue | No | Yes |
+| Use case | Cursors, selections | Who's online, visitor count |
+
+## React
+
+See [`useAwareness`](/sdk/react#useawareness).
