@@ -1,7 +1,7 @@
 {
   "name": "meridian-example-collaborative-workspace",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "meridian-sdk": "^0.3.0",
+    "meridian-sdk": "^0.4.0",
     "effect": "^3.19.0"
   },
   "devDependencies": {
