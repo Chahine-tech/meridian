@@ -1,6 +1,6 @@
 {
   "name": "meridian-devtools",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "React devtools overlay for Meridian CRDT state",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,7 +24,7 @@
     "typescript": "^5.8.0"
   },
   "peerDependencies": {
-    "meridian-sdk": "^0.3.0",
+    "meridian-sdk": "^0.4.0",
     "react": "^19.0.0",
     "typescript": ">=5.0.0"
   },
