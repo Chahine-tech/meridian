@@ -1,5 +1,12 @@
 # meridian-react
 
+## 2.0.0
+
+### Patch Changes
+
+- Updated dependencies [c7f86c9]
+  - meridian-sdk@1.0.0
+
 ## 1.0.0
 
 ### Minor Changes
