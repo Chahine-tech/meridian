@@ -33,6 +33,21 @@ jobs:
       - name: test (cluster features)
         run: cargo test --features cluster
 
+  edge:
+    name: Edge (WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: check
+        run: cargo check -p meridian-edge --target wasm32-unknown-unknown
+
   sdk:
     name: SDK
     runs-on: ubuntu-latest
