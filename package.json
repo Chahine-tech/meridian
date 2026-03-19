@@ -7,5 +7,11 @@
     "packages/devtools",
     "examples/collaborative-workspace",
     "examples/cursors"
-  ]
+  ],
+  "scripts": {
+    "release": "changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.30.0"
+  }
 }

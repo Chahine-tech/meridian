@@ -2,12 +2,68 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: install
+        run: bun install
+
+      # Build SDK first (sdk-react and devtools depend on it)
+      - name: build sdk
+        working-directory: packages/sdk
+        run: bun run build
+
+      - name: typecheck sdk
+        working-directory: packages/sdk
+        run: bun run typecheck
+
+      - name: test sdk
+        working-directory: packages/sdk
+        run: bun test
+
+      - name: build sdk-react
+        working-directory: packages/sdk-react
+        run: bun run build
+
+      - name: typecheck sdk-react
+        working-directory: packages/sdk-react
+        run: bun run typecheck
+
+      - name: build devtools
+        working-directory: packages/devtools
+        run: bun run build
+
+      - name: typecheck devtools
+        working-directory: packages/devtools
+        run: bun run typecheck
+
+      - name: Create Release PR or publish
+        uses: changesets/action@v1
+        with:
+          publish: bun run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
   server:
     name: Build server binaries
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       matrix:
         include:
@@ -17,7 +73,6 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: meridian-macos-aarch64
-    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,116 +90,17 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Rename binary
-        run: |
-          cp target/${{ matrix.target }}/release/meridian ${{ matrix.artifact }}
+        run: cp target/${{ matrix.target }}/release/meridian ${{ matrix.artifact }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
 
-  sdk-publish:
-    name: Publish SDK to npm
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-
-      - name: install
-        working-directory: packages/sdk
-        run: bun install
-
-      - name: typecheck
-        working-directory: packages/sdk
-        run: bun run typecheck
-
-      - name: test
-        working-directory: packages/sdk
-        run: bun test
-
-      - name: build
-        working-directory: packages/sdk
-        run: bun run build
-
-      - name: publish
-        working-directory: packages/sdk
-        run: bun publish --access public
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  sdk-react-publish:
-    name: Publish SDK React to npm
-    needs: sdk-publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-
-      - name: install
-        run: bun install
-
-      - name: build sdk
-        working-directory: packages/sdk
-        run: bun run build
-
-      - name: typecheck
-        working-directory: packages/sdk-react
-        run: bun run typecheck
-
-      - name: build
-        working-directory: packages/sdk-react
-        run: bun run build
-
-      - name: publish
-        working-directory: packages/sdk-react
-        run: bun publish --access public
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  devtools-publish:
-    name: Publish Devtools to npm
-    needs: sdk-publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-
-      - name: install
-        run: bun install
-
-      - name: build sdk
-        working-directory: packages/sdk
-        run: bun run build
-
-      - name: typecheck
-        working-directory: packages/devtools
-        run: bun run typecheck
-
-      - name: build
-        working-directory: packages/devtools
-        run: bun run build
-
-      - name: publish
-        working-directory: packages/devtools
-        run: bun publish --access public
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
   docker:
     name: Docker image
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
       packages: write
@@ -171,22 +127,3 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-
-  github-release:
-    name: GitHub Release
-    needs: [server, sdk-publish, sdk-react-publish, devtools-publish, docker]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: meridian-*
-          merge-multiple: true
-
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: meridian-*
-          generate_release_notes: true
