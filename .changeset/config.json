@@ -7,5 +7,8 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "minor",
-  "ignore": []
+  "ignore": [
+    "meridian-example-cursors",
+    "meridian-example-collaborative-workspace"
+  ]
 }
