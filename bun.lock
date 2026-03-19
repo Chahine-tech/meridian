@@ -8,9 +8,37 @@
         "@changesets/cli": "^2.30.0",
       },
     },
+    "examples/ai-agents": {
+      "name": "meridian-ai-agents",
+      "dependencies": {
+        "@anthropic-ai/sdk": "^0.55.0",
+        "effect": "^3.19.0",
+        "meridian-sdk": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+    },
+    "examples/ai-agents/ui": {
+      "name": "meridian-ai-agents-ui",
+      "dependencies": {
+        "effect": "^3.19.0",
+        "meridian-react": "workspace:*",
+        "meridian-sdk": "workspace:*",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+      },
+      "devDependencies": {
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "@vitejs/plugin-react": "^4.0.0",
+        "typescript": "^5.8.0",
+        "vite": "^7.1.7",
+      },
+    },
     "examples/collaborative-workspace": {
       "name": "meridian-example-collaborative-workspace",
-      "version": "0.0.1",
+      "version": "0.0.2",
       "dependencies": {
         "effect": "^3.19.0",
         "meridian-sdk": "^0.3.0",
@@ -22,7 +50,7 @@
     },
     "examples/cursors": {
       "name": "meridian-example-cursors",
-      "version": "0.0.1",
+      "version": "0.0.2",
       "dependencies": {
         "effect": "^3.19.0",
         "meridian-devtools": "workspace:*",
@@ -41,7 +69,7 @@
     },
     "packages/devtools": {
       "name": "meridian-devtools",
-      "version": "0.1.1",
+      "version": "1.0.0",
       "devDependencies": {
         "@biomejs/biome": "^2.4.7",
         "@types/react": "^19.0.0",
@@ -49,14 +77,14 @@
         "typescript": "^5.8.0",
       },
       "peerDependencies": {
-        "meridian-sdk": "^0.3.0",
+        "meridian-sdk": "^0.4.0",
         "react": "^19.0.0",
         "typescript": ">=5.0.0",
       },
     },
     "packages/sdk": {
       "name": "meridian-sdk",
-      "version": "0.3.5",
+      "version": "0.4.0",
       "dependencies": {
         "@msgpack/msgpack": "^3.0.0",
         "effect": "^3.19.0",
@@ -72,24 +100,26 @@
     },
     "packages/sdk-react": {
       "name": "meridian-react",
-      "version": "0.3.5",
+      "version": "1.0.0",
       "dependencies": {
         "effect": "^3.19.0",
       },
       "devDependencies": {
         "@biomejs/biome": "^2.4.7",
         "@types/react": "^19.0.0",
-        "meridian-sdk": "^0.3.0",
+        "meridian-sdk": "^0.4.0",
         "typescript": "^5.8.0",
       },
       "peerDependencies": {
-        "meridian-sdk": "^0.3.0",
+        "meridian-sdk": "^0.4.0",
         "react": "^19.0.0",
         "typescript": ">=5.0.0",
       },
     },
   },
   "packages": {
+    "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.55.1", "", { "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-gjOMS4chmm8BxClKmCjNHmvf1FrO1Cn++CSX6K3YCZjz5JG4I9ZttQ/xEH4FBsz6HQyZvnUpiKlOAkmxaGmEaQ=="],
+
     "@babel/code-frame": ["@babel/code-frame@7.29.0", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.28.5", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw=="],
 
     "@babel/compat-data": ["@babel/compat-data@7.29.0", "", {}, "sha512-T1NCJqT/j9+cn8fvkt7jtwbLBfLC/1y1c7NtCeXFRgzGTsafi68MRv8yzkYSapBnFA6L3U2VSc02ciDzoAJhJg=="],
@@ -439,6 +469,10 @@
     "lru-cache": ["lru-cache@5.1.1", "", { "dependencies": { "yallist": "^3.0.2" } }, "sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w=="],
 
     "merge2": ["merge2@1.4.1", "", {}, "sha512-8q7VEgMJW4J8tcfVPy8g09NcQwZdbwFEqhe/WZkoIzjn/3TGDwtOCYtXGxA3O8tPzpczCCDgv+P2P5y00ZJOOg=="],
+
+    "meridian-ai-agents": ["meridian-ai-agents@workspace:examples/ai-agents"],
+
+    "meridian-ai-agents-ui": ["meridian-ai-agents-ui@workspace:examples/ai-agents/ui"],
 
     "meridian-devtools": ["meridian-devtools@workspace:packages/devtools"],
 

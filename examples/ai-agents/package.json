@@ -1,0 +1,18 @@
+{
+  "name": "meridian-ai-agents",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "agents": "bun run agents/run.ts",
+    "agents:file": "bun run agents/run.ts --file",
+    "audit": "bun run agents/audit.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.55.0",
+    "effect": "^3.19.0",
+    "meridian-sdk": "workspace:*"
+  }
+}
