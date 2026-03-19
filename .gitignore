@@ -1,6 +1,12 @@
 # Rust
 /target/
 
+# Secrets
+.dev.vars
+
+# Wrangler
+.wrangler/
+
 # Data
 /data/
 

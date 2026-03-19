@@ -1,9 +1,6 @@
-pub mod claims;
-pub mod error;
-pub mod middleware;
-pub mod signer;
+// Re-export pure auth types from meridian-core.
+pub use meridian_core::auth::{AuthError, Permissions, TokenClaims, TokenSigner};
 
-pub use claims::{Permissions, TokenClaims};
-pub use error::AuthError;
+// Server-only: axum middleware (depends on axum, stays in server)
+pub mod middleware;
 pub use middleware::{auth_middleware, AuthState, ClaimsExt};
-pub use signer::TokenSigner;

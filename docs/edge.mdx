@@ -1,0 +1,140 @@
+---
+title: Edge deploy (Cloudflare Workers)
+description: Deploy Meridian to Cloudflare Workers with Durable Objects — zero infrastructure, global low latency.
+---
+
+## Overview
+
+`meridian-edge` is a Cloudflare Workers runtime for Meridian. It compiles the server to WASM and uses **Durable Objects** for per-namespace state — one DO instance per namespace, co-located with your users at the edge.
+
+The TypeScript SDK connects to it identically to the native server — same WebSocket protocol, same REST API, same token format.
+
+| | Native server | Edge (Cloudflare Workers) |
+|---|---|---|
+| Runtime | tokio + axum | Cloudflare Workers (WASM) |
+| Storage | sled / PostgreSQL / Redis | Durable Objects KV |
+| Scaling | Manual (cluster mode) | Automatic (CF global network) |
+| Cold start | None | ~0ms (DO always warm) |
+| Deploy | Docker / binary | `wrangler deploy` |
+
+## Prerequisites
+
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) — `npm install -g wrangler`
+- Rust with `wasm32-unknown-unknown` target — `rustup target add wasm32-unknown-unknown`
+- `worker-build` — `cargo install worker-build`
+- A Cloudflare account (free tier works)
+
+## Local development
+
+```bash
+cd crates/meridian-edge
+
+# Create your local secrets file (never commit this)
+echo 'MERIDIAN_SIGNING_KEY=<your-32-byte-hex-key>' > .dev.vars
+
+# Start local dev server on http://localhost:8787
+wrangler dev
+```
+
+Generate a signing key:
+```bash
+openssl rand -hex 32
+```
+
+Generate a token for local testing (uses the same `gen_token` binary as the native server):
+```bash
+MERIDIAN_SIGNING_KEY=<your-key> cargo run --bin gen_token -- my-namespace 1
+```
+
+## Connect with the SDK
+
+```ts
+import { MeridianClient } from "meridian-sdk";
+
+const client = new MeridianClient({
+  url: "ws://localhost:8787",   // wss://your-worker.workers.dev in prod
+  namespace: "my-namespace",
+  token: "<generated-token>",
+});
+
+await client.connect();
+const counter = client.gcounter("views");
+counter.increment(1);
+```
+
+No SDK changes needed — the edge worker speaks the exact same protocol as the native server.
+
+## Production deploy
+
+**1. Set your signing key as a secret:**
+
+```bash
+wrangler secret put MERIDIAN_SIGNING_KEY
+# Enter your 32-byte hex key when prompted
+```
+
+**2. Deploy:**
+
+```bash
+wrangler deploy
+```
+
+Your worker is live at `https://meridian-edge.<your-subdomain>.workers.dev`.
+
+**3. Issue tokens from your backend:**
+
+```bash
+curl -X POST https://meridian-edge.<your-subdomain>.workers.dev/v1/namespaces/my-room/tokens \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"client_id": 1, "ttl_ms": 3600000, "permissions": {"read": ["*"], "write": ["*"], "admin": false}}'
+```
+
+## Architecture
+
+Each namespace maps to one **Durable Object** instance:
+
+```
+Client SDK
+    │  WebSocket / REST
+    ▼
+CF Worker (WASM)          ← meridian-edge: auth, routing
+    │  DO RPC
+    ▼
+NsObject (Durable Object) ← one per namespace: CRDT state, WS fan-out
+    │  KV storage
+    ▼
+Durable Object Storage    ← persistent, replicated by Cloudflare
+```
+
+When a client connects:
+1. Worker validates the token (ed25519 signature, namespace check)
+2. Worker looks up the DO for the namespace via `env.NS_OBJECT.idFromName(namespace)`
+3. WebSocket is upgraded and forwarded to the DO
+4. The DO manages all connected WebSockets and broadcasts deltas on every op
+
+## wrangler.toml reference
+
+```toml
+name = "meridian-edge"
+main = "build/index.js"
+compatibility_date = "2024-01-01"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[durable_objects.bindings]]
+name = "NS_OBJECT"
+class_name = "NsObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["NsObject"]
+```
+
+## Limitations
+
+- **No WAL / point-in-time recovery** — Durable Object storage is persistent but there is no WAL replay. This is planned.
+- **No clustering** — each DO is a single instance. Cloudflare handles availability and replication automatically.
+- **No webhooks** — not yet implemented in the edge runtime.
+- **No Prometheus metrics** — use Cloudflare Analytics instead.

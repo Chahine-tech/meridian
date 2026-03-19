@@ -33,7 +33,14 @@
               "self-hosting/docker",
               "self-hosting/configuration",
               "self-hosting/tokens",
-              "self-hosting/storage"
+              "self-hosting/storage",
+              "self-hosting/clustering"
+            ]
+          },
+          {
+            "group": "Edge deploy",
+            "pages": [
+              "edge"
             ]
           },
           {

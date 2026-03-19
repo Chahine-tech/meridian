@@ -21,6 +21,8 @@ cluster = ["dep:meridian-cluster", "meridian-cluster/transport-redis"]
 cluster-http = ["dep:meridian-cluster", "meridian-cluster/transport-http"]
 
 [dependencies]
+# Core business logic (CRDTs, auth, protocol, namespace) — no axum/tokio deps
+meridian-core = { path = "../crates/meridian-core" }
 # Storage abstraction layer
 meridian-storage = { path = "../crates/meridian-storage", default-features = false }
 # Cluster support (optional)

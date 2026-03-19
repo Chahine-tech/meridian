@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/Chahine-tech/meridian/actions"><img src="https://github.com/Chahine-tech/meridian/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024" />
-  <img src="https://img.shields.io/badge/tests-138-brightgreen" alt="138 tests" />
+  <img src="https://img.shields.io/badge/tests-132-brightgreen" alt="132 tests" />
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
 </p>
 
@@ -20,7 +20,9 @@
 
 ## What is Meridian?
 
-Meridian is a self-hosted server that lets multiple clients share state in real-time without conflicts. You pick a CRDT type (counter, set, register, presence), apply operations from any client, and every client converges to the same value automatically — no locks, no last-write-wins bugs.
+Meridian is a real-time CRDT sync server that runs **self-hosted on native infrastructure** or **at the edge on Cloudflare Workers** — same SDK, same protocol, two deployment targets.
+
+You pick a CRDT type (counter, set, register, presence), apply operations from any client, and every client converges to the same value automatically — no locks, no last-write-wins bugs.
 
 ## Quick start
 
@@ -111,28 +113,48 @@ Non-CRDT ephemeral channel for high-frequency transient state (cursors, selectio
 
 `CRDTMap` lets you assign a different CRDT type to each key within a single document. Each key merges independently using its own conflict resolution semantics.
 
+## Edge deploy (Cloudflare Workers)
+
+Deploy Meridian to the edge in minutes — no server, no Docker, no ops.
+
+```bash
+cd crates/meridian-edge
+cp .dev.vars.example .dev.vars  # add your MERIDIAN_SIGNING_KEY
+wrangler dev                     # local dev
+wrangler deploy                  # production on Cloudflare
+```
+
+The edge runtime uses **Durable Objects** for per-namespace state (replaces sled), compiles to WASM via `wasm-bindgen`, and exposes the exact same WebSocket + REST API as the native server. Your SDK client connects to either without any code change:
+
+```ts
+// Native server
+const client = new MeridianClient({ url: "ws://localhost:3000", namespace: "my-room", token });
+
+// Edge worker (same SDK, different URL)
+const client = new MeridianClient({ url: "wss://my-worker.workers.dev", namespace: "my-room", token });
+```
+
+See [`crates/meridian-edge/`](crates/meridian-edge/) for full setup.
+
 ## Packages
+
+**npm**
 
 | Package | Description |
 |---------|-------------|
 | [`meridian-sdk`](packages/sdk) | TypeScript SDK — Effect-based, msgpack, fully typed |
-| [`meridian-react`](packages/sdk-react) | React hooks — `useGCounter`, `usePresence`, etc. |
+| [`meridian-react`](packages/sdk-react) | React hooks — `useGCounter`, `usePresence`, `useAwareness`, etc. |
+| [`meridian-devtools`](packages/devtools) | Devtools panel — real-time CRDT state inspector |
 
-## Features
+**Rust crates**
 
-- **Real-time sync** over WebSocket with automatic reconnection
-- **6 CRDT types** covering the most common collaborative patterns
-- **Awareness protocol** — ephemeral pub/sub for cursors, selections, "is typing" — not persisted, zero latency fan-out
-- **TTL-based expiry** — schedule any CRDT for automatic deletion after a given duration
-- **Multinode clustering** — horizontal scaling with Redis Pub/Sub fan-out or HTTP push transport; anti-entropy gossip for convergence after partitions (`--features cluster` / `--features cluster-http`)
-- **Pluggable storage** — sled (default), PostgreSQL, Redis, in-memory; WAL with point-in-time recovery
-- **Scoped permissions** — token-level read/write access with glob patterns (`allowed:*`)
-- **Rate limiting** — 100 req/s per token, sliding window
-- **Webhooks** — `POST` to your backend on every op, HMAC-SHA256 signed
-- **Prometheus metrics** — ops counter, active WS connections, WAL entries (`GET /metrics`)
-- **WAL compaction** — automatic background truncation
-- **History API** — audit log per CRDT (`GET /v1/namespaces/:ns/crdts/:id/history`)
-- **138 tests** — unit, property-based, and integration
+| Crate | Description |
+|-------|-------------|
+| [`server`](server) | Native binary — axum + tokio |
+| [`meridian-core`](crates/meridian-core) | Shared logic — CRDTs, auth, protocol (no runtime dep) |
+| [`meridian-edge`](crates/meridian-edge) | Cloudflare Workers runtime — WASM, Durable Objects |
+| [`meridian-storage`](crates/meridian-storage) | Pluggable storage backends — sled, PostgreSQL, Redis, in-memory |
+| [`meridian-cluster`](crates/meridian-cluster) | Multinode clustering — Redis Pub/Sub + HTTP push transport |
 
 ## Configuration
 
