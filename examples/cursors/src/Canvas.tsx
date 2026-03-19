@@ -1,6 +1,6 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Schema } from "effect";
-import { useAwareness, useMeridianClient } from "meridian-react";
+import { useAwareness, useMeridianClient, usePresence } from "meridian-react";
 import { colorForClient } from "./colors.js";
 
 const CursorSchema = Schema.Struct({
@@ -71,15 +71,33 @@ export function Canvas() {
   const myColor = colorForClient(client.clientId);
 
   const { peers, update, clear } = useAwareness<CursorData>("cursors", CursorSchema);
+  const { online } = usePresence("visitors", { data: {}, ttlMs: 15_000 });
+
+  // Track last known position so we can re-broadcast periodically.
+  // Awareness is stateless — new peers won't see our cursor until we move again.
+  const lastPosRef = useRef<CursorData | null>(null);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    update({ x: e.clientX - rect.left, y: e.clientY - rect.top, name: myName });
+    const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top, name: myName };
+    lastPosRef.current = pos;
+    update(pos);
   }, [update, myName]);
 
   // Clear our cursor when the mouse leaves the canvas
-  const handleMouseLeave = useCallback(() => { clear(); }, [clear]);
+  const handleMouseLeave = useCallback(() => {
+    lastPosRef.current = null;
+    clear();
+  }, [clear]);
+
+  // Re-broadcast our position every 3 s so late-joining peers see us immediately.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (lastPosRef.current) update(lastPosRef.current);
+    }, 3_000);
+    return () => clearInterval(id);
+  }, [update]);
 
   return (
     <div
@@ -112,7 +130,7 @@ export function Canvas() {
         {myName} (you)
       </div>
 
-      <VisitorCount count={peers.length + 1} />
+      <VisitorCount count={online.length} />
 
       {/* Hint */}
       <div style={{

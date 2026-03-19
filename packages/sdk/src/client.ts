@@ -466,7 +466,6 @@ export class MeridianClient {
     this.handleUnsubs.length = 0;
     this.anyListeners.clear();
     this.deltaListeners.clear();
-    this.awHandles.clear();
     this.transport.close();
   }
 

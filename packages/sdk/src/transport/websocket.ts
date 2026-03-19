@@ -57,6 +57,11 @@ export class WsTransport {
   }
 
   reopen(): void {
+    // Disown the current ws before creating a new one so its close event
+    // fires with ws !== this.ws and does not trigger scheduleReconnect.
+    const old = this.ws;
+    this.ws = null;
+    old?.close(1000, "reopen");
     this.closed = false;
     this.doConnect();
   }
