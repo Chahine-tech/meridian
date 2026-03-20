@@ -63,6 +63,17 @@ export {
 } from "./schema.js";
 export type { TimestampMs, ClientId } from "./schema.js";
 
+// AI Agents — Claude tool use helpers
+export {
+  getMeridianTools,
+  executeMeridianTool,
+} from "./agents.js";
+export type {
+  Tool,
+  ToolUseBlock,
+  MeridianAgentConfig,
+} from "./agents.js";
+
 // Codec (for advanced use / testing)
 export {
   encode,

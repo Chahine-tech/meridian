@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { MeridianClient } from "meridian-sdk";
 import { MeridianProvider } from "meridian-react";
 import { AgentBoard } from "./AgentBoard.js";
+import { ToolUseBoard } from "./ToolUseBoard.js";
 
 interface ConnectForm {
   url: string;
@@ -104,14 +105,40 @@ function ConnectScreen({ onConnect }: { onConnect: (client: MeridianClient) => v
   );
 }
 
+type Tab = "agents" | "tool-use";
+
+const TAB_STYLE = (active: boolean): React.CSSProperties => ({
+  padding: "6px 16px",
+  background: active ? "#7c3aed" : "transparent",
+  color: active ? "#fff" : "#71717a",
+  border: "1px solid",
+  borderColor: active ? "#7c3aed" : "#27272a",
+  borderRadius: 4,
+  fontFamily: "monospace",
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: "pointer",
+});
+
 export function App() {
   const [client, setClient] = useState<MeridianClient | null>(null);
+  const [tab, setTab] = useState<Tab>("agents");
 
   if (!client) return <ConnectScreen onConnect={setClient} />;
 
   return (
     <MeridianProvider client={client}>
-      <AgentBoard totalWorkers={3} />
+      <div style={{ background: "#0f0f0f", minHeight: "100%", color: "#e2e8f0", fontFamily: "monospace" }}>
+        <div style={{ borderBottom: "1px solid #27272a", padding: "12px 24px", display: "flex", gap: 8 }}>
+          <button style={TAB_STYLE(tab === "agents")} onClick={() => setTab("agents")}>
+            Multi-Agent
+          </button>
+          <button style={TAB_STYLE(tab === "tool-use")} onClick={() => setTab("tool-use")}>
+            Tool Use
+          </button>
+        </div>
+        {tab === "agents" ? <AgentBoard totalWorkers={3} /> : <ToolUseBoard />}
+      </div>
     </MeridianProvider>
   );
 }

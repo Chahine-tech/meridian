@@ -15,6 +15,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> worker::Result<Response
         .get_async("/v1/namespaces/:ns/connect", ws::ws_handler)
         // CRDT REST API
         .get_async("/v1/namespaces/:ns/crdts/:id", http::get_crdt)
+        .get_async("/v1/namespaces/:ns/crdts/:id/sync", http::get_sync)
         .post_async("/v1/namespaces/:ns/crdts/:id/ops", http::post_op)
         // Token issuance (admin only)
         .post_async("/v1/namespaces/:ns/tokens", http::issue_token)
