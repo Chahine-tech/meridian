@@ -1,0 +1,17 @@
+name = "meridian-edge"
+main = "build/worker/shim.mjs"
+compatibility_date = "2025-01-01"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[durable_objects.bindings]]
+name = "NS_OBJECT"
+class_name = "NsObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["NsObject"]
+
+# Set MERIDIAN_SIGNING_KEY via: wrangler secret put MERIDIAN_SIGNING_KEY
+# It must be the same 32-byte hex key used by the native server.

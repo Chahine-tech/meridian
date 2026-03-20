@@ -13,7 +13,7 @@ interface ConnectForm {
 
 function ConnectScreen({ onConnect }: { onConnect: (client: MeridianClient) => void }) {
   const [form, setForm] = useState<ConnectForm>({
-    url: "ws://localhost:3000",
+    url: "ws://localhost:8787",
     namespace: "cursors",
     token: "",
   });

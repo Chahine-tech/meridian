@@ -45,7 +45,7 @@ pub trait WsState: Clone + Send + Sync + 'static {
     }
 }
 
-use crate::auth::claims::TokenClaims;
+use crate::auth::TokenClaims;
 
 // ---------------------------------------------------------------------------
 // WebSocket upgrade handler
@@ -247,7 +247,7 @@ async fn handle_client_message<S: WsState>(
         ClientMsg::AwarenessUpdate { key, data } => {
             // Stateless fan-out — no persistence, no ack.
             let broadcast_msg = Arc::new(ServerMsg::AwarenessBroadcast {
-                client_id,
+                client_id: 0,
                 key,
                 data,
             });

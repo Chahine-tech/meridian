@@ -9,7 +9,7 @@ use axum::{
 use serde_json::json;
 use tracing::warn;
 
-use super::{claims::TokenClaims, error::AuthError, signer::TokenSigner};
+use super::{AuthError, TokenClaims, TokenSigner};
 use crate::rate_limit::RateLimiter;
 
 fn auth_error_response(err: AuthError) -> Response {
