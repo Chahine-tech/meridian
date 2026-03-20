@@ -58,7 +58,7 @@ jobs:
 
       - name: typecheck
         working-directory: crates/meridian-edge
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
   sdk:
     name: SDK

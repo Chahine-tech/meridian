@@ -167,11 +167,11 @@ impl DurableObject for NsObject {
         // --- Namespace TTL: delete if inactive for > NAMESPACE_TTL_MS ---
         const NAMESPACE_TTL_MS: u64 = 30 * 24 * 3600 * 1000; // 30 days
         let last_activity: Option<u64> = self.state.storage().get("ns:last_activity").await.ok().flatten();
-        if let Some(last) = last_activity {
-            if now_ms.saturating_sub(last) > NAMESPACE_TTL_MS {
-                let _ = self.state.storage().delete_all().await;
-                return Response::ok("expired");
-            }
+        if let Some(last) = last_activity
+            && now_ms.saturating_sub(last) > NAMESPACE_TTL_MS
+        {
+            let _ = self.state.storage().delete_all().await;
+            return Response::ok("expired");
         }
 
         // --- WAL compaction: remove entries older than 7 days ---
@@ -443,10 +443,10 @@ impl NsObject {
                 Err(_) => continue,
             };
 
-            if let Some(ms) = until_ms {
-                if entry.timestamp_ms > ms {
-                    break;
-                }
+            if let Some(ms) = until_ms
+                && entry.timestamp_ms > ms
+            {
+                break;
             }
             entries.push(entry);
         }

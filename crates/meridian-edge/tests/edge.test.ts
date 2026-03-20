@@ -9,7 +9,7 @@ async function api(
   init: RequestInit & { token?: string } = {}
 ): Promise<Response> {
   const { token, headers: initHeaders, ...rest } = init;
-  const headers = new Headers((initHeaders as HeadersInit | undefined) ?? {});
+  const headers = new Headers((initHeaders as Headers | Record<string, string> | undefined) ?? {});
   if (token) headers.set("Authorization", `Bearer ${token}`);
   return SELF.fetch(`${BASE_URL}${path}`, { ...rest, headers });
 }
