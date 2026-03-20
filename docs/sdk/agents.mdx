@@ -110,6 +110,38 @@ interface MeridianAgentConfig {
 }
 ```
 
+## Persistent agent memory
+
+Because Meridian CRDTs are durable, an agent can use them as long-term memory across runs — reading its previous state at startup and writing an updated summary before exiting.
+
+```ts
+// On startup — read previous memory
+const lastRun = await fetch(`${baseUrl}/v1/namespaces/${ns}/crdts/memory:last-run`, {
+  headers: { Authorization: `Bearer ${token}` },
+}).then(r => r.ok ? r.json() : null);
+
+// Pass previous memory as context to Claude
+const prompt = lastRun
+  ? `Your last run summary: ${JSON.stringify(lastRun.value)}\n\nContinue from where you left off.`
+  : `This is your first run.`;
+
+// ... agentic loop ...
+
+// On exit — write updated memory
+await executeMeridianTool(config, {
+  type: "tool_use", id: "1", name: "meridian_set_memory_last_run",
+  input: { value: JSON.stringify({ timestamp: new Date(), summary: "..." }), client_id: 1 },
+});
+```
+
+A full working example is in [`examples/ai-agents/agents/memory.ts`](https://github.com/Chahine-tech/meridian/tree/main/examples/ai-agents/agents/memory.ts). It uses three CRDTs:
+
+| CRDT | Type | Purpose |
+|------|------|---------|
+| `memory:run-count` | GCounter | Total runs ever |
+| `memory:last-run` | LWW Register | Summary of the last run |
+| `memory:insights` | ORSet | Observations accumulated across all runs |
+
 ## Live UI
 
 The [AI agents example](https://github.com/Chahine-tech/meridian/tree/main/examples/ai-agents) ships a React dashboard that subscribes to the same CRDTs via WebSocket and displays live state as the agent writes — demonstrating that native clients and HTTP agents share the same namespace seamlessly.

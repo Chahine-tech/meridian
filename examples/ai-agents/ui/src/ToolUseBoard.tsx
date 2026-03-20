@@ -24,7 +24,7 @@ function StatCard({ label, children }: { label: string; children: React.ReactNod
 export function ToolUseBoard() {
   const { value: views } = useGCounter("views");
   const { value: notes } = useLwwRegister<string>("notes");
-  const { value: tags } = useORSet<string>("tags");
+  const { elements: tags } = useORSet<string>("tags");
 
   return (
     <div style={{

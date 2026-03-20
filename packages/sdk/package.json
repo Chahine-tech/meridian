@@ -25,7 +25,7 @@
     "typescript": "^5.7.0"
   },
   "dependencies": {
-    "effect": "^3.19.0",
+    "effect": "^3.21.0",
     "@msgpack/msgpack": "^3.0.0"
   },
   "peerDependencies": {
