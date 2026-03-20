@@ -125,6 +125,65 @@ pub async fn get_wal(req: Request, ctx: RouteContext<()>) -> worker::Result<Resp
 }
 
 // ---------------------------------------------------------------------------
+// Webhooks (admin only)
+// GET  /v1/namespaces/:ns/webhooks
+// POST /v1/namespaces/:ns/webhooks
+// DELETE /v1/namespaces/:ns/webhooks/:id
+// ---------------------------------------------------------------------------
+
+async fn webhook_do_stub(
+    req: &Request,
+    ctx: &RouteContext<()>,
+    ns: &str,
+) -> worker::Result<Option<Response>> {
+    let claims = match crate::auth::validate(req, &ctx.env) {
+        Ok(c) => c,
+        Err(e) => return Ok(Some(crate::auth::auth_error_response(&e))),
+    };
+    if claims.namespace != ns || !claims.is_admin() {
+        return Ok(Some(Response::error("forbidden: admin permission required", 403)?));
+    }
+    Ok(None)
+}
+
+pub async fn list_webhooks(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
+    let ns = ctx.param("ns").cloned().unwrap_or_default();
+    if let Some(r) = webhook_do_stub(&req, &ctx, &ns).await? { return Ok(r); }
+
+    let do_stub = ctx.env.durable_object("NS_OBJECT")?.id_from_name(&ns)?.get_stub()?;
+    let do_req = Request::new(&format!("http://do/{ns}/webhooks"), worker::Method::Get)?;
+    do_stub.fetch_with_request(do_req).await
+}
+
+pub async fn register_webhook(mut req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
+    let ns = ctx.param("ns").cloned().unwrap_or_default();
+    if let Some(r) = webhook_do_stub(&req, &ctx, &ns).await? { return Ok(r); }
+
+    let body = req.bytes().await?;
+    let do_stub = ctx.env.durable_object("NS_OBJECT")?.id_from_name(&ns)?.get_stub()?;
+    let do_req = Request::new_with_init(
+        &format!("http://do/{ns}/webhooks"),
+        worker::RequestInit::new()
+            .with_method(worker::Method::Post)
+            .with_body(Some(body.into())),
+    )?;
+    do_stub.fetch_with_request(do_req).await
+}
+
+pub async fn delete_webhook(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
+    let ns = ctx.param("ns").cloned().unwrap_or_default();
+    let id = ctx.param("id").cloned().unwrap_or_default();
+    if let Some(r) = webhook_do_stub(&req, &ctx, &ns).await? { return Ok(r); }
+
+    let do_stub = ctx.env.durable_object("NS_OBJECT")?.id_from_name(&ns)?.get_stub()?;
+    let do_req = Request::new(
+        &format!("http://do/{ns}/webhooks/{id}"),
+        worker::Method::Delete,
+    )?;
+    do_stub.fetch_with_request(do_req).await
+}
+
+// ---------------------------------------------------------------------------
 // POST /v1/namespaces/:ns/tokens  (admin only)
 // ---------------------------------------------------------------------------
 

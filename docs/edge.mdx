@@ -113,6 +113,68 @@ When a client connects:
 3. WebSocket is upgraded and forwarded to the DO
 4. The DO manages all connected WebSockets and broadcasts deltas on every op
 
+## Webhooks
+
+Register a URL to be called on every op applied to a namespace. Useful for triggering backend pipelines, notifications, or audit systems without maintaining a persistent WebSocket.
+
+```bash
+# Register a webhook (admin token required)
+curl -X POST https://meridian-edge.<your-subdomain>.workers.dev/v1/namespaces/my-room/webhooks \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-backend.com/meridian-hook",
+    "secret": "my-secret",
+    "crdt_ids": ["visits", "messages"]
+  }'
+```
+
+Each op fires a `POST` to the registered URL with this payload:
+
+```json
+{
+  "crdt_id": "visits",
+  "seq": 42,
+  "timestamp_ms": 1700000000000
+}
+```
+
+The `X-Meridian-Secret` header is included if a secret was registered. Use it to verify the request origin.
+
+```bash
+# List webhooks
+curl https://meridian-edge.<your-subdomain>.workers.dev/v1/namespaces/my-room/webhooks \
+  -H "Authorization: Bearer <admin-token>"
+
+# Delete a webhook
+curl -X DELETE https://meridian-edge.<your-subdomain>.workers.dev/v1/namespaces/my-room/webhooks/<id> \
+  -H "Authorization: Bearer <admin-token>"
+```
+
+Webhook delivery is **best-effort** — failed requests are not retried. For guaranteed delivery, use the WAL endpoint to replay missed ops.
+
+## WAL & point-in-time recovery
+
+Every op written to a Durable Object is persisted to a **write-ahead log** before being applied to the CRDT snapshot. This means you can replay ops from any sequence number:
+
+```bash
+# Fetch WAL entries from seq 0 (admin token required)
+curl https://meridian-edge.<your-subdomain>.workers.dev/v1/namespaces/my-room/wal?from_seq=0 \
+  -H "Authorization: Bearer <admin-token>"
+```
+
+Response:
+```json
+{
+  "checkpoint_seq": 42,
+  "entries": [
+    { "seq": 43, "crdt_id": "views", "op_bytes": "...", "timestamp_ms": 1700000000000 }
+  ]
+}
+```
+
+WAL entries older than **7 days** are automatically compacted via [DO Alarms](https://developers.cloudflare.com/durable-objects/api/alarms/) — no manual maintenance required. Namespaces inactive for **30 days** are automatically deleted.
+
 ## wrangler.toml reference
 
 ```toml
@@ -134,7 +196,5 @@ new_sqlite_classes = ["NsObject"]
 
 ## Limitations
 
-- **No WAL / point-in-time recovery** — Durable Object storage is persistent but there is no WAL replay. This is planned.
-- **No clustering** — each DO is a single instance. Cloudflare handles availability and replication automatically.
-- **No webhooks** — not yet implemented in the edge runtime.
-- **No Prometheus metrics** — use Cloudflare Analytics instead.
+- **Single DO instance per namespace** — no cross-region replication at the application level. Cloudflare handles availability automatically; for strict data residency use [DO jurisdictions](https://developers.cloudflare.com/durable-objects/reference/data-location/).
+- **No Prometheus metrics** — Workers have no long-running process to scrape. Use Cloudflare Analytics or Workers Logpush instead.

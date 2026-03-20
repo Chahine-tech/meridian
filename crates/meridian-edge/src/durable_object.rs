@@ -10,6 +10,26 @@ use worker::durable::DurableObject;
 
 use crate::wal::WalEntry;
 
+/// A registered webhook for a namespace.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Webhook {
+    pub id: String,
+    pub url: String,
+    /// Optional secret — sent as `X-Meridian-Secret` header.
+    pub secret: Option<String>,
+    /// Filter: only fire for these crdt_ids. Empty = fire for all.
+    pub crdt_ids: Vec<String>,
+}
+
+/// Payload sent to webhook URLs on every op.
+#[derive(Serialize)]
+struct WebhookPayload<'a> {
+    namespace: &'a str,
+    crdt_id: &'a str,
+    seq: u64,
+    timestamp_ms: u64,
+}
+
 /// Newtype wrapper so `Vec<u8>` serializes as a base64 string via serde_json,
 /// which is what the DO KV storage uses internally.
 #[derive(Serialize, Deserialize)]
@@ -55,6 +75,17 @@ impl DurableObject for NsObject {
             self.handle_get(req).await
         } else if path.ends_with("/wal") {
             self.handle_wal(req).await
+        } else if path.ends_with("/webhooks") {
+            match req.method() {
+                worker::Method::Get => self.handle_list_webhooks().await,
+                worker::Method::Post => self.handle_register_webhook(req).await,
+                _ => Response::error("method not allowed", 405),
+            }
+        } else if path.contains("/webhooks/") {
+            match req.method() {
+                worker::Method::Delete => self.handle_delete_webhook(req).await,
+                _ => Response::error("method not allowed", 405),
+            }
         } else {
             Response::error("not found", 404)
         }
@@ -137,7 +168,7 @@ impl DurableObject for NsObject {
 
                 if let Some(ref delta) = delta_bytes {
                     let msg = ServerMsg::Delta {
-                        crdt_id,
+                        crdt_id: crdt_id.clone(),
                         delta_bytes: delta.clone().into(),
                     };
                     if let Ok(msg_bytes) = msg.to_msgpack() {
@@ -146,6 +177,10 @@ impl DurableObject for NsObject {
                         }
                     }
                 }
+
+                // Fire webhooks (best-effort, non-blocking)
+                let seq: u64 = self.state.storage().get("wal:seq").await.ok().flatten().unwrap_or(0);
+                let _ = self.fire_webhooks(&crdt_id, seq).await;
             }
             ClientMsg::AwarenessUpdate { key, data } => {
                 let broadcast = ServerMsg::AwarenessBroadcast { client_id: 0, key, data };
@@ -308,6 +343,10 @@ impl NsObject {
             }
         }
 
+        // Fire webhooks (best-effort, non-blocking)
+        let seq: u64 = self.state.storage().get("wal:seq").await.ok().flatten().unwrap_or(0);
+        let _ = self.fire_webhooks(&crdt_id, seq).await;
+
         match delta_bytes {
             Some(bytes) => {
                 let mut resp = Response::from_bytes(bytes)?;
@@ -317,6 +356,118 @@ impl NsObject {
             }
             None => Response::empty().map(|r| r.with_status(204)),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Webhook management
+    // -----------------------------------------------------------------------
+
+    /// Load all registered webhooks from KV.
+    async fn load_webhooks(&self) -> Result<Vec<Webhook>> {
+        let opts = worker::durable::ListOptions::new().prefix("webhook:");
+        let map = self.state.storage().list_with_options(opts).await?;
+        let mut hooks = Vec::new();
+
+        let iter = match js_sys::try_iter(&map).ok().flatten() {
+            Some(i) => i,
+            None => return Ok(hooks),
+        };
+
+        for item in iter {
+            let item = item.map_err(|e| worker::Error::RustError(format!("{e:?}")))?;
+            let pair = js_sys::Array::from(&item);
+            let raw = pair.get(1);
+            let s = raw.as_string().unwrap_or_else(|| {
+                js_sys::JSON::stringify(&raw).ok().and_then(|s| s.as_string()).unwrap_or_default()
+            });
+            if let Ok(hook) = serde_json::from_str::<Webhook>(&s) {
+                hooks.push(hook);
+            }
+        }
+
+        Ok(hooks)
+    }
+
+    /// GET /webhooks — list registered webhooks (admin only).
+    async fn handle_list_webhooks(&self) -> Result<Response> {
+        let hooks = self.load_webhooks().await?;
+        Response::from_json(&hooks)
+    }
+
+    /// POST /webhooks — register a new webhook.
+    async fn handle_register_webhook(&self, mut req: Request) -> Result<Response> {
+        #[derive(Deserialize)]
+        struct RegisterBody {
+            url: String,
+            secret: Option<String>,
+            #[serde(default)]
+            crdt_ids: Vec<String>,
+        }
+
+        let body: RegisterBody = req.json().await
+            .map_err(|_| worker::Error::RustError("invalid body".into()))?;
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let hook = Webhook { id: id.clone(), url: body.url, secret: body.secret, crdt_ids: body.crdt_ids };
+        let key = format!("webhook:{id}");
+        let val = serde_json::to_string(&hook)
+            .map_err(|e| worker::Error::RustError(e.to_string()))?;
+        self.state.storage().put(&key, val).await?;
+
+        Response::from_json(&hook)
+    }
+
+    /// DELETE /webhooks/:id — remove a webhook.
+    async fn handle_delete_webhook(&self, req: Request) -> Result<Response> {
+        let url = req.url()?;
+        let path = url.path();
+        let id = path.split("/webhooks/").nth(1).unwrap_or("").to_owned();
+        if id.is_empty() {
+            return Response::error("missing webhook id", 400);
+        }
+        let key = format!("webhook:{id}");
+        self.state.storage().delete(&key).await?;
+        Response::ok("deleted")
+    }
+
+    /// Fire all matching webhooks for a crdt_id op — best effort, errors ignored.
+    async fn fire_webhooks(&self, crdt_id: &str, seq: u64) -> Result<()> {
+        let hooks = self.load_webhooks().await?;
+        if hooks.is_empty() {
+            return Ok(());
+        }
+
+        let payload = WebhookPayload {
+            namespace: "",  // namespace not stored in DO, callers don't need it here
+            crdt_id,
+            seq,
+            timestamp_ms: js_sys::Date::now() as u64,
+        };
+        let body = serde_json::to_string(&payload)
+            .map_err(|e| worker::Error::RustError(e.to_string()))?;
+
+        for hook in hooks {
+            if !hook.crdt_ids.is_empty() && !hook.crdt_ids.iter().any(|id| id == crdt_id || id == "*") {
+                continue;
+            }
+
+            let mut init = worker::RequestInit::new();
+            init.with_method(worker::Method::Post);
+            let headers = worker::Headers::new();
+            let _ = headers.set("Content-Type", "application/json");
+            if let Some(ref secret) = hook.secret {
+                let _ = headers.set("X-Meridian-Secret", secret);
+            }
+            init.with_headers(headers);
+            init.with_body(Some(body.clone().into()));
+
+            if let Ok(req) = Request::new_with_init(&hook.url, &init) {
+                // Fire and forget — don't await the result
+                let _ = worker::Fetch::Request(req).send().await;
+            }
+        }
+
+        Ok(())
     }
 
     /// Delete WAL entries older than `cutoff_ms` and update `wal:checkpoint`.

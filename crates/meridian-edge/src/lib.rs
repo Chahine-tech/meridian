@@ -20,6 +20,10 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> worker::Result<Response
         .post_async("/v1/namespaces/:ns/tokens", http::issue_token)
         // WAL replay / audit log
         .get_async("/v1/namespaces/:ns/wal", http::get_wal)
+        // Webhooks (admin only)
+        .get_async("/v1/namespaces/:ns/webhooks", http::list_webhooks)
+        .post_async("/v1/namespaces/:ns/webhooks", http::register_webhook)
+        .delete_async("/v1/namespaces/:ns/webhooks/:id", http::delete_webhook)
         // Health check
         .get_async("/health", |_, _| async move { Response::ok("ok") })
         .run(req, env)
