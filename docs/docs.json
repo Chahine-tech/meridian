@@ -34,7 +34,8 @@
               "self-hosting/configuration",
               "self-hosting/tokens",
               "self-hosting/storage",
-              "self-hosting/clustering"
+              "self-hosting/clustering",
+              "self-hosting/sse"
             ]
           },
           {
@@ -51,7 +52,8 @@
               "sdk/error-handling",
               "sdk/react",
               "sdk/ttl",
-              "sdk/devtools"
+              "sdk/devtools",
+              "sdk/agents"
             ]
           },
           {
