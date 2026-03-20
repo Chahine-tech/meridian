@@ -93,6 +93,41 @@ struct IssueTokenBody {
     permissions: Permissions,
 }
 
+// ---------------------------------------------------------------------------
+// GET /v1/namespaces/:ns/wal?from_seq=0[&until_ms=...]
+// ---------------------------------------------------------------------------
+
+pub async fn get_wal(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
+    let ns = ctx.param("ns").cloned().unwrap_or_default();
+
+    let claims = match auth::validate(&req, &ctx.env) {
+        Ok(c) => c,
+        Err(e) => return Ok(auth::auth_error_response(&e)),
+    };
+
+    if claims.namespace != ns || !claims.is_admin() {
+        return Response::error("forbidden: admin permission required", 403);
+    }
+
+    let url = req.url()?;
+    let query = url.query().unwrap_or_default().to_owned();
+
+    let do_url = format!("http://do/{ns}/wal?{query}");
+    let do_req = Request::new(&do_url, worker::Method::Get)?;
+
+    let do_stub = ctx
+        .env
+        .durable_object("NS_OBJECT")?
+        .id_from_name(&ns)?
+        .get_stub()?;
+
+    do_stub.fetch_with_request(do_req).await
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/namespaces/:ns/tokens  (admin only)
+// ---------------------------------------------------------------------------
+
 pub async fn issue_token(mut req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
     let ns = ctx.param("ns").cloned().unwrap_or_default();
 

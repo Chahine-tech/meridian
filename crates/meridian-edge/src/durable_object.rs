@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use worker::{durable_object, Env, Request, Response, Result, State, WebSocket, WebSocketPair};
 use worker::durable::DurableObject;
 
+use crate::wal::WalEntry;
+
 /// Newtype wrapper so `Vec<u8>` serializes as a base64 string via serde_json,
 /// which is what the DO KV storage uses internally.
 #[derive(Serialize, Deserialize)]
@@ -51,6 +53,8 @@ impl DurableObject for NsObject {
             self.handle_op(req).await
         } else if path.contains("/get/") {
             self.handle_get(req).await
+        } else if path.ends_with("/wal") {
+            self.handle_wal(req).await
         } else {
             Response::error("not found", 404)
         }
@@ -93,10 +97,23 @@ impl DurableObject for NsObject {
                 }
             }
             ClientMsg::Op { crdt_id, op_bytes, ttl_ms } => {
+                // Rate limit: 500 ops per minute per namespace (WS path, higher limit)
+                if !self.check_rate_limit(500, 60_000).await {
+                    let err = ServerMsg::Error { code: 429, message: "rate limit exceeded".into() };
+                    if let Ok(b) = err.to_msgpack() {
+                        let _ = ws.send_with_bytes(&b);
+                    }
+                    return Ok(());
+                }
+
                 let op: CrdtOp = match rmp_serde::decode::from_slice(&op_bytes) {
                     Ok(o) => o,
                     Err(_) => return Ok(()),
                 };
+
+                // Write-ahead: persist the op before applying the snapshot.
+                let _ = self.append_wal(&crdt_id, &op_bytes).await;
+                self.touch_activity().await;
 
                 let crdt_type = op.crdt_type();
                 let mut value = self
@@ -144,6 +161,30 @@ impl DurableObject for NsObject {
         Ok(())
     }
 
+    async fn alarm(&self) -> Result<Response> {
+        let now_ms = js_sys::Date::now() as u64;
+
+        // --- Namespace TTL: delete if inactive for > NAMESPACE_TTL_MS ---
+        const NAMESPACE_TTL_MS: u64 = 30 * 24 * 3600 * 1000; // 30 days
+        let last_activity: Option<u64> = self.state.storage().get("ns:last_activity").await.ok().flatten();
+        if let Some(last) = last_activity {
+            if now_ms.saturating_sub(last) > NAMESPACE_TTL_MS {
+                let _ = self.state.storage().delete_all().await;
+                return Response::ok("expired");
+            }
+        }
+
+        // --- WAL compaction: remove entries older than 7 days ---
+        let cutoff_ms = now_ms - 7 * 24 * 3600 * 1000;
+        let _ = self.compact_wal_before(cutoff_ms).await;
+
+        // Reschedule in 24h (set_alarm takes i64 ms since epoch)
+        let next: i64 = (now_ms as i64) + 24 * 3600 * 1000;
+        let _ = self.state.storage().set_alarm(next).await;
+
+        Response::ok("compacted")
+    }
+
     async fn websocket_close(
         &self,
         _ws: WebSocket,
@@ -181,6 +222,28 @@ impl NsObject {
         self.state.storage().put(&key, Bytes(data)).await
     }
 
+    /// Sliding-window rate limiter: max `limit` ops per `window_ms`.
+    /// Returns `true` if the request is allowed, `false` if throttled.
+    /// Uses a per-minute bucket key so old counts expire naturally.
+    async fn check_rate_limit(&self, limit: u64, window_ms: u64) -> bool {
+        let now_ms = js_sys::Date::now() as u64;
+        let bucket = now_ms / window_ms;
+        let key = format!("rl:{bucket}");
+
+        let count: u64 = self.state.storage().get(&key).await.ok().flatten().unwrap_or(0u64);
+        if count >= limit {
+            return false;
+        }
+        let _ = self.state.storage().put(&key, count + 1).await;
+        true
+    }
+
+    /// Update `ns:last_activity` to now. Called on every client interaction.
+    async fn touch_activity(&self) {
+        let now_ms = js_sys::Date::now() as u64;
+        let _ = self.state.storage().put("ns:last_activity", now_ms).await;
+    }
+
     /// WebSocket upgrade — attach client to DO via Hibernation API.
     async fn handle_websocket(&self, _req: Request) -> Result<Response> {
         let pair = WebSocketPair::new()?;
@@ -188,12 +251,18 @@ impl NsObject {
         let client = pair.client;
 
         self.state.accept_web_socket(&server);
+        self.touch_activity().await;
 
         Response::from_websocket(client)
     }
 
     /// Apply a CRDT op and broadcast the delta to all connected clients.
     async fn handle_op(&self, mut req: Request) -> Result<Response> {
+        // Rate limit: 200 ops per minute per namespace (HTTP path)
+        if !self.check_rate_limit(200, 60_000).await {
+            return Response::error("rate limit exceeded", 429);
+        }
+
         let body = req.bytes().await?;
 
         let url = req.url()?;
@@ -203,6 +272,10 @@ impl NsObject {
 
         let op: CrdtOp = rmp_serde::decode::from_slice(&body)
             .map_err(|e| worker::Error::RustError(format!("decode op: {e}")))?;
+
+        // Write-ahead: persist the op before applying the snapshot.
+        let _ = self.append_wal(&crdt_id, &body).await;
+        self.touch_activity().await;
 
         let crdt_type = op.crdt_type();
         let mut value = self
@@ -244,6 +317,161 @@ impl NsObject {
             }
             None => Response::empty().map(|r| r.with_status(204)),
         }
+    }
+
+    /// Delete WAL entries older than `cutoff_ms` and update `wal:checkpoint`.
+    async fn compact_wal_before(&self, cutoff_ms: u64) -> Result<()> {
+        let opts = worker::durable::ListOptions::new().prefix("wal:");
+        let map = self.state.storage().list_with_options(opts).await?;
+
+        let iter = match js_sys::try_iter(&map).ok().flatten() {
+            Some(i) => i,
+            None => return Ok(()),
+        };
+
+        let mut last_deleted_seq: u64 = 0;
+        let mut keys_to_delete: Vec<String> = Vec::new();
+
+        for item in iter {
+            let item = item.map_err(|e| worker::Error::RustError(format!("{e:?}")))?;
+            let pair = js_sys::Array::from(&item);
+            let key = pair.get(0).as_string().unwrap_or_default();
+            // Skip metadata keys (wal:seq, wal:checkpoint) — only process hex-seq keys
+            if key == "wal:seq" || key == "wal:checkpoint" {
+                continue;
+            }
+            let raw_val = pair.get(1);
+            let val = raw_val.as_string().unwrap_or_else(|| {
+                js_sys::JSON::stringify(&raw_val)
+                    .ok()
+                    .and_then(|s| s.as_string())
+                    .unwrap_or_default()
+            });
+            let raw: Bytes = match serde_json::from_str(&val) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let entry: WalEntry = match rmp_serde::decode::from_slice(&raw.0) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            if entry.timestamp_ms < cutoff_ms {
+                keys_to_delete.push(key);
+                last_deleted_seq = entry.seq;
+            } else {
+                break; // entries are in seq order ≈ time order
+            }
+        }
+
+        for key in keys_to_delete {
+            let _ = self.state.storage().delete(&key).await;
+        }
+
+        if last_deleted_seq > 0 {
+            let _ = self.state.storage().put("wal:checkpoint", last_deleted_seq).await;
+        }
+
+        Ok(())
+    }
+
+    /// Append an op to the WAL. Returns the assigned sequence number.
+    /// Write-ahead: called before applying the op to the snapshot.
+    async fn append_wal(&self, crdt_id: &str, op_bytes: &[u8]) -> Result<u64> {
+        let seq: u64 = self.state.storage().get("wal:seq").await?.unwrap_or(0u64);
+        let next_seq = seq + 1;
+
+        let entry = WalEntry {
+            seq: next_seq,
+            crdt_id: crdt_id.to_owned(),
+            op_bytes: op_bytes.to_vec(),
+            timestamp_ms: js_sys::Date::now() as u64,
+        };
+
+        let key = format!("wal:{:016x}", next_seq);
+        let data = rmp_serde::encode::to_vec_named(&entry)
+            .map_err(|e| worker::Error::RustError(e.to_string()))?;
+
+        self.state.storage().put(&key, Bytes(data)).await?;
+        self.state.storage().put("wal:seq", next_seq).await?;
+
+        // Schedule the first compaction alarm when the first op is written
+        if next_seq == 1 {
+            let next_alarm: i64 = (js_sys::Date::now() as i64) + 24 * 3600 * 1000;
+            let _ = self.state.storage().set_alarm(next_alarm).await;
+        }
+
+        Ok(next_seq)
+    }
+
+    /// Replay WAL entries with seq >= from_seq, optionally bounded by until_ms.
+    async fn replay_wal(&self, from_seq: u64, until_ms: Option<u64>) -> Result<Vec<WalEntry>> {
+        let start_key = format!("wal:{:016x}", from_seq);
+        let opts = worker::durable::ListOptions::new()
+            .prefix("wal:")
+            .start(&start_key);
+
+        let map = self.state.storage().list_with_options(opts).await?;
+        let mut entries = Vec::new();
+
+        let iter = js_sys::try_iter(&map)
+            .ok()
+            .flatten()
+            .ok_or_else(|| worker::Error::RustError("wal map not iterable".into()))?;
+
+        for item in iter {
+            let item = item.map_err(|e| worker::Error::RustError(format!("{e:?}")))?;
+            let pair = js_sys::Array::from(&item);
+            let val = pair.get(1);
+            // In production CF DO KV, values are returned as JSON strings.
+            // In miniflare (tests), they may be returned as JS objects — stringify both.
+            let bytes = val.as_string().unwrap_or_else(|| {
+                js_sys::JSON::stringify(&val)
+                    .ok()
+                    .and_then(|s| s.as_string())
+                    .unwrap_or_default()
+            });
+            if bytes.is_empty() {
+                continue;
+            }
+            // Values are stored as Bytes (base64 via serde_bytes / serde_json)
+            let raw: Bytes = match serde_json::from_str(&bytes) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let entry: WalEntry = match rmp_serde::decode::from_slice(&raw.0) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            if let Some(ms) = until_ms {
+                if entry.timestamp_ms > ms {
+                    break;
+                }
+            }
+            entries.push(entry);
+        }
+
+        Ok(entries)
+    }
+
+    /// GET /wal?from_seq=0[&until_ms=...]
+    async fn handle_wal(&self, req: Request) -> Result<Response> {
+        let url = req.url()?;
+        let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
+        let from_seq: u64 = params.get("from_seq").and_then(|v| v.parse().ok()).unwrap_or(0);
+        let until_ms: Option<u64> = params.get("until_ms").and_then(|v| v.parse().ok());
+
+        let checkpoint_seq: u64 = self.state.storage()
+            .get("wal:checkpoint").await.ok().flatten().unwrap_or(0u64);
+        let entries = self.replay_wal(from_seq, until_ms).await?;
+
+        #[derive(Serialize)]
+        struct WalResponse {
+            checkpoint_seq: u64,
+            entries: Vec<WalEntry>,
+        }
+
+        Response::from_json(&WalResponse { checkpoint_seq, entries })
     }
 
     /// Return CRDT state as JSON.
