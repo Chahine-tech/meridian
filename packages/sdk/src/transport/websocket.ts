@@ -292,8 +292,9 @@ export class WsTransport {
   private flushPendingOps(): void {
     this.runtime.runFork(
       Effect.gen((function* (this: WsTransport) {
-        let next: Option.Option<ClientMsg>;
-        while (Option.isSome(next = yield* Queue.poll(this.pendingQueue))) {
+        for (;;) {
+          const next: Option.Option<ClientMsg> = yield* Queue.poll(this.pendingQueue);
+          if (Option.isNone(next)) break;
           if (this.ws === null || this.state !== "CONNECTED") {
             yield* Queue.offer(this.pendingQueue, next.value);
             break;
