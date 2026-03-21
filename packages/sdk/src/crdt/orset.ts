@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Chunk, Effect, Schema, Stream } from "effect";
 import { encode, uuidToBytes } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { ORSetDelta } from "../sync/delta.js";
@@ -52,6 +52,14 @@ export class ORSetHandle<T> {
   onChange(listener: (elements: T[]) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
+  }
+
+  /** Returns a Stream that emits the set elements on every change. */
+  stream(): Stream.Stream<T[], never, never> {
+    return Stream.async<T[]>((emit) => {
+      const unsub = this.onChange((elements) => { void emit(Effect.succeed(Chunk.of(elements))); });
+      return Effect.sync(unsub);
+    });
   }
 
   /**

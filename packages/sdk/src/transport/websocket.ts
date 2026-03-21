@@ -1,14 +1,23 @@
-import { Effect } from "effect";
+import {
+  Effect,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Option,
+  Queue,
+  Schedule,
+  Duration,
+} from "effect";
 import { encodeClientMsg, decodeServerMsg, encodeVectorClock } from "../codec.js";
 import type { ServerMsg, VectorClock } from "../schema.js";
 import {
   BACKOFF_INITIAL_MS,
   BACKOFF_MAX_MS,
   BACKOFF_MULTIPLIER,
-  JITTER_MULTIPLIER,
   DEFAULT_TIMEOUT_MS,
   OFFLINE_QUEUE_MAX,
 } from "../constants.js";
+import { TransportError } from "../errors.js";
 
 export type WsState =
   | "DISCONNECTED"
@@ -24,46 +33,77 @@ export interface WsTransportConfig {
   maxBackoffMs?: number;
 }
 
+type ClientMsg = Parameters<typeof encodeClientMsg>[0];
+
 export class WsTransport {
   private readonly config: WsTransportConfig;
   private readonly maxBackoffMs: number;
 
   private ws: WebSocket | null = null;
   private state: WsState = "DISCONNECTED";
-  private backoffMs = BACKOFF_INITIAL_MS;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
 
+  // Effect runtime owned by this transport
+  private readonly runtime = ManagedRuntime.make(Layer.empty);
+  private lifecycleFiber: Fiber.RuntimeFiber<void, never> | null = null;
+
+  // State change listeners (replacing fragile function-chain pattern)
+  private readonly stateListeners = new Set<(state: WsState) => void>();
+
   private readonly subscriptions = new Map<string, VectorClock>();
-  private readonly pendingOps: Parameters<typeof encodeClientMsg>[0][] = [];
+
+  // Effect sliding queue — drops oldest when full (same behaviour as previous array)
+  private readonly pendingQueue: Queue.Queue<ClientMsg>;
 
   constructor(config: WsTransportConfig) {
     this.config = config;
     this.maxBackoffMs = config.maxBackoffMs ?? BACKOFF_MAX_MS;
+
+    // Queue creation is synchronous
+    this.pendingQueue = Effect.runSync(Queue.sliding<ClientMsg>(OFFLINE_QUEUE_MAX));
+
+    // Register initial onStateChange listener if provided
+    if (config.onStateChange) {
+      this.stateListeners.add(config.onStateChange);
+    }
   }
 
   connect(): void {
     if (this.closed) return;
     this.closed = false;
-    this.doConnect();
+    this.transitionTo("CONNECTING");
+    const ws = this.makeWs();
+    this.lifecycleFiber = this.runtime.runFork(this.buildLifecycleEffect(ws));
   }
 
   close(): void {
     this.closed = true;
-    this.pendingOps.length = 0;
-    this.clearReconnectTimer();
+    // Drain synchronously so pendingOpCount returns 0 immediately after close()
+    Effect.runSync(Queue.takeAll(this.pendingQueue));
+    this.runtime.runFork(Queue.shutdown(this.pendingQueue));
     this.transitionTo("CLOSING");
+    if (this.lifecycleFiber !== null) {
+      const fiber = this.lifecycleFiber;
+      this.lifecycleFiber = null;
+      this.runtime.runFork(Fiber.interrupt(fiber));
+    }
     this.ws?.close(1000, "client close");
+    this.ws = null;
+    void this.runtime.dispose();
   }
 
   reopen(): void {
-    // Disown the current ws before creating a new one so its close event
-    // fires with ws !== this.ws and does not trigger scheduleReconnect.
+    if (this.lifecycleFiber !== null) {
+      const fiber = this.lifecycleFiber;
+      this.lifecycleFiber = null;
+      this.runtime.runFork(Fiber.interrupt(fiber));
+    }
     const old = this.ws;
     this.ws = null;
     old?.close(1000, "reopen");
     this.closed = false;
-    this.doConnect();
+    this.transitionTo("CONNECTING");
+    this.lifecycleFiber = this.runtime.runFork(this.buildLifecycleEffect(this.makeWs()));
   }
 
   subscribe(crdtId: string, sinceVc: VectorClock = {}): void {
@@ -77,19 +117,21 @@ export class WsTransport {
     this.subscriptions.set(crdtId, vc);
   }
 
-  send(msg: Parameters<typeof encodeClientMsg>[0]): void {
+  send(msg: ClientMsg): void {
     if (this.state !== "CONNECTED" || this.ws === null) {
-      if (this.pendingOps.length >= OFFLINE_QUEUE_MAX) {
-        this.pendingOps.shift(); // drop oldest to make room
-      }
-      this.pendingOps.push(msg);
+      // sliding queue drops oldest automatically if full
+      this.runtime.runFork(Queue.offer(this.pendingQueue, msg));
       return;
     }
     this.ws.send(encodeClientMsg(msg));
   }
 
   get pendingOpCount(): number {
-    return this.pendingOps.length;
+    try {
+      return Effect.runSync(Queue.size(this.pendingQueue));
+    } catch {
+      return 0;
+    }
   }
 
   /**
@@ -97,18 +139,8 @@ export class WsTransport {
    * Compatible with React's `useSyncExternalStore` subscribe parameter.
    */
   onStateChange(listener: (state: WsState) => void): () => void {
-    const prev = this.config.onStateChange;
-    this.config.onStateChange = (s) => {
-      prev?.(s);
-      listener(s);
-    };
-    return () => {
-      if (prev !== undefined) {
-        this.config.onStateChange = prev;
-      } else {
-        delete (this.config as Partial<WsTransportConfig>).onStateChange;
-      }
-    };
+    this.stateListeners.add(listener);
+    return () => { this.stateListeners.delete(listener); };
   }
 
   get currentState(): WsState {
@@ -118,90 +150,136 @@ export class WsTransport {
   waitForConnected(timeoutMs = DEFAULT_TIMEOUT_MS): Promise<void> {
     if (this.state === "CONNECTED") return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const orig = this.config.onStateChange;
-      const restore = () => {
-        if (orig !== undefined) {
-          this.config.onStateChange = orig;
-        } else {
-          delete (this.config as Partial<WsTransportConfig>).onStateChange;
-        }
-      };
       const timer = setTimeout(() => {
-        restore();
+        this.stateListeners.delete(listener);
         reject(new Error("WsTransport: connect timeout"));
       }, timeoutMs);
-      this.config.onStateChange = (s) => {
-        orig?.(s);
+      const listener = (s: WsState) => {
         if (s === "CONNECTED") {
           clearTimeout(timer);
-          restore();
+          this.stateListeners.delete(listener);
           resolve();
         }
       };
+      this.stateListeners.add(listener);
     });
   }
 
-  private doConnect(): void {
-    if (this.closed) return;
-    this.transitionTo("CONNECTING");
+  // ---------------------------------------------------------------------------
+  // Effect lifecycle
+  // ---------------------------------------------------------------------------
 
+  private makeWs(): {
+    ws: WebSocket;
+    connected: Promise<WebSocket>;
+    cancel: () => void;
+  } {
     const url = `${this.config.url}${this.config.url.includes("?") ? "&" : "?"}token=${encodeURIComponent(this.config.token)}`;
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
-    this.ws = ws;
 
-    ws.addEventListener("open", () => {
-      if (ws !== this.ws) return;
-      this.backoffMs = BACKOFF_INITIAL_MS;
+    // Register open/error listeners synchronously so they fire even if the
+    // Fiber hasn't started yet (runFork is async).
+    let resolve!: (ws: WebSocket) => void;
+    let reject!: (e: TransportError) => void;
+    const connected = new Promise<WebSocket>((res, rej) => { resolve = res; reject = rej; });
+
+    const onOpen = () => {
+      this.ws = ws;
       this.transitionTo("CONNECTED");
       this.resubscribeAll();
-    });
+      resolve(ws);
+    };
+    const onError = () => {
+      reject(new TransportError({ message: "WebSocket connection failed" }));
+    };
+    ws.addEventListener("open", onOpen, { once: true });
+    ws.addEventListener("error", onError, { once: true });
 
-    ws.addEventListener("message", (event: MessageEvent) => {
-      if (ws !== this.ws) return;
-      const bytes = new Uint8Array(event.data as ArrayBuffer);
-      Effect.runPromise(decodeServerMsg(bytes)).then(
-        (msg) => { this.config.onMessage(msg); },
-        (e) => { console.warn("[meridian] failed to decode server message", e); },
-      );
-    });
+    const cancel = () => {
+      ws.removeEventListener("open", onOpen);
+      ws.removeEventListener("error", onError);
+      ws.close(1000, "fiber interrupt");
+    };
+    return { ws, connected, cancel };
+  }
 
-    ws.addEventListener("close", () => {
-      if (ws !== this.ws) return;
-      this.ws = null;
-      if (!this.closed) {
-        this.transitionTo("DISCONNECTED");
-        this.scheduleReconnect();
+  private buildLifecycleEffect(wsHandle: ReturnType<WsTransport["makeWs"]>): Effect.Effect<void, never> {
+    const { ws, connected, cancel } = wsHandle;
+
+    const connectOnce = Effect.async<WebSocket, TransportError>((resume) => {
+      if (this.closed) {
+        cancel();
+        resume(Effect.fail(new TransportError({ message: "transport closed" })));
+        return Effect.void;
       }
+
+      // connected already has the listeners; just await its outcome
+      connected.then(
+        (w) => resume(Effect.succeed(w)),
+        () => resume(Effect.fail(new TransportError({ message: "WebSocket connection failed" }))),
+      );
+
+      // Finalizer — called if Fiber is interrupted before open
+      return Effect.sync(cancel);
     });
 
-    ws.addEventListener("error", () => {
-      // HACK: The "close" event fires right after an error — let that handler drive reconnect logic.
-    });
+    const handleConnection = (_ws: WebSocket): Effect.Effect<void, TransportError> =>
+      Effect.async((resume) => {
+        const onMessage = (event: MessageEvent) => {
+          const bytes = new Uint8Array(event.data as ArrayBuffer);
+          Effect.runPromise(decodeServerMsg(bytes)).then(
+            (msg) => { this.config.onMessage(msg); },
+            (e) => { console.warn("[meridian] failed to decode server message", e); },
+          );
+        };
+        const onClose = () => {
+          this.ws = null;
+          resume(Effect.fail(new TransportError({ message: "WebSocket closed" })));
+        };
+
+        ws.addEventListener("message", onMessage);
+        ws.addEventListener("close", onClose, { once: true });
+
+        // Finalizer — clean up listeners if Fiber is interrupted
+        return Effect.sync(() => {
+          ws.removeEventListener("message", onMessage);
+          ws.removeEventListener("close", onClose);
+          ws.close(1000, "fiber interrupt");
+        });
+      });
+
+    const reconnectSchedule = Schedule.exponential(
+      Duration.millis(BACKOFF_INITIAL_MS),
+      BACKOFF_MULTIPLIER,
+    ).pipe(
+      Schedule.map((d) => Duration.min(d, Duration.millis(this.maxBackoffMs))),
+      Schedule.jittered,
+    );
+
+    return connectOnce.pipe(
+      Effect.flatMap(handleConnection),
+      Effect.tapError(() => Effect.sync(() => {
+        if (!this.closed) this.transitionTo("DISCONNECTED");
+      })),
+      Effect.retry(reconnectSchedule),
+      Effect.catchAll(() => Effect.void),
+    );
   }
 
-  private scheduleReconnect(): void {
-    if (this.closed) return;
-    const jitter = this.backoffMs * JITTER_MULTIPLIER * (Math.random() * 2 - 1);
-    const delay = Math.round(this.backoffMs + jitter);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.doConnect();
-    }, delay);
-    this.backoffMs = Math.min(this.backoffMs * BACKOFF_MULTIPLIER, this.maxBackoffMs);
-  }
-
-  private clearReconnectTimer(): void {
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-  }
+  // ---------------------------------------------------------------------------
+  // Internals
+  // ---------------------------------------------------------------------------
 
   private transitionTo(next: WsState): void {
     if (this.state === next) return;
     this.state = next;
+    // Notify initial listener from config (for backward compat with client.ts)
     this.config.onStateChange?.(next);
+    // Notify all registered listeners
+    for (const listener of this.stateListeners) {
+      listener(next);
+    }
   }
 
   private resubscribeAll(): void {
@@ -212,18 +290,23 @@ export class WsTransport {
   }
 
   private flushPendingOps(): void {
-    const ops = this.pendingOps.splice(0);
-    for (let i = 0; i < ops.length; i++) {
-      const op = ops[i];
-      if (op === undefined) continue;
-      try {
-        this.ws?.send(encodeClientMsg(op));
-      } catch {
-        // WebSocket closed between open and flush — re-queue remaining ops.
-        this.pendingOps.unshift(...ops.slice(i));
-        break;
-      }
-    }
+    this.runtime.runFork(
+      Effect.gen((function* (this: WsTransport) {
+        let next: Option.Option<ClientMsg>;
+        while (Option.isSome(next = yield* Queue.poll(this.pendingQueue))) {
+          if (this.ws === null || this.state !== "CONNECTED") {
+            yield* Queue.offer(this.pendingQueue, next.value);
+            break;
+          }
+          try {
+            this.ws.send(encodeClientMsg(next.value));
+          } catch {
+            yield* Queue.offer(this.pendingQueue, next.value);
+            break;
+          }
+        }
+      }).bind(this)),
+    );
   }
 
   private sendSubscribe(crdtId: string, vc: VectorClock): void {

@@ -1,3 +1,4 @@
+import { Chunk, Effect, Stream } from "effect";
 import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { PNCounterDelta } from "../sync/delta.js";
@@ -48,6 +49,14 @@ export class PNCounterHandle {
   onChange(listener: (value: number) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
+  }
+
+  /** Returns a Stream that emits the counter value on every change. */
+  stream(): Stream.Stream<number, never, never> {
+    return Stream.async<number>((emit) => {
+      const unsub = this.onChange((value) => { void emit(Effect.succeed(Chunk.of(value))); });
+      return Effect.sync(unsub);
+    });
   }
 
   /**

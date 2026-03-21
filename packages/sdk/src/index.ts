@@ -74,6 +74,9 @@ export type {
   MeridianAgentConfig,
 } from "./agents.js";
 
+// Effect Layer — dependency injection
+export { MeridianService, MeridianLive } from "./layer.js";
+
 // Codec (for advanced use / testing)
 export {
   encode,

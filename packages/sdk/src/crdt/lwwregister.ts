@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Chunk, Effect, Schema, Stream } from "effect";
 import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { LwwDelta, LwwEntry } from "../sync/delta.js";
@@ -57,6 +57,14 @@ export class LwwRegisterHandle<T> {
   onChange(listener: (value: T | null) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
+  }
+
+  /** Returns a Stream that emits the register value (or null) on every change. */
+  stream(): Stream.Stream<T | null, never, never> {
+    return Stream.async<T | null>((emit) => {
+      const unsub = this.onChange((value) => { void emit(Effect.succeed(Chunk.of(value))); });
+      return Effect.sync(unsub);
+    });
   }
 
   /**
