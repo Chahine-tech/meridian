@@ -61,12 +61,21 @@ pub struct LwwValue {
 // ---------------------------------------------------------------------------
 
 /// Returns true if `a` beats `b` in LWW order.
-/// Primary key: HLC (higher wins). Tie-break: author (higher wins).
-fn wins_over(a_hlc: HybridLogicalClock, a_author: u64, b_hlc: HybridLogicalClock, b_author: u64) -> bool {
+/// Primary key: HLC (higher wins). Tie-break 1: author (higher wins).
+/// Tie-break 2: value serialized as JSON string (lexicographic) — makes merge
+/// totally ordered and commutative even when two writers share the same HLC and author.
+fn wins_over(
+    a_hlc: HybridLogicalClock, a_author: u64, a_value: &serde_json::Value,
+    b_hlc: HybridLogicalClock, b_author: u64, b_value: &serde_json::Value,
+) -> bool {
     match a_hlc.cmp(&b_hlc) {
         std::cmp::Ordering::Greater => true,
-        std::cmp::Ordering::Equal => a_author > b_author,
         std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => match a_author.cmp(&b_author) {
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Less => false,
+            std::cmp::Ordering::Equal => a_value.to_string() > b_value.to_string(),
+        },
     }
 }
 
@@ -88,7 +97,7 @@ impl Crdt for LwwRegister {
 
         let should_apply = match &self.entry {
             None => true,
-            Some(existing) => wins_over(new_entry.hlc, new_entry.author, existing.hlc, existing.author),
+            Some(existing) => wins_over(new_entry.hlc, new_entry.author, &new_entry.value, existing.hlc, existing.author, &existing.value),
         };
 
         if should_apply {
@@ -105,7 +114,7 @@ impl Crdt for LwwRegister {
             (_, None) => {}
             (None, Some(o)) => self.entry = Some(o.clone()),
             (Some(s), Some(o)) => {
-                if wins_over(o.hlc, o.author, s.hlc, s.author) {
+                if wins_over(o.hlc, o.author, &o.value, s.hlc, s.author, &s.value) {
                     self.entry = Some(o.clone());
                 }
             }
