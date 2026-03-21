@@ -70,7 +70,7 @@ async fn redis_store_delete_removes_entry() {
 
     let value = TestValue { data: "to delete".into(), count: 0 };
     store.put("ns", "id1", &value).await.unwrap();
-    store.delete("ns", "id1").await.unwrap();
+    Store::<TestValue>::delete(&store, "ns", "id1").await.unwrap();
     let result: Option<TestValue> = store.get("ns", "id1").await.unwrap();
     assert!(result.is_none());
 }

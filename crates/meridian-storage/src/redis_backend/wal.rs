@@ -136,7 +136,7 @@ impl WalBackend for RedisWal {
         redis::cmd("XTRIM")
             .arg(WAL_STREAM_KEY)
             .arg("MINID")
-            .arg(&seq_to_stream_id(before_seq))
+            .arg(seq_to_stream_id(before_seq))
             .query_async::<()>(&mut conn)
             .await?;
         Ok(())

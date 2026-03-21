@@ -74,7 +74,7 @@ fn wins_over(
         std::cmp::Ordering::Equal => match a_author.cmp(&b_author) {
             std::cmp::Ordering::Greater => true,
             std::cmp::Ordering::Less => false,
-            std::cmp::Ordering::Equal => a_value.to_string() > b_value.to_string(),
+            std::cmp::Ordering::Equal => a_value.to_string().as_bytes() > b_value.to_string().as_bytes(),
         },
     }
 }

@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use sqlx::PgPool;
-use tracing::{instrument, warn};
+use tracing::instrument;
 
 use crate::{
     error::{Result, StorageError},
