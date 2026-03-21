@@ -5,6 +5,7 @@ import { MeridianProvider } from "meridian-react";
 import { AgentBoard } from "./AgentBoard.js";
 import { ToolUseBoard } from "./ToolUseBoard.js";
 import { MemoryBoard } from "./MemoryBoard.js";
+import { DebateBoard } from "./DebateBoard.js";
 
 interface ConnectForm {
   url: string;
@@ -106,7 +107,7 @@ function ConnectScreen({ onConnect }: { onConnect: (client: MeridianClient) => v
   );
 }
 
-type Tab = "agents" | "tool-use" | "memory";
+type Tab = "agents" | "tool-use" | "memory" | "debate";
 
 const TAB_STYLE = (active: boolean): React.CSSProperties => ({
   padding: "6px 16px",
@@ -140,8 +141,14 @@ export function App() {
           <button style={TAB_STYLE(tab === "memory")} onClick={() => setTab("memory")}>
             Memory
           </button>
+          <button style={TAB_STYLE(tab === "debate")} onClick={() => setTab("debate")}>
+            Debate
+          </button>
         </div>
-        {tab === "agents" ? <AgentBoard totalWorkers={3} /> : tab === "tool-use" ? <ToolUseBoard /> : <MemoryBoard />}
+        {tab === "agents" ? <AgentBoard totalWorkers={3} />
+          : tab === "tool-use" ? <ToolUseBoard />
+          : tab === "memory" ? <MemoryBoard />
+          : <DebateBoard />}
       </div>
     </MeridianProvider>
   );

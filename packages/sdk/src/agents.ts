@@ -16,7 +16,7 @@
  * ```
  */
 
-import { encode } from "./codec.js";
+import { encode, uuidToBytes } from "./codec.js";
 
 // ---------------------------------------------------------------------------
 // Anthropic tool types (inline — no @anthropic-ai/sdk dep required)
@@ -171,12 +171,12 @@ export async function executeMeridianTool(
 
   if (addMatch?.[1]) {
     const crdtId = addMatch[1].replace(/_/g, "-");
-    const rawEl = String(input["element"] ?? "null");
-    let element: unknown;
-    try { element = JSON.parse(rawEl); } catch { element = rawEl; }
+    // Always store as a string so useORSet<string> can read it back directly.
+    // If Claude passes a JSON object, re-serialize it to a stable string.
+    const rawEl = input["element"];
+    const element: string = typeof rawEl === "string" ? rawEl : JSON.stringify(rawEl ?? null);
     const clientId = Number(input["client_id"] ?? 1);
     return applyOrSetOp(baseUrl, token, namespace, crdtId, clientId, element);
-
   }
 
   return JSON.stringify({ error: `Unknown tool: ${name}` });
@@ -275,7 +275,7 @@ async function applyOrSetOp(
 ): Promise<string> {
   const op = {
     ORSet: {
-      Add: { client_id: clientId, element, unique_tag: `${clientId}-${Date.now()}` },
+      Add: { client_id: clientId, element, tag: uuidToBytes(crypto.randomUUID()) },
     },
   };
 
