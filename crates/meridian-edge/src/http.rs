@@ -125,6 +125,38 @@ pub async fn get_wal(req: Request, ctx: RouteContext<()>) -> worker::Result<Resp
 }
 
 // ---------------------------------------------------------------------------
+// GET /v1/namespaces/:ns/crdts/:id/sync?since=<base64url-vc>
+// ---------------------------------------------------------------------------
+
+pub async fn get_sync(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
+    let ns = ctx.param("ns").cloned().unwrap_or_default();
+    let id = ctx.param("id").cloned().unwrap_or_default();
+
+    let claims = match auth::validate(&req, &ctx.env) {
+        Ok(c) => c,
+        Err(e) => return Ok(auth::auth_error_response(&e)),
+    };
+
+    if claims.namespace != ns || !claims.can_read_key(&id) {
+        return Response::error("forbidden", 403);
+    }
+
+    let url = req.url()?;
+    let since = url.query_pairs()
+        .find(|(k, _)| k == "since")
+        .map(|(_, v)| v.into_owned());
+
+    let mut do_url = format!("http://do/{ns}/sync?crdt_id={id}");
+    if let Some(vc) = since {
+        do_url.push_str(&format!("&since={vc}"));
+    }
+
+    let do_req = Request::new(&do_url, worker::Method::Get)?;
+    let do_stub = ctx.env.durable_object("NS_OBJECT")?.id_from_name(&ns)?.get_stub()?;
+    do_stub.fetch_with_request(do_req).await
+}
+
+// ---------------------------------------------------------------------------
 // Webhooks (admin only)
 // GET  /v1/namespaces/:ns/webhooks
 // POST /v1/namespaces/:ns/webhooks

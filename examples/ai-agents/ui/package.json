@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "effect": "^3.19.0",
+    "effect": "^3.21.0",
     "meridian-react": "workspace:*",
     "meridian-sdk": "workspace:*",
     "react": "^19.0.0",

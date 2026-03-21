@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
+use base64::Engine as _;
 use meridian_core::{
-    crdt::registry::{apply_op, CrdtOp, CrdtValue},
+    crdt::{registry::{apply_op, CrdtOp, CrdtValue}, VectorClock},
     protocol::{ClientMsg, ServerMsg},
 };
 use serde::{Deserialize, Serialize};
@@ -75,6 +76,8 @@ impl DurableObject for NsObject {
             self.handle_get(req).await
         } else if path.ends_with("/wal") {
             self.handle_wal(req).await
+        } else if path.ends_with("/sync") {
+            self.handle_sync(req).await
         } else if path.ends_with("/webhooks") {
             match req.method() {
                 worker::Method::Get => self.handle_list_webhooks().await,
@@ -623,6 +626,38 @@ impl NsObject {
         }
 
         Response::from_json(&WalResponse { checkpoint_seq, entries })
+    }
+
+    /// GET /sync?crdt_id=<id>[&since=<base64url-msgpack-vc>]
+    /// Returns a msgpack delta since the given VectorClock, or full state if absent.
+    async fn handle_sync(&self, req: Request) -> Result<Response> {
+        let url = req.url()?;
+        let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
+        let crdt_id = params.get("crdt_id").cloned().unwrap_or_default();
+
+        let since = match params.get("since") {
+            None => VectorClock::default(),
+            Some(b64) => {
+                let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(b64)
+                    .map_err(|e| worker::Error::RustError(format!("invalid since: {e}")))?;
+                rmp_serde::decode::from_slice::<VectorClock>(&bytes)
+                    .map_err(|e| worker::Error::RustError(format!("malformed vector clock: {e}")))?
+            }
+        };
+
+        match self.load_crdt(&crdt_id).await? {
+            None => Response::error("not found", 404),
+            Some(value) => match value.delta_since_msgpack(&since) {
+                Ok(Some(bytes)) => {
+                    let mut r = Response::from_bytes(bytes)?;
+                    r.headers_mut().set("Content-Type", "application/msgpack")?;
+                    Ok(r)
+                }
+                Ok(None) => Response::empty().map(|r| r.with_status(204)),
+                Err(e) => Response::error(e.to_string(), 500),
+            },
+        }
     }
 
     /// Return CRDT state as JSON.

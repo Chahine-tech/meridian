@@ -1660,6 +1660,7 @@ dependencies = [
 name = "meridian-edge"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "getrandom 0.4.2",
  "js-sys",
  "meridian-core",
@@ -1678,6 +1679,7 @@ name = "meridian-server"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "async-stream",
  "axum",
  "base64 0.22.1",
  "bytes",
@@ -1702,6 +1704,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tokio-test",
  "tokio-util",
  "tower",
@@ -3493,6 +3496,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

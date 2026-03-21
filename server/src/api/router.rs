@@ -13,6 +13,7 @@ use super::handlers::{
     crdt::{get_crdt, get_sync, post_op},
     history::get_history,
     metrics::get_metrics,
+    sse::get_sse,
     tokens::issue_token,
     AppStateExt,
 };
@@ -27,6 +28,7 @@ use crate::auth::auth_middleware;
 /// POST /v1/namespaces/:ns/crdts/:id/ops       -> post_op
 /// GET  /v1/namespaces/:ns/crdts/:id/sync      -> get_sync
 /// GET  /v1/namespaces/:ns/crdts/:id/history   -> get_history
+/// GET  /v1/namespaces/:ns/crdts/:id/events    -> get_sse (SSE stream)
 /// POST /v1/namespaces/:ns/tokens              -> issue_token
 /// GET  /v1/namespaces/:ns/connect             -> ws_upgrade_handler
 /// GET  /metrics                               -> get_metrics (no auth)
@@ -40,6 +42,7 @@ where
         .route("/v1/namespaces/{ns}/crdts/{id}/ops", post(post_op::<S>))
         .route("/v1/namespaces/{ns}/crdts/{id}/sync", get(get_sync::<S>))
         .route("/v1/namespaces/{ns}/crdts/{id}/history", get(get_history::<S>))
+        .route("/v1/namespaces/{ns}/crdts/{id}/events", get(get_sse::<S>))
         .route("/v1/namespaces/{ns}/tokens", post(issue_token::<S>))
         .route("/v1/namespaces/{ns}/connect", get(ws_upgrade_handler::<S>))
         .layer(middleware::from_fn_with_state(auth_state, auth_middleware))

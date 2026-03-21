@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "meridian-sdk": "^1.0.1",
-    "effect": "^3.19.0"
+    "effect": "^3.21.0"
   },
   "devDependencies": {
     "typescript": "^5.8.0",

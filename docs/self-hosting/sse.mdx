@@ -1,0 +1,59 @@
+---
+title: Server-Sent Events
+description: Stream CRDT deltas to stateless clients via SSE.
+---
+
+Meridian exposes a Server-Sent Events endpoint for clients that cannot maintain a persistent WebSocket — serverless functions, Lambda, Cloudflare Workers, or AI agents.
+
+```
+GET /v1/namespaces/:ns/crdts/:id/events
+Authorization: Bearer <token>
+Accept: text/event-stream
+```
+
+## Event format
+
+Each event carries a single base64-encoded msgpack delta:
+
+```
+data: <base64-encoded msgpack delta>\n\n
+```
+
+The delta has the same structure as WebSocket deltas — decode the base64, then decode the msgpack payload as a CRDT delta.
+
+Keep-alive pings are sent every 15 seconds to prevent proxy timeouts. Lagged receivers (those that fall too far behind the broadcast buffer) are silently skipped — reconnect to catch up.
+
+## Example
+
+```ts
+const es = new EventSource(
+  `https://your-server.com/v1/namespaces/my-app/crdts/counter/events`,
+  { headers: { Authorization: `Bearer ${token}` } }
+);
+
+es.onmessage = (event) => {
+  const bytes = Uint8Array.from(atob(event.data), c => c.charCodeAt(0));
+  const delta = decode(bytes); // msgpack decode
+  console.log("delta:", delta);
+};
+
+es.onerror = () => {
+  // reconnect automatically — EventSource retries by default
+};
+```
+
+## Auth
+
+The token must have `read` permission for the CRDT ID. The namespace in the token must match the `:ns` path parameter.
+
+## Comparison with WebSocket
+
+| | WebSocket | SSE |
+|---|-----------|-----|
+| Direction | Bidirectional | Server → client only |
+| Writes | Yes (ops over WS) | No — use `POST /ops` |
+| Persistent connection | Yes | Yes (HTTP keep-alive) |
+| Serverless compatible | No | Yes |
+| Reconnect on drop | Manual | Automatic (browser `EventSource`) |
+
+Use SSE when your client only needs to **react** to changes. For reads and writes from serverless agents, combine SSE with `POST /v1/namespaces/:ns/crdts/:id/ops`. See [AI Agents](/sdk/agents) for a complete example.

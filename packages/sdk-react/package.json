@@ -24,7 +24,7 @@
     "typescript": "^5.8.0"
   },
   "dependencies": {
-    "effect": "^3.19.0"
+    "effect": "^3.21.0"
   },
   "peerDependencies": {
     "meridian-sdk": "^1.0.1",

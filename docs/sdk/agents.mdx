@@ -1,0 +1,188 @@
+---
+title: AI Agents
+description: Use Meridian CRDTs as shared state for Claude AI agents via HTTP tool use.
+---
+
+Meridian ships a built-in integration for [Anthropic Claude tool use](https://docs.anthropic.com/en/docs/tool-use). Stateless agents (serverless functions, Lambda, Cloudflare Workers) can read and write CRDTs via pure HTTP — no persistent WebSocket required.
+
+## Install
+
+```bash
+npm install meridian-sdk @anthropic-ai/sdk
+```
+
+## Quick start
+
+```ts
+import Anthropic from "@anthropic-ai/sdk";
+import { getMeridianTools, executeMeridianTool } from "meridian-sdk";
+import type { ToolUseBlock } from "meridian-sdk";
+
+const config = {
+  baseUrl: "https://your-meridian-server.com",
+  token: process.env.MERIDIAN_TOKEN!,
+  namespace: "my-app",
+};
+
+const anthropic = new Anthropic();
+
+// 1. Generate Anthropic-compatible tool definitions from your CRDT IDs
+const tools = getMeridianTools(config, ["views", "notes", "tags"]);
+
+// 2. Run the agentic loop
+const messages: Anthropic.MessageParam[] = [
+  { role: "user", content: "Increment the views counter and update the notes." },
+];
+
+while (true) {
+  const response = await anthropic.messages.create({
+    model: "claude-opus-4-6",
+    max_tokens: 1024,
+    tools,
+    messages,
+  });
+
+  const toolResults: Anthropic.ToolResultBlockParam[] = [];
+
+  for (const block of response.content) {
+    if (block.type === "tool_use") {
+      // 3. Execute each tool call against Meridian via HTTP
+      const result = await executeMeridianTool(config, block as ToolUseBlock);
+      toolResults.push({ type: "tool_result", tool_use_id: block.id, content: result });
+    }
+  }
+
+  messages.push({ role: "assistant", content: response.content });
+
+  if (toolResults.length === 0) break; // Claude is done
+
+  messages.push({ role: "user", content: toolResults });
+}
+```
+
+## `getMeridianTools`
+
+```ts
+function getMeridianTools(
+  config: MeridianAgentConfig,
+  crdtIds: string[],
+): Tool[]
+```
+
+Returns an Anthropic `Tool[]` array. Each CRDT ID exposes four tools:
+
+| Tool | CRDT type | Description |
+|------|-----------|-------------|
+| `meridian_read_{id}` | any | Read current JSON state |
+| `meridian_increment_{id}` | GCounter / PNCounter | Increment by `amount` |
+| `meridian_set_{id}` | LWW Register | Set value (string, number, object) |
+| `meridian_add_{id}` | ORSet | Add an element |
+
+Special characters in CRDT IDs (`:`, `/`, `-`) are replaced with `_` in tool names.
+
+## `executeMeridianTool`
+
+```ts
+function executeMeridianTool(
+  config: MeridianAgentConfig,
+  toolUse: ToolUseBlock,
+): Promise<string>
+```
+
+Executes a tool call returned by Claude and returns a JSON string suitable for the `content` field of a `tool_result` block.
+
+Dispatches to the correct HTTP endpoint based on the tool name:
+- `read` → `GET /v1/namespaces/:ns/crdts/:id`
+- `increment` → `POST /v1/namespaces/:ns/crdts/:id/ops` (GCounter or PNCounter op)
+- `set` → `POST /v1/namespaces/:ns/crdts/:id/ops` (LwwRegister op)
+- `add` → `POST /v1/namespaces/:ns/crdts/:id/ops` (ORSet Add op)
+
+## `MeridianAgentConfig`
+
+```ts
+interface MeridianAgentConfig {
+  /** HTTP base URL of the Meridian server */
+  baseUrl: string;
+  /** Bearer token with read+write permissions for the namespace */
+  token: string;
+  /** Namespace scoping all CRDT operations */
+  namespace: string;
+}
+```
+
+## Persistent agent memory
+
+Because Meridian CRDTs are durable, an agent can use them as long-term memory across runs — reading its previous state at startup and writing an updated summary before exiting.
+
+```ts
+// On startup — read previous memory
+const lastRun = await fetch(`${baseUrl}/v1/namespaces/${ns}/crdts/memory:last-run`, {
+  headers: { Authorization: `Bearer ${token}` },
+}).then(r => r.ok ? r.json() : null);
+
+// Pass previous memory as context to Claude
+const prompt = lastRun
+  ? `Your last run summary: ${JSON.stringify(lastRun.value)}\n\nContinue from where you left off.`
+  : `This is your first run.`;
+
+// ... agentic loop ...
+
+// On exit — write updated memory
+await executeMeridianTool(config, {
+  type: "tool_use", id: "1", name: "meridian_set_memory_last_run",
+  input: { value: JSON.stringify({ timestamp: new Date(), summary: "..." }), client_id: 1 },
+});
+```
+
+A full working example is in [`examples/ai-agents/agents/memory.ts`](https://github.com/Chahine-tech/meridian/tree/main/examples/ai-agents/agents/memory.ts). It uses three CRDTs:
+
+| CRDT | Type | Purpose |
+|------|------|---------|
+| `memory:run-count` | GCounter | Total runs ever |
+| `memory:last-run` | LWW Register | Summary of the last run |
+| `memory:insights` | ORSet | Observations accumulated across all runs |
+
+## Live UI
+
+The [AI agents example](https://github.com/Chahine-tech/meridian/tree/main/examples/ai-agents) ships a React dashboard that subscribes to the same CRDTs via WebSocket and displays live state as the agent writes — demonstrating that native clients and HTTP agents share the same namespace seamlessly.
+
+## SSE streaming
+
+For agents that need to react to changes without polling, use the SSE endpoint:
+
+```
+GET /v1/namespaces/:ns/crdts/:id/events
+Authorization: Bearer <token>
+Accept: text/event-stream
+```
+
+Each event is a base64-encoded msgpack delta. The SDK `HttpClient.syncCrdt()` handles decoding automatically. Keep-alive pings are sent every 15 seconds to prevent proxy timeouts.
+
+```ts
+const es = new EventSource(
+  `${baseUrl}/v1/namespaces/${ns}/crdts/${id}/events`,
+  { headers: { Authorization: `Bearer ${token}` } }
+);
+
+es.onmessage = (e) => {
+  const delta = decode(base64ToBytes(e.data)); // msgpack delta
+  // apply delta to local CRDT state
+};
+```
+
+## Token requirements
+
+The token must have `read` and `write` permissions for all CRDT IDs the agent will access. Issue one via the admin API:
+
+```bash
+curl -X POST https://your-server.com/v1/tokens \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "namespace": "my-app",
+    "client_id": 42,
+    "permissions": { "read": ["*"], "write": ["*"], "admin": false }
+  }'
+```
+
+See [Tokens](/self-hosting/tokens) for details.
