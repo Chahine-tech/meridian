@@ -1,9 +1,9 @@
 import { useGCounter, useLwwRegister, useORSet } from "meridian-react";
 
 export function MemoryBoard() {
-  const { value: runCount } = useGCounter("memory:run-count");
-  const { value: lastRun } = useLwwRegister<Record<string, unknown>>("memory:last-run");
-  const { elements: insights } = useORSet<string>("memory:insights");
+  const { value: runCount } = useGCounter("memory-run-count");
+  const { value: lastRun } = useLwwRegister<Record<string, unknown>>("memory-last-run");
+  const { elements: insights } = useORSet<string>("memory-insights");
 
   return (
     <div style={{
@@ -40,7 +40,7 @@ export function MemoryBoard() {
         </div>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>Total runs</div>
-          <div style={{ fontSize: 12, color: "#52525b" }}>memory:run-count (GCounter)</div>
+          <div style={{ fontSize: 12, color: "#52525b" }}>memory-run-count (GCounter)</div>
         </div>
       </div>
 
@@ -52,7 +52,7 @@ export function MemoryBoard() {
         padding: 16,
       }}>
         <div style={{ fontSize: 11, color: "#71717a", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>
-          Last run summary — memory:last-run (LWW Register)
+          Last run summary — memory-last-run (LWW Register)
         </div>
         {lastRun ? (
           <pre style={{ fontSize: 12, color: "#e2e8f0", margin: 0, whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
@@ -73,7 +73,7 @@ export function MemoryBoard() {
         padding: 16,
       }}>
         <div style={{ fontSize: 11, color: "#71717a", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>
-          Accumulated insights — memory:insights (ORSet · {insights?.length ?? 0} entries)
+          Accumulated insights — memory-insights (ORSet · {insights?.length ?? 0} entries)
         </div>
         {insights && insights.length > 0 ? (
           <ol style={{ margin: 0, padding: "0 0 0 18px", display: "flex", flexDirection: "column", gap: 8 }}>

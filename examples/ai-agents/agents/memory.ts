@@ -6,9 +6,9 @@
  * summary before exiting. The next run picks up exactly where this one left off.
  *
  * Memory layout (namespace: "agent-memory"):
- *   memory:run-count   — GCounter  — total number of runs ever
- *   memory:last-run    — LWW Reg   — JSON blob: { timestamp, summary, insights_added }
- *   memory:insights    — ORSet     — accumulated observations across all runs
+ *   memory-run-count   — GCounter  — total number of runs ever
+ *   memory-last-run    — LWW Reg   — JSON blob: { timestamp, summary, insights_added }
+ *   memory-insights    — ORSet     — accumulated observations across all runs
  *
  * Run:
  *   MERIDIAN_URL=http://localhost:3000 \
@@ -22,7 +22,7 @@ import { getMeridianTools, executeMeridianTool } from "meridian-sdk";
 import type { ToolUseBlock } from "meridian-sdk";
 
 const NAMESPACE = "ai-agents";
-const CRDT_IDS = ["memory:run-count", "memory:last-run", "memory:insights"];
+const CRDT_IDS = ["memory-run-count", "memory-last-run", "memory-insights"];
 const CLIENT_ID = 1;
 
 async function main() {
@@ -39,13 +39,13 @@ async function main() {
 
   // --- Read current memory state before starting ---
   const [runCount, lastRun, insights] = await Promise.all([
-    fetch(`${baseUrl}/v1/namespaces/${NAMESPACE}/crdts/memory:run-count`, {
+    fetch(`${baseUrl}/v1/namespaces/${NAMESPACE}/crdts/memory-run-count`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then(r => r.ok ? r.json() as Promise<{ total: number }> : null),
-    fetch(`${baseUrl}/v1/namespaces/${NAMESPACE}/crdts/memory:last-run`, {
+    fetch(`${baseUrl}/v1/namespaces/${NAMESPACE}/crdts/memory-last-run`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then(r => r.ok ? r.json() as Promise<{ value: unknown }> : null),
-    fetch(`${baseUrl}/v1/namespaces/${NAMESPACE}/crdts/memory:insights`, {
+    fetch(`${baseUrl}/v1/namespaces/${NAMESPACE}/crdts/memory-insights`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then(r => r.ok ? r.json() as Promise<string[]> : null),
   ]);
@@ -80,9 +80,9 @@ async function main() {
 ${memoryContext}
 
 Your tasks for this run (#${currentRun}):
-1. Increment "memory:run-count" by 1 (client_id: ${CLIENT_ID}) to record this run
-2. Add one new insight to "memory:insights" — something you observe or deduce about your run history (client_id: ${CLIENT_ID})
-3. Set "memory:last-run" to a JSON object summarizing this run: include run_number, timestamp, what_you_did, and a note_to_future_self (client_id: ${CLIENT_ID})
+1. Increment "memory-run-count" by 1 (client_id: ${CLIENT_ID}) to record this run
+2. Add one new insight to "memory-insights" — something you observe or deduce about your run history (client_id: ${CLIENT_ID})
+3. Set "memory-last-run" to a JSON object summarizing this run: include run_number, timestamp, what_you_did, and a note_to_future_self (client_id: ${CLIENT_ID})
 4. Read back all three CRDTs to confirm the writes succeeded
 5. Summarize what you remember from before, what you did this run, and what you want to remember next time
 
