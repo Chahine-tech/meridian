@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "meridian-sdk": "^1.0.1",
+    "meridian-sdk": "^1.1.0",
     "effect": "^3.21.0"
   },
   "devDependencies": {

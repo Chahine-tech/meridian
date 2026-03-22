@@ -1,5 +1,11 @@
 # meridian-sdk
 
+## 1.1.0
+
+### Minor Changes
+
+- 4354639: Add `stream()` on all CRDT handles, `MeridianLive` Layer for Effect DI, and Effect-based `WsTransport` with `Fiber`, `Schedule`, and `Queue`.
+
 ## 1.0.1
 
 ### Patch Changes
