@@ -20,14 +20,14 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.7",
     "@types/react": "^19.0.0",
-    "meridian-sdk": "^1.0.1",
+    "meridian-sdk": "workspace:*",
     "typescript": "^5.8.0"
   },
   "dependencies": {
     "effect": "^3.21.0"
   },
   "peerDependencies": {
-    "meridian-sdk": "^1.0.1",
+    "meridian-sdk": "workspace:*",
     "react": "^19.0.0",
     "typescript": ">=5.0.0"
   },
