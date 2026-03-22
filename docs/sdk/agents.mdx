@@ -5,6 +5,10 @@ description: Use Meridian CRDTs as shared state for Claude AI agents via HTTP to
 
 Meridian ships a built-in integration for [Anthropic Claude tool use](https://docs.anthropic.com/en/docs/tool-use). Stateless agents (serverless functions, Lambda, Cloudflare Workers) can read and write CRDTs via pure HTTP — no persistent WebSocket required.
 
+<Note>
+  The `getMeridianTools` / `executeMeridianTool` helpers currently return **Anthropic-compatible** tool definitions. OpenAI and Gemini adapters are planned — see the [Roadmap](https://github.com/Chahine-tech/meridian/blob/main/ROADMAP.md).
+</Note>
+
 ## Install
 
 ```bash
@@ -116,7 +120,7 @@ Because Meridian CRDTs are durable, an agent can use them as long-term memory ac
 
 ```ts
 // On startup — read previous memory
-const lastRun = await fetch(`${baseUrl}/v1/namespaces/${ns}/crdts/memory:last-run`, {
+const lastRun = await fetch(`${baseUrl}/v1/namespaces/${ns}/crdts/memory-last-run`, {
   headers: { Authorization: `Bearer ${token}` },
 }).then(r => r.ok ? r.json() : null);
 
@@ -134,17 +138,27 @@ await executeMeridianTool(config, {
 });
 ```
 
-A full working example is in [`examples/ai-agents/agents/memory.ts`](https://github.com/Chahine-tech/meridian/tree/main/examples/ai-agents/agents/memory.ts). It uses three CRDTs:
+A full working example is in [`examples/ai-agents/agents/memory.ts`](https://github.com/Chahine-tech/meridian/tree/main/examples/ai-agents/agents/memory.ts). It uses three CRDTs (namespace: `ai-agents`):
 
 | CRDT | Type | Purpose |
 |------|------|---------|
-| `memory:run-count` | GCounter | Total runs ever |
-| `memory:last-run` | LWW Register | Summary of the last run |
-| `memory:insights` | ORSet | Observations accumulated across all runs |
+| `memory-run-count` | GCounter | Total runs ever |
+| `memory-last-run` | LWW Register | Summary of the last run |
+| `memory-insights` | ORSet | Observations accumulated across all runs |
+
+<Note>
+  CRDT IDs must use hyphens only — colons are not supported. `getMeridianTools` converts special characters to `_` in tool names and `executeMeridianTool` converts them back to `-` when calling the API.
+</Note>
+
+## Multi-agent debate
+
+Two agents can use CRDTs as a shared communication channel — each writing its argument to an LWW-Register and reading the opponent's latest argument before composing a rebuttal.
+
+A full working example is in [`examples/ai-agents/agents/debate.ts`](https://github.com/Chahine-tech/meridian/tree/main/examples/ai-agents/agents/debate.ts). It runs two Claude agents (FOR / AGAINST) in interleaved rounds, with each agent's argument history accumulated in an ORSet. A React UI displays both sides live.
 
 ## Live UI
 
-The [AI agents example](https://github.com/Chahine-tech/meridian/tree/main/examples/ai-agents) ships a React dashboard that subscribes to the same CRDTs via WebSocket and displays live state as the agent writes — demonstrating that native clients and HTTP agents share the same namespace seamlessly.
+The [AI agents example](https://github.com/Chahine-tech/meridian/tree/main/examples/ai-agents) ships a React dashboard with four tabs — **Agents** (multi-worker coordinator), **Tool Use** (single Claude agent), **Memory** (persistent memory across runs), and **Debate** (two-agent debate) — all subscribing to the same CRDTs via WebSocket and displaying live state as agents write.
 
 ## SSE streaming
 

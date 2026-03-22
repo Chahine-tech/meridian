@@ -87,6 +87,12 @@ const views = client.gcounter("gc:views");
 views.increment(1);
 views.onChange(v => console.log("views:", v));
 
+// Every handle has stream() — composable with Effect
+import { Stream } from "effect";
+await Effect.runPromise(
+  views.stream().pipe(Stream.take(5), Stream.runForEach(v => Effect.log(`views: ${v}`)))
+);
+
 // Awareness — ephemeral cursors, not persisted, schema-validated at runtime
 const CursorSchema = Schema.Struct({ x: Schema.Number, y: Schema.Number });
 const cursors = client.awareness("cursors", CursorSchema);
@@ -142,7 +148,7 @@ See [`crates/meridian-edge/`](crates/meridian-edge/) for full setup.
 
 | Package | Description |
 |---------|-------------|
-| [`meridian-sdk`](packages/sdk) | TypeScript SDK — Effect-based, msgpack, fully typed |
+| [`meridian-sdk`](packages/sdk) | TypeScript SDK — Effect-based, msgpack, fully typed. Includes `stream()` on all CRDT handles and `MeridianLive` Layer for DI |
 | [`meridian-react`](packages/sdk-react) | React hooks — `useGCounter`, `usePresence`, `useAwareness`, etc. |
 | [`meridian-devtools`](packages/devtools) | Devtools panel — real-time CRDT state inspector |
 

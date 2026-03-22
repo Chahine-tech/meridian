@@ -13,13 +13,13 @@ const room = client.presence("pr:room-123");
 // Announce presence (data: any, ttl in ms)
 room.heartbeat({ status: "online" }, 30_000);
 
-// Read current entries
-console.log(room.value()); // Map<clientId, { data: unknown; expiresAtMs: number }>
+// Read current live entries
+console.log(room.online()); // PresenceEntry<unknown>[]
 
 // Subscribe
 room.onChange(entries => {
-  for (const [clientId, entry] of entries) {
-    console.log(clientId, entry.data);
+  for (const entry of entries) {
+    console.log(entry.clientId, entry.data);
   }
 });
 
@@ -42,9 +42,9 @@ const cursors = client.presence("pr:cursors", Cursor);
 cursors.heartbeat({ x: 120, y: 340 }, 5_000);
 
 cursors.onChange(entries => {
-  for (const [clientId, entry] of entries) {
+  for (const entry of entries) {
     // entry.data: { x: number; y: number }
-    renderCursor(clientId, entry.data.x, entry.data.y);
+    renderCursor(entry.clientId, entry.data.x, entry.data.y);
   }
 });
 ```
@@ -55,13 +55,15 @@ cursors.onChange(entries => {
 |--------|-------------|
 | `heartbeat(data: T, ttlMs: number)` | Send presence data, expires after `ttlMs` |
 | `leave()` | Remove own entry immediately |
-| `value()` | Returns `Map<number, PresenceEntry<T>>` — only live entries |
+| `online()` | Returns `PresenceEntry<T>[]` — only live (non-expired) entries |
 | `onChange(fn)` | Subscribe — returns unsubscribe function |
+| `stream()` | Returns an Effect `Stream<PresenceEntry<T>[]>` that emits on every change |
 
 ## PresenceEntry
 
 ```ts
 interface PresenceEntry<T> {
+  clientId: number;
   data: T;
   expiresAtMs: number; // absolute timestamp
 }
@@ -69,7 +71,7 @@ interface PresenceEntry<T> {
 
 ## TTL behavior
 
-Entries expire when `now > expiresAtMs`. Call `heartbeat()` periodically to keep the entry alive. `value()` always filters out expired entries before returning.
+Entries expire when `now > expiresAtMs`. Call `heartbeat()` periodically to keep the entry alive. `online()` always filters out expired entries before returning.
 
 ## Server restart behavior
 

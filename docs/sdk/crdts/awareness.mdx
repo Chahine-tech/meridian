@@ -45,6 +45,7 @@ unsub();
 | `clear()` | Remove our entry from all peers |
 | `peers()` | Returns `AwarenessEntry<T>[]` — all peers except self |
 | `onChange(fn)` | Subscribe to peer changes — returns unsubscribe function |
+| `stream()` | Returns an Effect `Stream<AwarenessEntry<T>[]>` that emits on every change |
 
 ## AwarenessEntry
 

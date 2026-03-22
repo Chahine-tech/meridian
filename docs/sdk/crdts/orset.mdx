@@ -13,9 +13,9 @@ const tags = client.orset("or:article-123-tags");
 tags.add("typescript");
 tags.remove("javascript");
 
-console.log(tags.values()); // Set<unknown>
+console.log(tags.elements()); // string[]
 
-tags.onChange(set => console.log("tags:", set));
+tags.onChange(elements => console.log("tags:", elements));
 ```
 
 ## Usage with schema
@@ -29,7 +29,7 @@ const cart = client.orset("or:cart-user-42", Item);
 cart.add({ id: "prod-1", name: "Keyboard" });
 
 cart.onChange(items => {
-  // items: Set<{ id: string; name: string }>
+  // items: { id: string; name: string }[]
   for (const item of items) {
     console.log(item.name);
   }
@@ -44,5 +44,7 @@ Incoming deltas are validated against the schema at runtime via `Schema.decodeUn
 |--------|-------------|
 | `add(value: T)` | Add an element |
 | `remove(value: T)` | Remove all observed instances of an element |
-| `values()` | Returns current `Set<T>` |
+| `has(value: T)` | Returns `true` if the element is currently in the set |
+| `elements()` | Returns current elements as `T[]` |
 | `onChange(fn)` | Subscribe — returns unsubscribe function |
+| `stream()` | Returns an Effect `Stream<T[]>` that emits on every change |

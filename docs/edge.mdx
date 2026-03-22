@@ -49,15 +49,17 @@ MERIDIAN_SIGNING_KEY=<your-key> cargo run --bin gen_token -- my-namespace 1
 ## Connect with the SDK
 
 ```ts
+import { Effect } from "effect";
 import { MeridianClient } from "meridian-sdk";
 
-const client = new MeridianClient({
-  url: "ws://localhost:8787",   // wss://your-worker.workers.dev in prod
-  namespace: "my-namespace",
-  token: "<generated-token>",
-});
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "ws://localhost:8787",   // wss://your-worker.workers.dev in prod
+    namespace: "my-namespace",
+    token: "<generated-token>",
+  })
+);
 
-await client.connect();
 const counter = client.gcounter("views");
 counter.increment(1);
 ```
