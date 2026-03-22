@@ -1,4 +1,4 @@
-import { Schema as S } from "effect";
+import { Chunk, Effect, Schema as S, Stream } from "effect";
 import type { Schema } from "effect";
 import { encode, decode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
@@ -140,6 +140,14 @@ export class AwarenessHandle<T = unknown> {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  /** Returns a Stream that emits the peer entries on every change. */
+  stream(): Stream.Stream<AwarenessEntry<T>[], never, never> {
+    return Stream.async<AwarenessEntry<T>[]>((emit) => {
+      const unsub = this.onChange((entries) => { void emit(Effect.succeed(Chunk.of(entries))); });
+      return Effect.sync(unsub);
+    });
   }
 
   private emit(): void {

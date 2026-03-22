@@ -33,17 +33,20 @@ cd examples/cursors
 bun install && bun dev
 ```
 
-**Collaborative AI agents** — multiple Claude agents summarize a document in parallel, a coordinator aggregates the results. Live dashboard via `useCRDTMap` + `usePresence` (React + Node.js):
+**Collaborative AI agents** — four examples in one: multi-agent document summarization, Claude tool use over CRDTs, persistent agent memory across runs, and a two-agent debate. Live React dashboard with tabs for each scenario (`useCRDTMap`, `usePresence`, `useGCounter`, `useORSet`, `useLwwRegister`):
 
 ```bash
 cd examples/ai-agents
 bun install
 
-# Terminal 1 — UI
+# Terminal 1 — UI (http://localhost:5175)
 cd ui && bun run dev
 
-# Terminal 2 — agents
-MERIDIAN_ADMIN_TOKEN=xxx ANTHROPIC_API_KEY=xxx bun run agents
+# Terminal 2 — pick an example
+MERIDIAN_ADMIN_TOKEN=xxx ANTHROPIC_API_KEY=xxx bun run agents   # multi-agent coordinator
+MERIDIAN_ADMIN_TOKEN=xxx ANTHROPIC_API_KEY=xxx bun run tool-use # single agent + tool use
+MERIDIAN_ADMIN_TOKEN=xxx ANTHROPIC_API_KEY=xxx bun run memory   # persistent memory
+MERIDIAN_ADMIN_TOKEN=xxx ANTHROPIC_API_KEY=xxx bun run debate   # two-agent debate
 ```
 
 See [`examples/ai-agents/README.md`](https://github.com/Chahine-tech/meridian/tree/main/examples/ai-agents) for full setup instructions.

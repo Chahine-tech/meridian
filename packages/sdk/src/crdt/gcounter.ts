@@ -1,3 +1,4 @@
+import { Chunk, Effect, Stream } from "effect";
 import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { GCounterDelta } from "../sync/delta.js";
@@ -53,6 +54,14 @@ export class GCounterHandle {
   onChange(listener: (value: number) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
+  }
+
+  /** Returns an Effect Stream that emits the counter value on every change. */
+  stream(): Stream.Stream<number, never, never> {
+    return Stream.async<number>((emit) => {
+      const unsub = this.onChange((value) => { void emit(Effect.succeed(Chunk.of(value))); });
+      return Effect.sync(unsub);
+    });
   }
 
   /**

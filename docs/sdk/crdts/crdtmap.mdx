@@ -66,6 +66,7 @@ doc.orsetAdd("tags", "typescript", tag);
 | `value()` | Returns snapshot of the full map `Record<string, unknown>` |
 | `get(key)` | Returns the current value at `key`, or `undefined` |
 | `onChange(fn)` | Subscribe to any change — returns unsubscribe function |
+| `stream()` | Returns an Effect `Stream<CrdtMapValue>` that emits on every change |
 | `lwwSet(key, value)` | Write a LWW-Register value |
 | `incrementCounter(key, amount?)` | Increment a GCounter key (default `1`) |
 | `incrementPNCounter(key, amount?)` | Increment a PNCounter key (default `1`) |

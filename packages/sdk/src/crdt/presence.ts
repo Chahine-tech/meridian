@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Chunk, Effect, Schema, Stream } from "effect";
 import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { PresenceDelta, PresenceEntryDelta } from "../sync/delta.js";
@@ -58,6 +58,14 @@ export class PresenceHandle<T> {
   onChange(listener: (entries: PresenceEntry<T>[]) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
+  }
+
+  /** Returns a Stream that emits the online entries on every change. */
+  stream(): Stream.Stream<PresenceEntry<T>[], never, never> {
+    return Stream.async<PresenceEntry<T>[]>((emit) => {
+      const unsub = this.onChange((entries) => { void emit(Effect.succeed(Chunk.of(entries))); });
+      return Effect.sync(unsub);
+    });
   }
 
   /**

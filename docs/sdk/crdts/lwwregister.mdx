@@ -43,7 +43,9 @@ profile.onChange(v => {
 |--------|-------------|
 | `set(value: T)` | Write a new value |
 | `value()` | Returns current value or `null` if not set |
+| `meta()` | Returns `{ updatedAtMs: number; author: number } \| null` — timestamp and author of the winning write |
 | `onChange(fn)` | Subscribe — returns unsubscribe function |
+| `stream()` | Returns an Effect `Stream<T \| null>` that emits on every change |
 
 ## Conflict resolution
 

@@ -155,17 +155,17 @@ export async function executeMeridianTool(
 
   if (incrementMatch?.[1]) {
     const crdtId = incrementMatch[1].replace(/_/g, "-");
-    const amount = Number(input["amount"] ?? 1);
-    const clientId = Number(input["client_id"] ?? 1);
+    const amount = Number(input.amount ?? 1);
+    const clientId = Number(input.client_id ?? 1);
     return applyCounterOp(baseUrl, token, namespace, crdtId, clientId, amount);
   }
 
   if (setMatch?.[1]) {
     const crdtId = setMatch[1].replace(/_/g, "-");
-    const raw = String(input["value"] ?? "null");
+    const raw = String(input.value ?? "null");
     let value: unknown;
     try { value = JSON.parse(raw); } catch { value = raw; }
-    const clientId = Number(input["client_id"] ?? 1);
+    const clientId = Number(input.client_id ?? 1);
     return applyLwwOp(baseUrl, token, namespace, crdtId, clientId, value);
   }
 
@@ -173,9 +173,9 @@ export async function executeMeridianTool(
     const crdtId = addMatch[1].replace(/_/g, "-");
     // Always store as a string so useORSet<string> can read it back directly.
     // If Claude passes a JSON object, re-serialize it to a stable string.
-    const rawEl = input["element"];
+    const rawEl = input.element;
     const element: string = typeof rawEl === "string" ? rawEl : JSON.stringify(rawEl ?? null);
-    const clientId = Number(input["client_id"] ?? 1);
+    const clientId = Number(input.client_id ?? 1);
     return applyOrSetOp(baseUrl, token, namespace, crdtId, clientId, element);
   }
 

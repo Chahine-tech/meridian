@@ -98,6 +98,42 @@ await Effect.runPromise(
 
 Without a schema, `T = unknown`. With a schema, incoming deltas are validated at runtime via `Schema.decodeUnknownSync`.
 
+Every handle exposes a `stream()` method returning a `Stream.Stream<T, never, never>` — composable with the full Effect ecosystem:
+
+```ts
+import { Stream, Effect } from "effect";
+
+const views = client.gcounter("gc:views");
+
+// Consume as an Effect Stream
+await Effect.runPromise(
+  views.stream().pipe(
+    Stream.tap(v => Effect.log(`views: ${v}`)),
+    Stream.take(10),
+    Stream.runDrain,
+  )
+);
+```
+
+### Effect Layer (dependency injection)
+
+`MeridianLive` is an Effect `Layer` that provides `MeridianService` — use it to inject the client into any Effect program without manual wiring:
+
+```ts
+import { Effect, Layer } from "effect";
+import { MeridianLive, MeridianService } from "meridian-sdk";
+
+const config = { url: "http://localhost:3000", namespace: "my-room", token };
+
+const program = Effect.gen(function* () {
+  const meridian = yield* MeridianService;
+  const views = meridian.gcounter("gc:views");
+  views.increment(1);
+});
+
+await Effect.runPromise(program.pipe(Effect.provide(MeridianLive(config))));
+```
+
 ### Awareness
 
 Ephemeral pub/sub channel — updates are fanned out to all other subscribers in real time but are **not** persisted. Use this for high-frequency transient state like cursor positions or "is typing" indicators.

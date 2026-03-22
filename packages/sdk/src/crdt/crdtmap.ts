@@ -1,3 +1,4 @@
+import { Chunk, Effect, Stream } from "effect";
 import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { CRDTMapDelta, CrdtValueDelta } from "../sync/delta.js";
@@ -54,6 +55,14 @@ export class CRDTMapHandle {
   onChange(listener: (value: CrdtMapValue) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
+  }
+
+  /** Returns a Stream that emits the map value on every change. */
+  stream(): Stream.Stream<CrdtMapValue, never, never> {
+    return Stream.async<CrdtMapValue>((emit) => {
+      const unsub = this.onChange((value) => { void emit(Effect.succeed(Chunk.of(value))); });
+      return Effect.sync(unsub);
+    });
   }
 
   /** Increment a GCounter key by `amount` (default `1`). */

@@ -10,7 +10,7 @@ bun add meridian-react
 npm install meridian-react
 ```
 
-Requires `react ^19.0.0` and `meridian-sdk ^0.3.0` as peer dependencies.
+Requires `react ^19.0.0`, `meridian-sdk ^0.3.0`, and `effect ^3.21.0` as peer dependencies.
 
 ## Setup
 
