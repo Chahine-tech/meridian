@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { ComponentType } from "react";
 import type { MeridianClient, ClientSnapshot, CRDTSnapshotEntry, DeltaEvent } from "meridian-sdk";
 import { useDevtoolsState } from "./useDevtoolsState.js";
@@ -39,7 +39,19 @@ function CRDTRow({ entry, onSelect, selected }: { entry: CRDTSnapshotEntry; onSe
   );
 }
 
-function ConnectionSection({ snapshot }: { snapshot: ClientSnapshot }) {
+function useLatencyStats(client: MeridianClient) {
+  const [stats, setStats] = useState<{ p50: number; p99: number; count: number } | null>(null);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setStats(client.getLatencyStats());
+    }, 1000);
+    return () => { clearInterval(id); };
+  }, [client]);
+  return stats;
+}
+
+function ConnectionSection({ snapshot, client }: { snapshot: ClientSnapshot; client: MeridianClient }) {
+  const latency = useLatencyStats(client);
   return (
     <div style={styles.section}>
       <div style={styles.sectionTitle}>Connection</div>
@@ -51,6 +63,17 @@ function ConnectionSection({ snapshot }: { snapshot: ClientSnapshot }) {
       {snapshot.pendingOpCount > 0 && (
         <div style={{ marginTop: 4, color: "#fbbf24", fontSize: 11 }}>
           ⏳ {snapshot.pendingOpCount} op{snapshot.pendingOpCount > 1 ? "s" : ""} pending
+        </div>
+      )}
+      {latency !== null && (
+        <div style={{ marginTop: 6, display: "flex", gap: 12 }}>
+          <span style={{ fontSize: 11, color: "#a1a1aa" }}>
+            Op latency — <span style={{ color: "#4ade80" }}>p50: {latency.p50.toFixed(1)}ms</span>
+            {" · "}
+            <span style={{ color: latency.p99 > 200 ? "#f87171" : "#facc15" }}>p99: {latency.p99.toFixed(1)}ms</span>
+            {" · "}
+            <span style={{ color: "#71717a" }}>{latency.count} samples</span>
+          </span>
         </div>
       )}
     </div>
@@ -220,7 +243,7 @@ function MeridianDevtoolsImpl({ client, defaultOpen = false }: MeridianDevtoolsP
               style={{ marginLeft: "auto", background: "none", border: "none", color: "#a1a1aa", cursor: "pointer", fontSize: 14, padding: "0 4px" }}
             >↻</button>
           </div>
-          <ConnectionSection snapshot={snapshot} />
+          <ConnectionSection snapshot={snapshot} client={client} />
           <TabBar active={tab} onChange={setTab} />
           <div style={styles.body}>
             {tab === "crdts" && (

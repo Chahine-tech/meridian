@@ -55,6 +55,13 @@ export class WsTransport {
   // Effect sliding queue — drops oldest when full (same behaviour as previous array)
   private readonly pendingQueue: Queue.Queue<ClientMsg>;
 
+  // Latency tracking
+  private nextClientSeq = 0;
+  /** Maps client_seq → `performance.now()` timestamp at send time. */
+  private readonly pendingAcks = new Map<number, number>();
+  private readonly latencySamples: number[] = [];           // rolling window of round-trip ms
+  private static readonly LATENCY_WINDOW = 128;
+
   constructor(config: WsTransportConfig) {
     this.config = config;
     this.maxBackoffMs = config.maxBackoffMs ?? BACKOFF_MAX_MS;
@@ -118,12 +125,40 @@ export class WsTransport {
   }
 
   send(msg: ClientMsg): void {
+    const tagged = this.tagOp(msg);
     if (this.state !== "CONNECTED" || this.ws === null) {
       // sliding queue drops oldest automatically if full
-      this.runtime.runFork(Queue.offer(this.pendingQueue, msg));
+      this.runtime.runFork(Queue.offer(this.pendingQueue, tagged));
       return;
     }
-    this.ws.send(encodeClientMsg(msg));
+    this.ws.send(encodeClientMsg(tagged));
+  }
+
+  /** Returns P50 and P99 op round-trip latency in milliseconds, or null if not enough samples. */
+  getLatencyStats(): { p50: number; p99: number; count: number } | null {
+    if (this.latencySamples.length < 2) return null;
+    const sorted = [...this.latencySamples].sort((a, b) => a - b);
+    const p50 = sorted[Math.floor(sorted.length * 0.5)] ?? 0;
+    const p99 = sorted[Math.floor(sorted.length * 0.99)] ?? 0;
+    return { p50, p99, count: sorted.length };
+  }
+
+  private tagOp(msg: ClientMsg): ClientMsg {
+    if (!("Op" in msg)) return msg;
+    const seq = this.nextClientSeq++;
+    this.pendingAcks.set(seq, performance.now());
+    return { Op: { ...msg.Op, client_seq: seq } };
+  }
+
+  private recordAck(clientSeq: number): void {
+    const sentAt = this.pendingAcks.get(clientSeq);
+    if (sentAt === undefined) return;
+    this.pendingAcks.delete(clientSeq);
+    const rtt = performance.now() - sentAt;
+    this.latencySamples.push(rtt);
+    if (this.latencySamples.length > WsTransport.LATENCY_WINDOW) {
+      this.latencySamples.shift();
+    }
   }
 
   get pendingOpCount(): number {
@@ -229,7 +264,12 @@ export class WsTransport {
         const onMessage = (event: MessageEvent) => {
           const bytes = new Uint8Array(event.data as ArrayBuffer);
           Effect.runPromise(decodeServerMsg(bytes)).then(
-            (msg) => { this.config.onMessage(msg); },
+            (msg) => {
+              if ("Ack" in msg && msg.Ack.client_seq !== undefined) {
+                this.recordAck(msg.Ack.client_seq);
+              }
+              this.config.onMessage(msg);
+            },
             (e) => { console.warn("[meridian] failed to decode server message", e); },
           );
         };
@@ -300,7 +340,7 @@ export class WsTransport {
             break;
           }
           try {
-            this.ws.send(encodeClientMsg(next.value));
+            this.ws.send(encodeClientMsg(this.tagOp(next.value)));
           } catch {
             yield* Queue.offer(this.pendingQueue, next.value);
             break;

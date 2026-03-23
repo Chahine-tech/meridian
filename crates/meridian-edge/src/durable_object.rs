@@ -130,7 +130,7 @@ impl DurableObject for NsObject {
                     }
                 }
             }
-            ClientMsg::Op { crdt_id, op_bytes, ttl_ms } => {
+            ClientMsg::Op { crdt_id, op_bytes, ttl_ms, client_seq } => {
                 // Rate limit: 500 ops per minute per namespace (WS path, higher limit)
                 if !self.check_rate_limit(500, 60_000).await {
                     let err = ServerMsg::Error { code: 429, message: "rate limit exceeded".into() };
@@ -184,6 +184,12 @@ impl DurableObject for NsObject {
                 // Fire webhooks (best-effort, non-blocking)
                 let seq: u64 = self.state.storage().get("wal:seq").await.ok().flatten().unwrap_or(0);
                 let _ = self.fire_webhooks(&crdt_id, seq).await;
+
+                // Acknowledge the op to the sender with the WAL seq and echoed client_seq.
+                let ack = ServerMsg::Ack { seq, client_seq };
+                if let Ok(b) = ack.to_msgpack() {
+                    let _ = ws.send_with_bytes(&b);
+                }
             }
             ClientMsg::AwarenessUpdate { key, data } => {
                 let broadcast = ServerMsg::AwarenessBroadcast { client_id: 0, key, data };

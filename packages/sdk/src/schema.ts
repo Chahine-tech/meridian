@@ -47,6 +47,7 @@ export const ClientMsg = Schema.Union(
       crdt_id: Schema.String,
       op_bytes: Schema.Uint8ArrayFromSelf,
       ttl_ms: Schema.optional(Schema.Number),
+      client_seq: Schema.optional(Schema.Number),
     }),
   }),
   Schema.Struct({
@@ -68,7 +69,7 @@ export const ServerMsg = Schema.Union(
       delta_bytes: Schema.Uint8ArrayFromSelf,
     }),
   }),
-  Schema.Struct({ Ack: Schema.Struct({ seq: Schema.Number }) }),
+  Schema.Struct({ Ack: Schema.Struct({ seq: Schema.Number, client_seq: Schema.optional(Schema.Number) }) }),
   Schema.Struct({
     Error: Schema.Struct({ code: Schema.Number, message: Schema.String }),
   }),
