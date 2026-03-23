@@ -80,6 +80,50 @@ REDIS_URL=redis://localhost:6379
 
 ---
 
+## S3 WAL archive
+
+Enable durable off-node WAL backups with the `wal-archive-s3` feature. Works with AWS S3, Cloudflare R2, and any S3-compatible store (MinIO, LocalStack).
+
+```toml
+# Cargo.toml (server)
+meridian-server = { features = ["storage-sled", "wal-archive-s3"] }
+```
+
+Set `S3_BUCKET` to opt in — no other change required:
+
+```bash
+S3_BUCKET=my-wal-bucket
+S3_REGION=us-east-1                          # default: us-east-1
+S3_KEY_PREFIX=wal/                           # default: wal/
+WAL_SEGMENT_SIZE=500                         # default: 500 entries per segment
+
+# For R2 / MinIO / LocalStack:
+S3_ENDPOINT=https://your-account.r2.cloudflarestorage.com
+
+# Credentials — standard AWS credential chain (env, ~/.aws, IAM role):
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+```
+
+**How it works**
+
+- **Upload on threshold** — every `WAL_SEGMENT_SIZE` appends, the accumulated segment is uploaded to S3 as `{prefix}{seq_start:020}-{seq_end:020}.msgpack`.
+- **Upload on truncation** — before local WAL entries are truncated (compacted), any pending unarchived entries are flushed to S3. This guarantees data is on S3 before local deletion.
+- **Restore on startup** — if the local WAL is empty (fresh node or wiped disk), all S3 segments are downloaded and replayed in order before the server accepts connections.
+- **Non-fatal uploads** — S3 upload failures are logged as warnings. The local WAL remains authoritative and writes are never blocked.
+
+**Minimum IAM policy**
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["s3:PutObject", "s3:GetObject", "s3:ListObjectsV2"],
+  "Resource": "arn:aws:s3:::my-wal-bucket/*"
+}
+```
+
+---
+
 ## WAL replay and point-in-time recovery
 
 Every write goes through the WAL before being applied to the snapshot store. On restart:

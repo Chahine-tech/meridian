@@ -9,15 +9,20 @@ storage-sled = ["dep:sled", "dep:tokio"]
 storage-memory = []
 storage-postgres = ["dep:sqlx", "dep:tokio"]
 storage-redis = ["dep:redis", "dep:tokio"]
+wal-archive-s3 = ["dep:aws-sdk-s3", "dep:aws-config", "dep:tokio"]
 
 [dependencies]
-# Async runtime — only needed for sled (spawn_blocking) and postgres adapters
+# Async runtime — only needed for sled (spawn_blocking), postgres, and S3 adapters
 tokio = { version = "1.50", features = ["full"], optional = true }
 
 # Storage backends
 sled = { version = "0.34", optional = true }
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "macros"], optional = true }
 redis = { version = "0.28", features = ["tokio-comp"], optional = true }
+
+# S3 archive
+aws-sdk-s3 = { version = "1", optional = true }
+aws-config = { version = "1", features = ["behavior-version-latest"], optional = true }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -32,4 +37,4 @@ tracing = "0.1"
 
 [dev-dependencies]
 testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["postgres", "redis"] }
+testcontainers-modules = { version = "0.11", features = ["postgres", "redis", "localstack"] }

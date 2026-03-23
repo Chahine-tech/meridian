@@ -47,7 +47,16 @@ async fn init_storage_and_run(
         PgStore::migrate(&pool).await?;
         PgWal::migrate(&pool).await?;
         let store = Arc::new(PgStore::new(pool.clone()));
-        let wal = Arc::new(PgWal::new(pool).await?);
+        let inner_wal = PgWal::new(pool).await?;
+
+        #[cfg(feature = "wal-archive-s3")]
+        if let Some(s3_cfg) = meridian_storage::S3ArchiveConfig::from_env() {
+            info!(bucket = s3_cfg.bucket, "S3 WAL archiving enabled");
+            let wal = Arc::new(meridian_storage::S3ArchivedWal::new(inner_wal, s3_cfg).await?);
+            return run(config, metrics, store, wal).await;
+        }
+
+        let wal = Arc::new(inner_wal);
         return run(config, metrics, store, wal).await;
     }
 
@@ -58,7 +67,16 @@ async fn init_storage_and_run(
 
         info!(url, "redis backend selected");
         let store = Arc::new(RedisStore::new(url).await?);
-        let wal = Arc::new(RedisWal::new(url).await?);
+        let inner_wal = RedisWal::new(url).await?;
+
+        #[cfg(feature = "wal-archive-s3")]
+        if let Some(s3_cfg) = meridian_storage::S3ArchiveConfig::from_env() {
+            info!(bucket = s3_cfg.bucket, "S3 WAL archiving enabled");
+            let wal = Arc::new(meridian_storage::S3ArchivedWal::new(inner_wal, s3_cfg).await?);
+            return run(config, metrics, store, wal).await;
+        }
+
+        let wal = Arc::new(inner_wal);
         return run(config, metrics, store, wal).await;
     }
 
@@ -69,7 +87,16 @@ async fn init_storage_and_run(
 
         info!(path = config.data_dir, "sled backend selected");
         let store = Arc::new(SledStore::open(&config.data_dir)?);
-        let wal = Arc::new(SledWal::new(store.db())?);
+        let inner_wal = SledWal::new(store.db())?;
+
+        #[cfg(feature = "wal-archive-s3")]
+        if let Some(s3_cfg) = meridian_storage::S3ArchiveConfig::from_env() {
+            info!(bucket = s3_cfg.bucket, "S3 WAL archiving enabled");
+            let wal = Arc::new(meridian_storage::S3ArchivedWal::new(inner_wal, s3_cfg).await?);
+            return run(config, metrics, store, wal).await;
+        }
+
+        let wal = Arc::new(inner_wal);
         run(config, metrics, store, wal).await
     }
 

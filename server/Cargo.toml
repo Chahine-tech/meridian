@@ -19,6 +19,7 @@ storage-postgres = ["meridian-storage/storage-postgres"]
 storage-redis = ["meridian-storage/storage-redis"]
 cluster = ["dep:meridian-cluster", "meridian-cluster/transport-redis"]
 cluster-http = ["dep:meridian-cluster", "meridian-cluster/transport-http"]
+wal-archive-s3 = ["meridian-storage/wal-archive-s3"]
 
 [dependencies]
 # Core business logic (CRDTs, auth, protocol, namespace) — no axum/tokio deps

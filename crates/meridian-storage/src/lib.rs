@@ -31,3 +31,9 @@ pub use postgres::{PgStore, PgWal};
 
 #[cfg(feature = "storage-redis")]
 pub use redis_backend::{RedisStore, RedisWal};
+
+#[cfg(feature = "wal-archive-s3")]
+pub mod s3_archive;
+
+#[cfg(feature = "wal-archive-s3")]
+pub use s3_archive::{S3ArchiveClient, S3ArchiveConfig, S3ArchivedWal};
