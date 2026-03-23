@@ -168,7 +168,7 @@ See [`crates/meridian-edge/`](crates/meridian-edge/) for full setup.
 | [`server`](server) | Native binary — axum + tokio |
 | [`meridian-core`](crates/meridian-core) | Shared logic — CRDTs, auth, protocol (no runtime dep) |
 | [`meridian-edge`](crates/meridian-edge) | Cloudflare Workers runtime — WASM, Durable Objects |
-| [`meridian-storage`](crates/meridian-storage) | Pluggable storage backends — sled, PostgreSQL, Redis, in-memory |
+| [`meridian-storage`](crates/meridian-storage) | Pluggable storage backends — sled, PostgreSQL, Redis, in-memory; S3 WAL archive (`--features wal-archive-s3`) |
 | [`meridian-cluster`](crates/meridian-cluster) | Multinode clustering — Redis Pub/Sub + HTTP push transport |
 
 ## Configuration
@@ -184,3 +184,8 @@ See [`crates/meridian-edge/`](crates/meridian-edge/) for full setup.
 | `MERIDIAN_PEERS` | *(unset)* | Comma-separated peer URLs — enables HTTP cluster mode (`--features cluster-http`) |
 | `MERIDIAN_NODE_ID` | *(auto)* | Unique node ID — auto-derived from hostname+port if unset |
 | `MERIDIAN_ANTI_ENTROPY_SECS` | `30` | Gossip interval in seconds |
+| `S3_BUCKET` | *(unset)* | Enable S3 WAL archive — bucket name (`--features wal-archive-s3`) |
+| `S3_ENDPOINT` | *(unset)* | S3-compatible endpoint override (R2, MinIO, LocalStack) |
+| `S3_REGION` | `us-east-1` | AWS region |
+| `S3_KEY_PREFIX` | `wal/` | Object key prefix for WAL segments |
+| `WAL_SEGMENT_SIZE` | `500` | Number of WAL entries per S3 segment |
