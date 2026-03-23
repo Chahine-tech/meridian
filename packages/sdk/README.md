@@ -201,6 +201,17 @@ unsubDelta();
 
 The queue holds up to 500 ops. If the limit is reached, the oldest op is dropped to make room for the newest.
 
+### Op latency
+
+`client.getLatencyStats()` returns P50 and P99 round-trip latency in milliseconds, computed from the last 128 acknowledged ops. Returns `null` if fewer than 2 samples have been collected.
+
+```ts
+const stats = client.getLatencyStats();
+// { p50: 12.4, p99: 87.1, count: 64 } | null
+```
+
+Latency is measured from the moment an op is sent over the WebSocket to the moment the server `Ack` is received. The `meridian-devtools` panel displays this automatically.
+
 ### HTTP client (`client.http`)
 
 All methods return `Effect<T, HttpError | NetworkError>`:
