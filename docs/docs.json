@@ -53,6 +53,7 @@
               "sdk/react",
               "sdk/ttl",
               "sdk/devtools",
+              "sdk/cli",
               "sdk/agents"
             ]
           },

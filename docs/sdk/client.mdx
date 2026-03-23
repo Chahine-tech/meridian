@@ -93,6 +93,17 @@ unsub();
 
 The queue holds up to 500 ops. If the limit is reached, the oldest op is dropped to make room.
 
+## Op latency
+
+```ts
+const stats = client.getLatencyStats();
+// { p50: 12.4, p99: 87.1, count: 64 } | null
+```
+
+Returns P50 and P99 round-trip latency in milliseconds from the last 128 acknowledged ops, or `null` if fewer than 2 samples have been collected. Latency is measured from send to server `Ack` receipt — no clock synchronisation required.
+
+The `meridian-devtools` panel displays this automatically in the Connection section.
+
 ## Close
 
 ```ts

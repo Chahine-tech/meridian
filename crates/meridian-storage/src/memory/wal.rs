@@ -5,10 +5,6 @@ use crate::{
     wal_backend::{WalBackend, WalEntry},
 };
 
-// ---------------------------------------------------------------------------
-// NoopWal
-// ---------------------------------------------------------------------------
-
 /// No-op WAL — discards all entries. Used with `MemoryStore` in tests and
 /// edge/WASM environments where WAL persistence is not needed.
 pub struct NoopWal {

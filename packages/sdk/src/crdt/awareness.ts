@@ -3,10 +3,6 @@ import type { Schema } from "effect";
 import { encode, decode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 
-// ---------------------------------------------------------------------------
-// AwarenessEntry
-// ---------------------------------------------------------------------------
-
 /**
  * A single peer's awareness state on a given channel.
  *
@@ -21,10 +17,6 @@ export interface AwarenessEntry<T> {
   /** Local timestamp (ms) when this entry was last received. */
   receivedAt: number;
 }
-
-// ---------------------------------------------------------------------------
-// AwarenessHandle
-// ---------------------------------------------------------------------------
 
 /**
  * Handle for an ephemeral awareness channel.

@@ -10,10 +10,6 @@ use super::{
     Crdt, CrdtError, VectorClock,
 };
 
-// ---------------------------------------------------------------------------
-// CrdtType — discriminant byte (matches wire protocol tag)
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum CrdtType {
@@ -70,10 +66,6 @@ impl std::str::FromStr for CrdtType {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// CrdtValue — enum wrapping all 5 types (used in storage)
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CrdtValue {
@@ -159,10 +151,6 @@ impl CrdtValue {
     }
 }
 
-// ---------------------------------------------------------------------------
-// CrdtOp — enum wrapping all 5 op types (used in WAL + WebSocket protocol)
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CrdtOp {
     GCounter(GCounterOp),
@@ -208,10 +196,6 @@ pub fn apply_op(value: &mut CrdtValue, op: CrdtOp) -> Result<Option<Vec<u8>>, Cr
         _ => Err(CrdtError::InvalidOp("op type does not match crdt type".into())),
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

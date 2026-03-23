@@ -24,10 +24,6 @@ use crate::{
     transport::{ClusterTransport, DeltaEnvelope},
 };
 
-// ---------------------------------------------------------------------------
-// HttpPushTransport
-// ---------------------------------------------------------------------------
-
 /// Type-erased WAL replay function stored inside `Inner`.
 ///
 /// `WalBackend` uses `impl Future` return types (not dyn-compatible), so we
@@ -147,10 +143,6 @@ impl HttpPushTransport {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Internal HTTP handler
-// ---------------------------------------------------------------------------
-
 async fn handle_incoming_delta(
     State(inner): State<Arc<Inner>>,
     body: Bytes,
@@ -180,10 +172,6 @@ async fn handle_incoming_delta(
     StatusCode::OK
 }
 
-// ---------------------------------------------------------------------------
-// WAL pull handler
-// ---------------------------------------------------------------------------
-
 #[derive(Deserialize)]
 struct WalQuery {
     from_seq: u64,
@@ -211,10 +199,6 @@ async fn handle_wal_pull(
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// ClusterTransport impl
-// ---------------------------------------------------------------------------
 
 #[async_trait]
 impl ClusterTransport for HttpPushTransport {

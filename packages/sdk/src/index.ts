@@ -28,7 +28,7 @@ export type { AwarenessEntry } from "./crdt/awareness.js";
 
 // Transport
 export { HttpClient } from "./transport/http.js";
-export type { HttpClientConfig } from "./transport/http.js";
+export type { HttpClientConfig, HistoryEntry, HistoryResponse } from "./transport/http.js";
 export { WsTransport } from "./transport/websocket.js";
 export type { WsTransportConfig, WsState } from "./transport/websocket.js";
 

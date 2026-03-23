@@ -2,10 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::crdt::clock::now_ms;
 
-// ---------------------------------------------------------------------------
-// Glob matching (no external crate — we only need `*` wildcards)
-// ---------------------------------------------------------------------------
-
 /// Returns true if `pattern` matches `value`.
 ///
 /// Supports a single `*` wildcard that matches any sequence of characters
@@ -45,10 +41,6 @@ pub fn glob_match(pattern: &str, value: &str) -> bool {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Permissions
-// ---------------------------------------------------------------------------
 
 /// Key-scoped permissions.
 ///
@@ -101,10 +93,6 @@ impl std::fmt::Display for Permissions {
         f.write_str(&parts.join("+"))
     }
 }
-
-// ---------------------------------------------------------------------------
-// TokenClaims
-// ---------------------------------------------------------------------------
 
 /// Payload embedded in a signed token.
 ///
@@ -164,10 +152,6 @@ impl TokenClaims {
         self.permissions.admin
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

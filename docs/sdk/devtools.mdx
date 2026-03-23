@@ -13,7 +13,7 @@ npm install meridian-devtools
 bun add meridian-devtools
 ```
 
-Requires `react ^19.0.0` and `meridian-sdk ^0.3.0` as peer dependencies.
+Requires `react ^19.0.0` and `meridian-sdk` as peer dependencies.
 
 ## Setup
 
@@ -47,8 +47,9 @@ A floating **M** button appears in the bottom-right corner. Click it to toggle t
 - WebSocket state: `CONNECTED`, `CONNECTING`, `DISCONNECTED`, or `CLOSING`
 - Current namespace and client ID
 - Pending ops count — non-zero when disconnected with buffered writes
+- Op latency — P50 and P99 round-trip time in ms, updated every second once at least 2 samples have been collected. P99 turns red above 200ms.
 
-**CRDTs section**
+**CRDTs tab**
 
 All active handles are listed with their current value as JSON, color-coded by type:
 
@@ -61,15 +62,19 @@ All active handles are listed with their current value as JSON, color-coded by t
 | Pink | `presence` |
 | Green | `crdtmap` |
 
-**Events section**
+Click a row to select it — the selection carries over to the History tab.
 
-The last 20 incoming deltas from the server are listed in reverse-chronological order, with the CRDT type, ID, and timestamp. This gives a live view of which CRDTs are receiving updates and how frequently.
+**Events tab**
+
+The last 20 incoming deltas from the server in reverse-chronological order, with CRDT type, ID, and timestamp.
+
+**History tab**
+
+Paginated WAL history for any CRDT. Pick a CRDT from the list, browse its ops with sequence numbers and timestamps, and load additional pages with the **Load more** button.
 
 **Refresh button**
 
 A `↻` button in the panel header forces a manual snapshot refresh — useful if the panel appears stale between auto-updates.
-
-The panel updates in real time as values change or the connection state transitions.
 
 ## Production
 

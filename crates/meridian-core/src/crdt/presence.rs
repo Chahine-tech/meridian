@@ -6,9 +6,6 @@ use serde_json::Value as JsonValue;
 
 use super::{Crdt, CrdtError, HybridLogicalClock, VectorClock};
 
-// ---------------------------------------------------------------------------
-// Presence — TTL-aware presence tracking
-// ---------------------------------------------------------------------------
 //
 // Each client_id has at most one PresenceEntry. The entry is:
 //   - Live if current_wall_ms <= entry.hlc.wall_ms + entry.ttl_ms
@@ -45,10 +42,6 @@ impl PresenceEntry {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Op + Delta
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PresenceOp {
     /// Join or refresh presence. Replaces any existing entry for client_id.
@@ -73,10 +66,6 @@ pub struct PresenceDelta {
     pub changes: HashMap<u64, Option<PresenceEntry>>,
 }
 
-// ---------------------------------------------------------------------------
-// Merge helpers — deterministic total order for PresenceEntry
-// ---------------------------------------------------------------------------
-
 /// Returns true if `candidate` should replace `existing`.
 /// Primary key: HLC (higher wins). Tie-break: ttl_ms (longer wins → favors liveness).
 /// This ensures merge is commutative even when HLCs are identical.
@@ -87,10 +76,6 @@ fn presence_entry_wins(candidate: &PresenceEntry, existing: &PresenceEntry) -> b
         std::cmp::Ordering::Less => false,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Value
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PresenceValue {
@@ -103,10 +88,6 @@ pub struct PresenceEntryView {
     pub data: JsonValue,
     pub expires_at_ms: u64,
 }
-
-// ---------------------------------------------------------------------------
-// Crdt impl
-// ---------------------------------------------------------------------------
 
 impl Crdt for Presence {
     type Op = PresenceOp;
@@ -257,10 +238,6 @@ impl Presence {
         Some(PresenceDelta { changes })
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

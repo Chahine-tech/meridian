@@ -399,6 +399,11 @@ export class MeridianClient {
     return this.transport.pendingOpCount;
   }
 
+  /** P50 and P99 op round-trip latency in ms. Returns null if not enough samples. */
+  getLatencyStats(): { p50: number; p99: number; count: number } | null {
+    return this.transport.getLatencyStats();
+  }
+
   /**
    * Subscribe to connection state changes. Returns an unsubscribe function.
    * Useful for building "syncing" indicators in the UI.

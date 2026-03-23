@@ -12,9 +12,6 @@ use super::{
     Crdt, CrdtError, VectorClock,
 };
 
-// ---------------------------------------------------------------------------
-// CRDTMap — Map of nested CRDTs
-// ---------------------------------------------------------------------------
 //
 // Each key maps to exactly one CRDT leaf type (GCounter, PNCounter, ORSet,
 // LwwRegister, or Presence). The type is fixed at creation time: applying an
@@ -26,10 +23,6 @@ use super::{
 // Nesting is intentionally disallowed: CrdtInnerOp and CrdtMapInnerValue
 // exclude the CRDTMap variant to prevent infinite type recursion without Box.
 
-// ---------------------------------------------------------------------------
-// CrdtValueDelta — delta enum for the 5 leaf types
-// ---------------------------------------------------------------------------
-
 #[must_use]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum CrdtValueDelta {
@@ -40,10 +33,6 @@ pub enum CrdtValueDelta {
     Presence(PresenceDelta),
 }
 
-// ---------------------------------------------------------------------------
-// CrdtInnerOp — flat op enum excluding CRDTMap (no nesting)
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CrdtInnerOp {
     GCounter(GCounterOp),
@@ -53,10 +42,6 @@ pub enum CrdtInnerOp {
     Presence(PresenceOp),
 }
 
-// ---------------------------------------------------------------------------
-// CRDTMapOp
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CRDTMapOp {
     pub key: String,
@@ -64,19 +49,11 @@ pub struct CRDTMapOp {
     pub op: CrdtInnerOp,
 }
 
-// ---------------------------------------------------------------------------
-// CRDTMapDelta
-// ---------------------------------------------------------------------------
-
 #[must_use]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CRDTMapDelta {
     pub deltas: HashMap<String, CrdtValueDelta>,
 }
-
-// ---------------------------------------------------------------------------
-// CrdtMapInnerValue — state enum excluding CRDTMap (no nesting)
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum CrdtMapInnerValue {
@@ -120,18 +97,10 @@ impl CrdtMapInnerValue {
     }
 }
 
-// ---------------------------------------------------------------------------
-// CRDTMap state
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct CRDTMap {
     pub entries: HashMap<String, CrdtMapInnerValue>,
 }
-
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
 
 fn apply_inner(
     inner: &mut CrdtMapInnerValue,
@@ -209,15 +178,7 @@ fn delta_since_inner(inner: &CrdtMapInnerValue, since: &VectorClock) -> Option<C
     }
 }
 
-// ---------------------------------------------------------------------------
-// Observable value
-// ---------------------------------------------------------------------------
-
 pub type CrdtMapValue = HashMap<String, serde_json::Value>;
-
-// ---------------------------------------------------------------------------
-// Crdt impl
-// ---------------------------------------------------------------------------
 
 impl Crdt for CRDTMap {
     type Op    = CRDTMapOp;
@@ -305,10 +266,6 @@ impl Crdt for CRDTMap {
         self.entries.is_empty()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

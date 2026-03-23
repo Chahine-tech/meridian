@@ -2,10 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use super::error::Result;
 
-// ---------------------------------------------------------------------------
-// WalEntry — shared contract between all WAL backends
-// ---------------------------------------------------------------------------
-
 /// A single operation appended to the Write-Ahead Log.
 ///
 /// Sequence numbers are monotonically increasing u64 values assigned by the
@@ -20,10 +16,6 @@ pub struct WalEntry {
     pub op_bytes: Vec<u8>,
     pub timestamp_ms: u64,
 }
-
-// ---------------------------------------------------------------------------
-// WalBackend trait
-// ---------------------------------------------------------------------------
 
 /// Abstraction over Write-Ahead Log storage.
 pub trait WalBackend: Send + Sync + 'static {

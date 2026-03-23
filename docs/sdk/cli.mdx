@@ -1,0 +1,72 @@
+---
+title: CLI
+description: Inspect CRDT state and replay WAL history from the terminal.
+---
+
+`meridian-cli` is a command-line tool for inspecting and debugging Meridian namespaces without opening a browser.
+
+## Installation
+
+```bash
+bun add -g meridian-cli
+# or
+npm install -g meridian-cli
+```
+
+Or run directly with `bunx`:
+
+```bash
+bunx meridian-cli inspect my-ns gc:views --url http://localhost:3000 --token $TOKEN
+```
+
+## Commands
+
+### `meridian inspect <namespace> <crdt-id>`
+
+Prints the current state of a CRDT as JSON.
+
+```bash
+meridian inspect my-ns gc:views \
+  --url http://localhost:3000 \
+  --token $TOKEN
+```
+
+```json
+{
+  "type": "gcounter",
+  "value": 42,
+  "counts": { "1": 30, "2": 12 }
+}
+```
+
+### `meridian replay <namespace> <crdt-id>`
+
+Streams WAL history entries for a CRDT, one line per op.
+
+```bash
+meridian replay my-ns gc:views \
+  --url http://localhost:3000 \
+  --token $TOKEN \
+  --from-seq 0 \
+  --limit 50
+```
+
+```
+seq        timestamp              op
+────────────────────────────────────────────────────────────────────────
+#1         2025-03-22T10:00:01Z  {"Increment":{"client_id":1,"delta":1}}
+#2         2025-03-22T10:00:04Z  {"Increment":{"client_id":2,"delta":1}}
+...
+Done.
+```
+
+Pagination is handled automatically — the command fetches pages until there are no more entries.
+
+## Options
+
+| Option | Alias | Default | Description |
+|--------|-------|---------|-------------|
+| `--url` | `-u` | `http://localhost:3000` | Meridian server base URL |
+| `--token` | `-t` | — | Bearer token |
+| `--from-seq` | — | `0` | Start sequence number (`replay` only) |
+| `--limit` | — | `50` | Entries per page (`replay` only) |

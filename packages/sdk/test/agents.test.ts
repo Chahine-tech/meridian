@@ -8,10 +8,6 @@ import type { ToolUseBlock } from "../src/agents.js";
 
 const CONFIG = { baseUrl: "http://localhost:3000", token: "tok", namespace: "test-ns" };
 
-// ---------------------------------------------------------------------------
-// getMeridianTools
-// ---------------------------------------------------------------------------
-
 describe("getMeridianTools", () => {
   it("generates 4 tools per CRDT ID", () => {
     const tools = getMeridianTools(CONFIG, ["counter"]);
@@ -92,10 +88,6 @@ describe("getMeridianTools", () => {
     }
   });
 });
-
-// ---------------------------------------------------------------------------
-// executeMeridianTool — unknown tool
-// ---------------------------------------------------------------------------
 
 describe("executeMeridianTool", () => {
   it("returns error JSON for unknown tool name", async () => {

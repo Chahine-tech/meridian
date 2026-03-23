@@ -18,10 +18,6 @@
 
 import { encode, uuidToBytes } from "./codec.js";
 
-// ---------------------------------------------------------------------------
-// Anthropic tool types (inline — no @anthropic-ai/sdk dep required)
-// ---------------------------------------------------------------------------
-
 export interface Tool {
   name: string;
   description: string;
@@ -39,10 +35,6 @@ export interface ToolUseBlock {
   input: Record<string, unknown>;
 }
 
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
 export interface MeridianAgentConfig {
   /** HTTP base URL of the Meridian server (e.g. https://meridian.example.com) */
   baseUrl: string;
@@ -51,10 +43,6 @@ export interface MeridianAgentConfig {
   /** Namespace scoping all CRDT operations */
   namespace: string;
 }
-
-// ---------------------------------------------------------------------------
-// Tool generation
-// ---------------------------------------------------------------------------
 
 /**
  * Returns an Anthropic `Tool[]` array for the given CRDT IDs.
@@ -126,10 +114,6 @@ export function getMeridianTools(
   return tools;
 }
 
-// ---------------------------------------------------------------------------
-// Tool execution
-// ---------------------------------------------------------------------------
-
 /**
  * Execute a Meridian tool call returned by Claude.
  *
@@ -181,10 +165,6 @@ export async function executeMeridianTool(
 
   return JSON.stringify({ error: `Unknown tool: ${name}` });
 }
-
-// ---------------------------------------------------------------------------
-// HTTP helpers
-// ---------------------------------------------------------------------------
 
 async function readCrdt(
   baseUrl: string,

@@ -1,0 +1,32 @@
+{
+  "name": "meridian-cli",
+  "version": "1.0.0",
+  "description": "CLI for inspecting and replaying Meridian CRDT state",
+  "type": "module",
+  "bin": {
+    "meridian": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc && chmod +x dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint ./src",
+    "dev": "bun run src/main.ts"
+  },
+  "dependencies": {
+    "@effect/cli": "^0.75.0",
+    "@effect/platform": "^0.80.0",
+    "@effect/platform-node": "^0.106.0",
+    "effect": "^3.21.0",
+    "meridian-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.7",
+    "typescript": "^5.8.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Chahine-tech/meridian.git",
+    "directory": "packages/cli"
+  }
+}

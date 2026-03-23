@@ -6,9 +6,6 @@ use uuid::Uuid;
 
 use super::{Crdt, CrdtError, VectorClock};
 
-// ---------------------------------------------------------------------------
-// ORSet — Observed-Remove Set
-// ---------------------------------------------------------------------------
 //
 // State:  HashMap<element_key, HashSet<Uuid>>
 //   - element_key: canonical JSON string of the element
@@ -32,10 +29,6 @@ pub struct ORSet {
     /// element_key → set of live add-tags
     pub entries: HashMap<String, HashSet<Uuid>>,
 }
-
-// ---------------------------------------------------------------------------
-// Op + Delta
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ORSetOp {
@@ -62,29 +55,17 @@ pub struct ORSetDelta {
     pub removes: HashMap<String, HashSet<Uuid>>,
 }
 
-// ---------------------------------------------------------------------------
-// Value
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ORSetValue {
     /// Elements that have at least one live add-tag.
     pub elements: Vec<JsonValue>,
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 fn element_key(e: &JsonValue) -> String {
     // Canonical JSON serialization as map key.
     // serde_json produces deterministic output for scalars and arrays.
     e.to_string()
 }
-
-// ---------------------------------------------------------------------------
-// Crdt impl
-// ---------------------------------------------------------------------------
 
 impl Crdt for ORSet {
     type Op = ORSetOp;
@@ -195,10 +176,6 @@ impl Crdt for ORSet {
         self.entries.is_empty()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

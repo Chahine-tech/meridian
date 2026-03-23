@@ -5,6 +5,7 @@
     "packages/sdk",
     "packages/sdk-react",
     "packages/devtools",
+    "packages/cli",
     "examples/collaborative-workspace",
     "examples/cursors",
     "examples/ai-agents",

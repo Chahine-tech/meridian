@@ -103,11 +103,11 @@ mod tests {
         let mgr = SubscriptionManager::new();
         let mut rx = mgr.subscribe("my-room");
 
-        let msg = Arc::new(ServerMsg::Ack { seq: 1 });
+        let msg = Arc::new(ServerMsg::Ack { client_seq: None, seq: 1 });
         mgr.publish("my-room", msg.clone());
 
         let received = rx.recv().await.unwrap();
-        assert!(matches!(*received, ServerMsg::Ack { seq: 1 }));
+        assert!(matches!(*received, ServerMsg::Ack { client_seq: None, seq: 1 }));
     }
 
     #[tokio::test]
@@ -116,17 +116,17 @@ mod tests {
         let mut rx1 = mgr.subscribe("room");
         let mut rx2 = mgr.subscribe("room");
 
-        mgr.publish("room", Arc::new(ServerMsg::Ack { seq: 42 }));
+        mgr.publish("room", Arc::new(ServerMsg::Ack { client_seq: None, seq: 42 }));
 
-        assert!(matches!(*rx1.recv().await.unwrap(), ServerMsg::Ack { seq: 42 }));
-        assert!(matches!(*rx2.recv().await.unwrap(), ServerMsg::Ack { seq: 42 }));
+        assert!(matches!(*rx1.recv().await.unwrap(), ServerMsg::Ack { client_seq: None, seq: 42 }));
+        assert!(matches!(*rx2.recv().await.unwrap(), ServerMsg::Ack { client_seq: None, seq: 42 }));
     }
 
     #[tokio::test]
     async fn publish_to_unknown_ns_is_noop() {
         let mgr = SubscriptionManager::new();
         // Should not panic
-        mgr.publish("ghost-room", Arc::new(ServerMsg::Ack { seq: 0 }));
+        mgr.publish("ghost-room", Arc::new(ServerMsg::Ack { client_seq: None, seq: 0 }));
     }
 
     #[tokio::test]
@@ -147,7 +147,7 @@ mod tests {
         let mut rx_a = mgr.subscribe("ns-a");
         let mut rx_b = mgr.subscribe("ns-b");
 
-        mgr.publish("ns-a", Arc::new(ServerMsg::Ack { seq: 1 }));
+        mgr.publish("ns-a", Arc::new(ServerMsg::Ack { client_seq: None, seq: 1 }));
 
         // ns-a receives
         assert!(rx_a.recv().await.is_ok());

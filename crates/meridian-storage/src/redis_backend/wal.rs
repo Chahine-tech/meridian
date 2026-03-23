@@ -9,10 +9,6 @@ use crate::{
     wal_backend::{WalBackend, WalEntry},
 };
 
-// ---------------------------------------------------------------------------
-// RedisWal — Redis Streams backed Write-Ahead Log
-// ---------------------------------------------------------------------------
-
 /// Write-Ahead Log backed by Redis Streams (`XADD` / `XRANGE` / `XTRIM`).
 ///
 /// ## Stream key
@@ -91,10 +87,6 @@ impl RedisWal {
     }
 }
 
-// ---------------------------------------------------------------------------
-// WalBackend impl
-// ---------------------------------------------------------------------------
-
 impl WalBackend for RedisWal {
     #[instrument(skip(self, op_bytes))]
     async fn append(&self, namespace: &str, crdt_id: &str, op_bytes: Vec<u8>) -> Result<u64> {
@@ -161,10 +153,6 @@ impl WalBackend for RedisWal {
         Ok(())
     }
 }
-
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
 
 fn stream_id_to_seq(id: &str) -> u64 {
     let mut parts = id.splitn(2, '-');

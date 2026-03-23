@@ -12,7 +12,8 @@
 <p align="center">
   <a href="https://github.com/Chahine-tech/meridian/actions"><img src="https://github.com/Chahine-tech/meridian/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024" />
-  <img src="https://img.shields.io/badge/tests-132-brightgreen" alt="132 tests" />
+  <a href="https://www.npmjs.com/package/meridian-sdk"><img src="https://img.shields.io/npm/dw/meridian-sdk" alt="meridian-sdk downloads" /></a>
+  <a href="https://www.npmjs.com/package/meridian-react"><img src="https://img.shields.io/npm/dw/meridian-react" alt="meridian-react downloads" /></a>
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
 </p>
 
@@ -133,11 +134,18 @@ wrangler deploy                  # production on Cloudflare
 The edge runtime uses **Durable Objects** for per-namespace state (replaces sled), compiles to WASM via `wasm-bindgen`, and exposes the exact same WebSocket + REST API as the native server. Your SDK client connects to either without any code change:
 
 ```ts
+import { Effect } from "effect";
+import { MeridianClient } from "meridian-sdk";
+
 // Native server
-const client = new MeridianClient({ url: "ws://localhost:3000", namespace: "my-room", token });
+const client = await Effect.runPromise(
+  MeridianClient.create({ url: "http://localhost:3000", namespace: "my-room", token })
+);
 
 // Edge worker (same SDK, different URL)
-const client = new MeridianClient({ url: "wss://my-worker.workers.dev", namespace: "my-room", token });
+const client = await Effect.runPromise(
+  MeridianClient.create({ url: "https://my-worker.workers.dev", namespace: "my-room", token })
+);
 ```
 
 See [`crates/meridian-edge/`](crates/meridian-edge/) for full setup.
@@ -150,7 +158,8 @@ See [`crates/meridian-edge/`](crates/meridian-edge/) for full setup.
 |---------|-------------|
 | [`meridian-sdk`](packages/sdk) | TypeScript SDK — Effect-based, msgpack, fully typed. Includes `stream()` on all CRDT handles and `MeridianLive` Layer for DI |
 | [`meridian-react`](packages/sdk-react) | React hooks — `useGCounter`, `usePresence`, `useAwareness`, etc. |
-| [`meridian-devtools`](packages/devtools) | Devtools panel — real-time CRDT state inspector |
+| [`meridian-devtools`](packages/devtools) | Devtools panel — CRDT inspector, event stream, WAL history, op latency P50/P99 |
+| [`meridian-cli`](packages/cli) | CLI — `meridian inspect` and `meridian replay` for terminal-based debugging |
 
 **Rust crates**
 

@@ -5,9 +5,6 @@ use super::{
     Crdt, CrdtError, VectorClock,
 };
 
-// ---------------------------------------------------------------------------
-// PNCounter — Positive-Negative Counter
-// ---------------------------------------------------------------------------
 //
 // Composed of two GCounters: P (increments) and N (decrements).
 // value() = sum(P) - sum(N)  — can be negative, do NOT clamp.
@@ -20,10 +17,6 @@ pub struct PNCounter {
     pub pos: GCounter,
     pub neg: GCounter,
 }
-
-// ---------------------------------------------------------------------------
-// Op + Delta
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PNCounterOp {
@@ -38,19 +31,11 @@ pub struct PNCounterDelta {
     pub neg: Option<GCounterDelta>,
 }
 
-// ---------------------------------------------------------------------------
-// Value
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PNCounterValue {
     /// Signed value: sum(pos) - sum(neg). May be negative.
     pub value: i64,
 }
-
-// ---------------------------------------------------------------------------
-// Crdt impl
-// ---------------------------------------------------------------------------
 
 impl Crdt for PNCounter {
     type Op = PNCounterOp;
@@ -104,10 +89,6 @@ impl Crdt for PNCounter {
         self.pos.is_empty() && self.neg.is_empty()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

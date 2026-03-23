@@ -27,10 +27,6 @@ async fn setup() -> (String, testcontainers::ContainerAsync<Redis>) {
     (url, container)
 }
 
-// ---------------------------------------------------------------------------
-// RedisStore tests
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn redis_store_get_missing_returns_none() {
     let (url, _container) = setup().await;
@@ -92,10 +88,6 @@ async fn redis_store_scan_prefix_returns_namespace_entries() {
     assert!(results.iter().any(|(k, _)| k == "ns1/id1"));
     assert!(results.iter().any(|(k, _)| k == "ns1/id2"));
 }
-
-// ---------------------------------------------------------------------------
-// RedisWal tests
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn redis_wal_append_and_replay() {

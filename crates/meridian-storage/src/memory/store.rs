@@ -8,10 +8,6 @@ use crate::{
     store::Store,
 };
 
-// ---------------------------------------------------------------------------
-// MemoryStore
-// ---------------------------------------------------------------------------
-
 /// In-process CRDT storage backed by a `BTreeMap`.
 ///
 /// Useful for tests, edge/WASM environments, and development. Not persistent.

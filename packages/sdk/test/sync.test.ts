@@ -9,10 +9,6 @@ import { encode, decode, encodeClientMsg, decodeServerMsg } from "../src/codec.j
 import { parseToken, checkTokenExpiry } from "../src/auth/token.js";
 import { CodecError, TokenParseError, TokenExpiredError } from "../src/errors.js";
 
-// ---------------------------------------------------------------------------
-// VectorClockTracker
-// ---------------------------------------------------------------------------
-
 describe("VectorClockTracker", () => {
   function freshStorage() {
     const store = new Map<string, Record<string, number>>();
@@ -66,10 +62,6 @@ describe("VectorClockTracker", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Codec
-// ---------------------------------------------------------------------------
-
 describe("codec", () => {
   it("encode/decode roundtrip for plain objects", () => {
     const obj = { foo: "bar", n: 42 };
@@ -116,10 +108,6 @@ describe("codec", () => {
     expect("Ack" in result || "Delta" in result).toBe(true);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Token parsing
-// ---------------------------------------------------------------------------
 
 describe("parseToken", () => {
   function makeToken(claims: object): string {

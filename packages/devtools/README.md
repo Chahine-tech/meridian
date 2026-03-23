@@ -10,7 +10,7 @@ bun add meridian-devtools
 npm install meridian-devtools
 ```
 
-Requires `react ^19.0.0` and `meridian-sdk ^0.3.0` as peer dependencies.
+Requires `react ^19.0.0` and `meridian-sdk` as peer dependencies.
 
 ## Usage
 
@@ -53,8 +53,10 @@ A floating **M** button appears in the bottom-right corner. Click it to toggle t
 
 The devtools panel shows:
 
-- **Connection** — WebSocket state (`CONNECTED` / `CONNECTING` / `DISCONNECTED` / `CLOSING`), namespace, client ID, and a warning when ops are pending
+- **Connection** — WebSocket state, namespace, client ID, pending ops count, and live op latency (P50/P99 in ms, updated every second once enough samples are collected)
 - **CRDTs** — live list of all active handles with their current value as JSON, color-coded by type
+- **Events** — last 20 incoming deltas from the server in reverse-chronological order
+- **History** — paginated WAL history for any CRDT; pick a CRDT, browse ops with sequence numbers and timestamps, load more pages
 
 ## Production
 

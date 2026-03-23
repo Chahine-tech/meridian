@@ -13,10 +13,6 @@ import { PresenceHandle } from "../src/crdt/presence.js";
 import { CRDTMapHandle } from "../src/crdt/crdtmap.js";
 import type { WsTransport } from "../src/transport/websocket.js";
 
-// ---------------------------------------------------------------------------
-// Stub transport — captures sends, never actually connects
-// ---------------------------------------------------------------------------
-
 function stubTransport(): WsTransport & { sent: unknown[] } {
   const sent: unknown[] = [];
   return {
@@ -31,10 +27,6 @@ function stubTransport(): WsTransport & { sent: unknown[] } {
 }
 
 const BASE_OPTS = { ns: "test", clientId: 1 };
-
-// ---------------------------------------------------------------------------
-// GCounter
-// ---------------------------------------------------------------------------
 
 describe("GCounterHandle", () => {
   it("starts at 0", () => {
@@ -96,10 +88,6 @@ describe("GCounterHandle", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// PNCounter
-// ---------------------------------------------------------------------------
-
 describe("PNCounterHandle", () => {
   it("starts at 0", () => {
     const t = stubTransport();
@@ -129,10 +117,6 @@ describe("PNCounterHandle", () => {
     expect(h.value()).toBe(60);
   });
 });
-
-// ---------------------------------------------------------------------------
-// ORSet
-// ---------------------------------------------------------------------------
 
 describe("ORSetHandle", () => {
   it("empty by default", () => {
@@ -179,10 +163,6 @@ describe("ORSetHandle", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// LWW Register
-// ---------------------------------------------------------------------------
-
 describe("LwwRegisterHandle", () => {
   it("starts null", () => {
     const t = stubTransport();
@@ -227,10 +207,6 @@ describe("LwwRegisterHandle", () => {
     expect(h.value()).toBe("current");
   });
 });
-
-// ---------------------------------------------------------------------------
-// Presence
-// ---------------------------------------------------------------------------
 
 describe("PresenceHandle", () => {
   it("empty by default", () => {
@@ -291,10 +267,6 @@ describe("PresenceHandle", () => {
     expect(counts).toEqual([1, 0]);
   });
 });
-
-// ---------------------------------------------------------------------------
-// TTL — ttl_ms forwarded in Op message
-// ---------------------------------------------------------------------------
 
 describe("ttl_ms forwarding", () => {
   it("GCounter.increment includes ttl_ms when provided", () => {

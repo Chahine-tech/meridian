@@ -37,10 +37,6 @@ async fn setup() -> (
     (pool, container)
 }
 
-// ---------------------------------------------------------------------------
-// PgStore tests
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn pg_store_get_missing_returns_none() {
     let (pool, _container) = setup().await;
@@ -108,10 +104,6 @@ async fn pg_store_scan_prefix_returns_namespace_entries() {
     assert!(results.iter().any(|(k, _)| k == "ns1/id2"));
 }
 
-// ---------------------------------------------------------------------------
-// TTL / delete_expired tests
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn pg_store_delete_expired_removes_expired_rows() {
     let (pool, _container) = setup().await;
@@ -163,10 +155,6 @@ async fn pg_store_delete_expired_does_not_remove_future_expiry() {
     let still_there: Option<TestValue> = store.get("ns", "future").await.unwrap();
     assert_eq!(still_there, Some(v));
 }
-
-// ---------------------------------------------------------------------------
-// PgWal tests
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn pg_wal_append_and_replay() {

@@ -1,10 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 
-// ---------------------------------------------------------------------------
-// Client → Server messages
-// ---------------------------------------------------------------------------
-
 /// Messages sent by the client over the WebSocket connection.
 /// Encoded as msgpack binary frames.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,11 +12,16 @@ pub enum ClientMsg {
     /// `op_bytes` is msgpack-encoded `CrdtOp`.
     /// `ttl_ms` — optional TTL in milliseconds.  When set, the CRDT entry is
     /// scheduled for deletion by the GC task after `ttl_ms` ms.
+    /// `client_seq` — optional monotonic counter set by the client so the
+    /// server can echo it back in the `Ack`, enabling round-trip latency
+    /// measurement without clock synchronisation.
     Op {
         crdt_id: String,
         op_bytes: ByteBuf,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ttl_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_seq: Option<u64>,
     },
 
     /// Request a delta since a vector clock checkpoint.
@@ -36,10 +37,6 @@ pub enum ClientMsg {
     AwarenessUpdate { key: String, data: ByteBuf },
 }
 
-// ---------------------------------------------------------------------------
-// Server → Client messages
-// ---------------------------------------------------------------------------
-
 /// Messages sent by the server over the WebSocket connection.
 /// Encoded as msgpack binary frames.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,7 +46,14 @@ pub enum ServerMsg {
     Delta { crdt_id: String, delta_bytes: ByteBuf },
 
     /// Acknowledgement of a successfully applied `Op`.
-    Ack { seq: u64 },
+    /// `seq` is the WAL sequence number assigned by the server.
+    /// `client_seq` is echoed back from the client's `Op.client_seq` if present,
+    /// allowing the client to correlate acks with sent ops for latency tracking.
+    Ack {
+        seq: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_seq: Option<u64>,
+    },
 
     /// Error response. `code` mirrors HTTP status codes where applicable.
     Error { code: u16, message: String },
@@ -85,10 +89,6 @@ impl ClientMsg {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn client_msg_op_roundtrip() {
-        let msg = ClientMsg::Op { crdt_id: "set".into(), op_bytes: ByteBuf::from(vec![1, 2, 3]), ttl_ms: None };
+        let msg = ClientMsg::Op { crdt_id: "set".into(), op_bytes: ByteBuf::from(vec![1, 2, 3]), ttl_ms: None, client_seq: None };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ClientMsg::from_msgpack(&bytes).unwrap();
         assert!(matches!(decoded, ClientMsg::Op { op_bytes, .. } if op_bytes.as_ref() == [1, 2, 3]));
@@ -111,10 +111,31 @@ mod tests {
 
     #[test]
     fn server_msg_ack_roundtrip() {
-        let msg = ServerMsg::Ack { seq: 99 };
+        let msg = ServerMsg::Ack { seq: 99, client_seq: Some(7) };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ServerMsg::from_msgpack(&bytes).unwrap();
-        assert!(matches!(decoded, ServerMsg::Ack { seq: 99 }));
+        assert!(matches!(decoded, ServerMsg::Ack { seq: 99, client_seq: Some(7) }));
+    }
+
+    #[test]
+    fn server_msg_ack_no_client_seq_roundtrip() {
+        let msg = ServerMsg::Ack { seq: 42, client_seq: None };
+        let bytes = msg.to_msgpack().unwrap();
+        let decoded = ServerMsg::from_msgpack(&bytes).unwrap();
+        assert!(matches!(decoded, ServerMsg::Ack { seq: 42, client_seq: None }));
+    }
+
+    #[test]
+    fn client_msg_op_with_client_seq_roundtrip() {
+        let msg = ClientMsg::Op {
+            crdt_id: "counter".into(),
+            op_bytes: ByteBuf::from(vec![1, 2, 3]),
+            ttl_ms: None,
+            client_seq: Some(5),
+        };
+        let bytes = msg.to_msgpack().unwrap();
+        let decoded = ClientMsg::from_msgpack(&bytes).unwrap();
+        assert!(matches!(decoded, ClientMsg::Op { client_seq: Some(5), .. }));
     }
 
     #[test]

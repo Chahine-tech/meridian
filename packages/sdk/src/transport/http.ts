@@ -16,8 +16,20 @@ export interface HttpClientConfig {
   timeoutMs?: number;
 }
 
+export interface HistoryEntry {
+  seq: number;
+  timestamp_ms: number;
+  op: unknown;
+}
+
+export interface HistoryResponse {
+  crdt_id: string;
+  entries: HistoryEntry[];
+  next_seq: number | null;
+}
+
 export class HttpClient {
-  private readonly baseUrl: string;
+  readonly baseUrl: string;
   private readonly timeoutMs: number;
   token: string;
 
@@ -46,6 +58,11 @@ export class HttpClient {
       path += `?since=${base64urlEncode(bytes)}`;
     }
     return this.request(CrdtGetResponse, "GET", path);
+  }
+
+  getHistory(ns: string, id: string, sinceSeq = 0, limit = 50): Promise<HistoryResponse> {
+    const url = `${this.baseUrl}/v1/namespaces/${ns}/crdts/${encodeURIComponent(id)}/history?since_seq=${sinceSeq}&limit=${limit}`;
+    return fetch(url, { headers: { Authorization: `Bearer ${this.token}` } }).then(r => r.json() as Promise<HistoryResponse>);
   }
 
   issueToken(
