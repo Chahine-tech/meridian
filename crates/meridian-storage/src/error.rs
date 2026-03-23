@@ -32,6 +32,25 @@ pub enum StorageError {
 
     #[error("invalid key format: {0}")]
     InvalidKey(String),
+
+    #[cfg(feature = "wal-archive-s3")]
+    #[error("S3 error: {0}")]
+    S3(Box<aws_sdk_s3::Error>),
+
+    #[cfg(feature = "wal-archive-s3")]
+    #[error("S3 archive upload failed: {message}")]
+    S3Upload { message: String },
+
+    #[cfg(feature = "wal-archive-s3")]
+    #[error("S3 archive restore failed: {message}")]
+    S3Restore { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;
+
+#[cfg(feature = "wal-archive-s3")]
+impl From<aws_sdk_s3::Error> for StorageError {
+    fn from(e: aws_sdk_s3::Error) -> Self {
+        StorageError::S3(Box::new(e))
+    }
+}
