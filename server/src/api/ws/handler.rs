@@ -173,13 +173,13 @@ async fn handle_client_message<S: WsState>(
         ClientMsg::Subscribe { crdt_id } => {
             debug!(ns, client_id, crdt_id, "subscribed");
             // No explicit per-crdt subscribe needed — all deltas in ns are broadcast together.
-            let ack = ServerMsg::Ack { seq: *seq };
+            let ack = ServerMsg::Ack { seq: *seq, client_seq: None };
             if let Ok(b) = ack.to_msgpack() {
                 let _ = socket.send(Message::Binary(b.into())).await;
             }
         }
 
-        ClientMsg::Op { crdt_id, op_bytes, ttl_ms } => {
+        ClientMsg::Op { crdt_id, op_bytes, ttl_ms, client_seq } => {
             if !claims.can_write_key(&crdt_id) {
                 send_error(socket, 403, "insufficient permissions for key").await;
                 return true;
@@ -221,14 +221,14 @@ async fn handle_client_message<S: WsState>(
                         cluster.on_delta(ns, &crdt_id, bytes::Bytes::from(delta_bytes)).await;
                     }
 
-                    let ack = ServerMsg::Ack { seq: *seq };
+                    let ack = ServerMsg::Ack { seq: *seq, client_seq };
                     if let Ok(b) = ack.to_msgpack() {
                         let _ = socket.send(Message::Binary(b.into())).await;
                     }
                 }
                 Ok(None) => {
                     // Op was a no-op (stale / idempotent) — still ack.
-                    let ack = ServerMsg::Ack { seq: *seq };
+                    let ack = ServerMsg::Ack { seq: *seq, client_seq };
                     if let Ok(b) = ack.to_msgpack() {
                         let _ = socket.send(Message::Binary(b.into())).await;
                     }
@@ -277,7 +277,7 @@ async fn handle_client_message<S: WsState>(
                         }
                     } else {
                         // Up to date — send empty ack
-                        let ack = ServerMsg::Ack { seq: *seq };
+                        let ack = ServerMsg::Ack { seq: *seq, client_seq: None };
                         if let Ok(b) = ack.to_msgpack() {
                             let _ = socket.send(Message::Binary(b.into())).await;
                         }
