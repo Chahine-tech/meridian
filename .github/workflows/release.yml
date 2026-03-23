@@ -52,6 +52,14 @@ jobs:
         working-directory: packages/devtools
         run: bun run typecheck
 
+      - name: build cli
+        working-directory: packages/cli
+        run: bun run build
+
+      - name: typecheck cli
+        working-directory: packages/cli
+        run: bun run typecheck
+
       - name: Create Release PR or publish
         uses: changesets/action@v1
         with:
