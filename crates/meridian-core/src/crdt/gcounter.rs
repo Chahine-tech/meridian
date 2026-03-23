@@ -4,9 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use super::{Crdt, CrdtError, VectorClock};
 
-// ---------------------------------------------------------------------------
-// GCounter — Grow-Only Counter
-// ---------------------------------------------------------------------------
 //
 // State:  BTreeMap<client_id, count>
 // Merge:  max(self[i], other[i]) for all i
@@ -23,10 +20,6 @@ pub struct GCounter {
     pub counters: BTreeMap<u64, u64>,
 }
 
-// ---------------------------------------------------------------------------
-// Op + Delta types
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GCounterOp {
     pub client_id: u64,
@@ -41,20 +34,12 @@ pub struct GCounterDelta {
     pub counters: BTreeMap<u64, u64>,
 }
 
-// ---------------------------------------------------------------------------
-// Value
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GCounterValue {
     pub total: u64,
     /// Per-client breakdown (client_id as string for JSON compat).
     pub counters: BTreeMap<u64, u64>,
 }
-
-// ---------------------------------------------------------------------------
-// Crdt impl
-// ---------------------------------------------------------------------------
 
 impl Crdt for GCounter {
     type Op = GCounterOp;
@@ -137,10 +122,6 @@ impl Crdt for GCounter {
         self.counters.is_empty()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

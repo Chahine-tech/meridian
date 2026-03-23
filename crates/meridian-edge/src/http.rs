@@ -7,10 +7,6 @@ use worker::{Request, Response, RouteContext};
 
 use crate::auth;
 
-// ---------------------------------------------------------------------------
-// GET /v1/namespaces/:ns/crdts/:id
-// ---------------------------------------------------------------------------
-
 pub async fn get_crdt(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
     let ns = ctx.param("ns").cloned().unwrap_or_default();
     let id = ctx.param("id").cloned().unwrap_or_default();
@@ -34,10 +30,6 @@ pub async fn get_crdt(req: Request, ctx: RouteContext<()>) -> worker::Result<Res
     let do_req = Request::new(&do_url, worker::Method::Get)?;
     do_stub.fetch_with_request(do_req).await
 }
-
-// ---------------------------------------------------------------------------
-// POST /v1/namespaces/:ns/crdts/:id/ops
-// ---------------------------------------------------------------------------
 
 pub async fn post_op(mut req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
     let ns = ctx.param("ns").cloned().unwrap_or_default();
@@ -82,20 +74,12 @@ pub async fn post_op(mut req: Request, ctx: RouteContext<()>) -> worker::Result<
     do_stub.fetch_with_request(do_req).await
 }
 
-// ---------------------------------------------------------------------------
-// POST /v1/namespaces/:ns/tokens  (admin only)
-// ---------------------------------------------------------------------------
-
 #[derive(Deserialize)]
 struct IssueTokenBody {
     client_id: u64,
     ttl_ms: u64,
     permissions: Permissions,
 }
-
-// ---------------------------------------------------------------------------
-// GET /v1/namespaces/:ns/wal?from_seq=0[&until_ms=...]
-// ---------------------------------------------------------------------------
 
 pub async fn get_wal(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
     let ns = ctx.param("ns").cloned().unwrap_or_default();
@@ -123,10 +107,6 @@ pub async fn get_wal(req: Request, ctx: RouteContext<()>) -> worker::Result<Resp
 
     do_stub.fetch_with_request(do_req).await
 }
-
-// ---------------------------------------------------------------------------
-// GET /v1/namespaces/:ns/crdts/:id/sync?since=<base64url-vc>
-// ---------------------------------------------------------------------------
 
 pub async fn get_sync(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
     let ns = ctx.param("ns").cloned().unwrap_or_default();
@@ -156,13 +136,10 @@ pub async fn get_sync(req: Request, ctx: RouteContext<()>) -> worker::Result<Res
     do_stub.fetch_with_request(do_req).await
 }
 
-// ---------------------------------------------------------------------------
 // Webhooks (admin only)
 // GET  /v1/namespaces/:ns/webhooks
 // POST /v1/namespaces/:ns/webhooks
 // DELETE /v1/namespaces/:ns/webhooks/:id
-// ---------------------------------------------------------------------------
-
 async fn webhook_do_stub(
     req: &Request,
     ctx: &RouteContext<()>,
@@ -214,10 +191,6 @@ pub async fn delete_webhook(req: Request, ctx: RouteContext<()>) -> worker::Resu
     )?;
     do_stub.fetch_with_request(do_req).await
 }
-
-// ---------------------------------------------------------------------------
-// POST /v1/namespaces/:ns/tokens  (admin only)
-// ---------------------------------------------------------------------------
 
 pub async fn issue_token(mut req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
     let ns = ctx.param("ns").cloned().unwrap_or_default();

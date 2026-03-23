@@ -2,10 +2,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// VectorClock
-// ---------------------------------------------------------------------------
-
 /// A compact vector clock mapping client_id → version.
 ///
 /// Uses `BTreeMap` (not `HashMap`) for deterministic serialization order,
@@ -56,10 +52,6 @@ impl VectorClock {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// HybridLogicalClock
-// ---------------------------------------------------------------------------
 
 /// Hybrid Logical Clock: (wall_ms, logical, node_id).
 ///
@@ -153,10 +145,6 @@ pub fn now_ms() -> u64 {
             .as_millis() as u64
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

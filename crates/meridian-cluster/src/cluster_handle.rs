@@ -20,9 +20,6 @@ use crate::{
     transport::http_push::HttpPushTransport,
 };
 
-// ---------------------------------------------------------------------------
-// SubscriptionManager re-export shim
-// ---------------------------------------------------------------------------
 // ClusterHandle needs to call `subscriptions.publish()` but lives in its own
 // crate with no dependency on `meridian-server`. We use a trait to break the
 // cycle: the server implements `LocalBroadcast` for its `SubscriptionManager`.
@@ -31,10 +28,6 @@ use crate::{
 pub trait LocalBroadcast: Send + Sync + 'static {
     fn publish_delta(&self, namespace: &str, crdt_id: &str, delta_bytes: Bytes);
 }
-
-// ---------------------------------------------------------------------------
-// ClusterHandle
-// ---------------------------------------------------------------------------
 
 /// The single entry point for cluster operations on a running node.
 ///

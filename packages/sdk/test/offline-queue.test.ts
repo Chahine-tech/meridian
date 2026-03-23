@@ -8,10 +8,6 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { WsTransport } from "../src/transport/websocket.js";
 import { OFFLINE_QUEUE_MAX } from "../src/constants.js";
 
-// ---------------------------------------------------------------------------
-// Fake WebSocket
-// ---------------------------------------------------------------------------
-
 type WsEventName = "open" | "message" | "close" | "error";
 
 class FakeWebSocket {
@@ -68,10 +64,6 @@ function makeTransport(onStateChange?: (s: string) => void): WsTransport {
     maxBackoffMs: 10,
   });
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 describe("WsTransport offline queue", () => {
   it("buffers ops sent while DISCONNECTED", () => {

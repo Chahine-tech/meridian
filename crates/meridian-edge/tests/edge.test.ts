@@ -14,10 +14,6 @@ async function api(
   return SELF.fetch(`${BASE_URL}${path}`, { ...rest, headers });
 }
 
-// ---------------------------------------------------------------------------
-// Health
-// ---------------------------------------------------------------------------
-
 describe("health", () => {
   it("GET /health returns 200 ok", async () => {
     const res = await api("/health");
@@ -25,10 +21,6 @@ describe("health", () => {
     expect(await res.text()).toBe("ok");
   });
 });
-
-// ---------------------------------------------------------------------------
-// Auth
-// ---------------------------------------------------------------------------
 
 describe("auth", () => {
   it("rejects requests with no token", async () => {
@@ -51,10 +43,6 @@ describe("auth", () => {
     expect([200, 404]).toContain(res.status);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Token issuance
-// ---------------------------------------------------------------------------
 
 describe("issue token", () => {
   it("issues a read-write token via admin", async () => {
@@ -116,10 +104,6 @@ describe("issue token", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// CRDT ops
-// ---------------------------------------------------------------------------
-
 describe("crdt ops", () => {
   // GCounter increment op: msgpack { GCounter: { client_id: 1, amount: 1 } }
   const GC_INCREMENT = new Uint8Array([
@@ -172,10 +156,6 @@ describe("crdt ops", () => {
     expect(res.status).toBe(403);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Rate limiting
-// ---------------------------------------------------------------------------
 
 describe("rate limiting", () => {
   // GCounter increment op (same as crdt ops section)
@@ -237,10 +217,6 @@ describe("rate limiting", () => {
     expect(got429).toBe(true);
   });
 });
-
-// ---------------------------------------------------------------------------
-// WAL
-// ---------------------------------------------------------------------------
 
 describe("wal", () => {
   it("GET /wal returns checkpoint and entries JSON", async () => {

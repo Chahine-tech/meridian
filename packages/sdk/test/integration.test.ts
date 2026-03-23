@@ -17,12 +17,9 @@ import { MeridianClient } from "../src/client.js";
 import { HttpClient } from "../src/transport/http.js";
 import { uuidToBytes } from "../src/codec.js";
 
-// ---------------------------------------------------------------------------
 // Config — matches the dev signing key [0x42; 32]
 // The token below is for namespace="integration", client_id=1, TTL=24h
 // Regenerate with: cargo run --bin gen_token -- integration 1
-// ---------------------------------------------------------------------------
-
 const SERVER_URL = "http://127.0.0.1:3737";
 const NAMESPACE = "integration";
 
@@ -52,10 +49,6 @@ async function isServerUp(): Promise<boolean> {
     return false;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Test suite
-// ---------------------------------------------------------------------------
 
 describe("Meridian integration", () => {
   let http: HttpClient;

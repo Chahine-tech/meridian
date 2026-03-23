@@ -3,9 +3,6 @@ use serde_json::Value as JsonValue;
 
 use super::{Crdt, CrdtError, HybridLogicalClock, VectorClock};
 
-// ---------------------------------------------------------------------------
-// LWW Register — Last-Write-Wins Register
-// ---------------------------------------------------------------------------
 //
 // A single-value cell. The write with the highest HLC wins.
 // Tie-break on `author` (u64) makes the merge totally ordered and deterministic
@@ -27,10 +24,6 @@ pub struct LwwEntry {
     pub author: u64,
 }
 
-// ---------------------------------------------------------------------------
-// Op + Delta
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LwwOp {
     pub value: JsonValue,
@@ -45,20 +38,12 @@ pub struct LwwDelta {
     pub entry: Option<LwwEntry>,
 }
 
-// ---------------------------------------------------------------------------
-// Value
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LwwValue {
     pub value: Option<JsonValue>,
     pub updated_at_ms: Option<u64>,
     pub author: Option<u64>,
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 /// Returns true if `a` beats `b` in LWW order.
 /// Primary key: HLC (higher wins). Tie-break 1: author (higher wins).
@@ -78,10 +63,6 @@ fn wins_over(
         },
     }
 }
-
-// ---------------------------------------------------------------------------
-// Crdt impl
-// ---------------------------------------------------------------------------
 
 impl Crdt for LwwRegister {
     type Op = LwwOp;
@@ -160,10 +141,6 @@ impl Crdt for LwwRegister {
         self.entry.is_none()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

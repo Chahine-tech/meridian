@@ -15,10 +15,6 @@ use crate::{
 #[cfg(feature = "transport-http")]
 use crate::transport::http_push::HttpPushTransport;
 
-// ---------------------------------------------------------------------------
-// AntiEntropyApplier — server-side callback to re-apply a WAL op
-// ---------------------------------------------------------------------------
-
 /// Callback trait implemented by the server to re-apply a raw WAL op.
 ///
 /// `meridian-cluster` cannot depend on the CRDT registry (that would create
@@ -35,14 +31,6 @@ pub trait AntiEntropyApplier: Send + Sync + 'static {
         op_bytes: Vec<u8>,
     ) -> impl std::future::Future<Output = Result<Option<Vec<u8>>, String>> + Send;
 }
-
-// ---------------------------------------------------------------------------
-// run_anti_entropy — background task
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// run_pull_anti_entropy — pull WAL from peers (HTTP transport only)
-// ---------------------------------------------------------------------------
 
 /// Periodically pulls WAL entries from each peer and applies any ops this
 /// node missed while it was down or partitioned.

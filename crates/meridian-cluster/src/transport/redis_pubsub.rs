@@ -18,10 +18,6 @@ use crate::{
 // Format: `meridian:delta:{namespace}`
 const CHANNEL_PREFIX: &str = "meridian:delta:";
 
-// ---------------------------------------------------------------------------
-// RedisTransport
-// ---------------------------------------------------------------------------
-
 /// Cluster transport backed by Redis Pub/Sub.
 ///
 /// Each namespace maps to a Redis channel `meridian:delta:{ns}`.

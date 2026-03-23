@@ -1,10 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 
-// ---------------------------------------------------------------------------
-// Client → Server messages
-// ---------------------------------------------------------------------------
-
 /// Messages sent by the client over the WebSocket connection.
 /// Encoded as msgpack binary frames.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,10 +31,6 @@ pub enum ClientMsg {
     /// `data` — msgpack-encoded payload; the server forwards it verbatim.
     AwarenessUpdate { key: String, data: ByteBuf },
 }
-
-// ---------------------------------------------------------------------------
-// Server → Client messages
-// ---------------------------------------------------------------------------
 
 /// Messages sent by the server over the WebSocket connection.
 /// Encoded as msgpack binary frames.
@@ -84,10 +76,6 @@ impl ClientMsg {
         rmp_serde::decode::from_slice(bytes)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

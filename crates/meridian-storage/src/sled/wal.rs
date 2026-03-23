@@ -8,10 +8,6 @@ use crate::{
     wal_backend::{WalBackend, WalEntry},
 };
 
-// ---------------------------------------------------------------------------
-// SledWal — sled-backed Write-Ahead Log
-// ---------------------------------------------------------------------------
-
 /// Append-only Write-Ahead Log backed by a dedicated sled tree (`_wal`).
 ///
 /// ## Key format
@@ -63,10 +59,6 @@ impl SledWal {
         Some(u64::from_be_bytes(arr))
     }
 }
-
-// ---------------------------------------------------------------------------
-// WalBackend impl
-// ---------------------------------------------------------------------------
 
 impl WalBackend for SledWal {
     async fn append(&self, namespace: &str, crdt_id: &str, op_bytes: Vec<u8>) -> Result<u64> {
@@ -148,10 +140,6 @@ impl WalBackend for SledWal {
         Ok(())
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

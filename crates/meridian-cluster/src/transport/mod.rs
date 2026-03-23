@@ -5,10 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{error::Result, node_id::NodeId};
 
-// ---------------------------------------------------------------------------
-// DeltaEnvelope — wire format for cross-node delta messages
-// ---------------------------------------------------------------------------
-
 /// A delta broadcast from one node to all peers.
 ///
 /// The `delta_bytes` are the raw msgpack-encoded delta — the same bytes
@@ -39,10 +35,6 @@ impl DeltaEnvelope {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ClusterTransport — abstraction over the inter-node messaging layer
-// ---------------------------------------------------------------------------
-
 /// Transport layer for broadcasting deltas between cluster nodes.
 ///
 /// Implementations must be cheaply cloneable (use `Arc` internally).
@@ -61,10 +53,6 @@ pub trait ClusterTransport: Send + Sync + 'static {
     /// The stream runs until the transport is dropped or the cancel signal fires.
     fn subscribe_deltas(&self) -> BoxStream<'static, DeltaEnvelope>;
 }
-
-// ---------------------------------------------------------------------------
-// Re-exports
-// ---------------------------------------------------------------------------
 
 #[cfg(feature = "transport-redis")]
 pub mod redis_pubsub;
