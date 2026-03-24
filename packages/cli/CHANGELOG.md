@@ -1,0 +1,14 @@
+# meridian-cli
+
+## 1.1.0
+
+### Minor Changes
+
+- fe97f56: Initial release of `meridian-cli`.
+
+  Provides `meridian inspect <crdt-id>` to stream WAL history and `meridian replay <crdt-id>` to replay ops against a local server.
+
+### Patch Changes
+
+- Updated dependencies [fe97f56]
+  - meridian-sdk@1.1.0
