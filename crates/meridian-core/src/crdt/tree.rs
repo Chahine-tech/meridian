@@ -416,6 +416,7 @@ mod tests {
         .unwrap();
     }
 
+    #[allow(dead_code)]
     fn root_ids(tree: &TreeCrdt) -> Vec<String> {
         tree.value().roots.iter().map(|n| n.id.clone()).collect()
     }

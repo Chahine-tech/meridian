@@ -131,6 +131,25 @@ Collaborative text editing — ordered sequence CRDT.
 const { value, insert, delete: del } = useRGA("rg:doc-123");
 ```
 
+### `useTree`
+
+Collaborative hierarchical tree — outlines, mind maps, document trees.
+
+```tsx
+const { roots, addNode, moveNode, updateNode, deleteNode } = useTree("tr:outline");
+
+// Add root node
+const rootId = addNode(null, "a0", "Introduction");
+// Add child
+const childId = addNode(rootId, "a0", "Chapter 1");
+// Move, update, delete
+moveNode(childId, null, "b0");
+updateNode(childId, "Chapter 1 — Updated");
+deleteNode(childId);
+```
+
+`roots` is an array of `TreeNodeValue` — `{ id, value, children: TreeNodeValue[] }`. Concurrent moves converge via Kleppmann et al. (2021) — cycle-creating moves are silently discarded.
+
 ### `useCRDTMap`
 
 ```tsx
