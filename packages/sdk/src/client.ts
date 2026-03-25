@@ -10,6 +10,7 @@ import { LwwRegisterHandle } from "./crdt/lwwregister.js";
 import { PresenceHandle } from "./crdt/presence.js";
 import { CRDTMapHandle } from "./crdt/crdtmap.js";
 import { AwarenessHandle } from "./crdt/awareness.js";
+import { RGAHandle } from "./crdt/rga.js";
 import {
   decodeGCounterDelta,
   decodePNCounterDelta,
@@ -17,6 +18,7 @@ import {
   decodeLwwDelta,
   decodePresenceDelta,
   decodeCRDTMapDelta,
+  decodeRGADelta,
 } from "./sync/delta.js";
 import { parseAndValidateToken } from "./auth/token.js";
 import type { ServerMsg, TokenClaims } from "./schema.js";
@@ -56,13 +58,19 @@ export interface CRDTMapSnapshotEntry {
   crdtId: string;
   value: Readonly<CrdtMapValue>;
 }
+export interface RGASnapshotEntry {
+  type: "rga";
+  crdtId: string;
+  text: string;
+}
 export type CRDTSnapshotEntry =
   | GCounterSnapshotEntry
   | PNCounterSnapshotEntry
   | ORSetSnapshotEntry
   | LwwRegisterSnapshotEntry
   | PresenceSnapshotEntry
-  | CRDTMapSnapshotEntry;
+  | CRDTMapSnapshotEntry
+  | RGASnapshotEntry;
 
 export interface DeltaEvent {
   crdtId: string;
@@ -127,6 +135,7 @@ export class MeridianClient {
   private readonly prHandles = new Map<string, PresenceHandle<unknown>>();
   private readonly cmHandles = new Map<string, CRDTMapHandle>();
   private readonly awHandles = new Map<string, AwarenessHandle<unknown>>();
+  private readonly rgaHandles = new Map<string, RGAHandle>();
 
   private readonly anyListeners = new Set<() => void>();
   private readonly deltaListeners = new Set<(event: DeltaEvent) => void>();
@@ -359,6 +368,32 @@ export class MeridianClient {
   }
 
   /**
+   * Returns a handle for an RGA (Replicated Growable Array) CRDT — collaborative text editing.
+   *
+   * Handles are cached by `crdtId`; calling this method multiple times with the
+   * same id returns the same handle instance and creates only one subscription.
+   *
+   * @param crdtId - Unique identifier for the CRDT within this namespace.
+   *
+   * @example
+   * ```ts
+   * const doc = client.rga('doc:content');
+   * doc.insert(0, 'Hello');
+   * doc.onChange(text => console.log(text));
+   * ```
+   */
+  rga(crdtId: string): RGAHandle {
+    let handle = this.rgaHandles.get(crdtId);
+    if (!handle) {
+      handle = new RGAHandle({ crdtId, clientId: this.clientId, transport: this.transport });
+      this.rgaHandles.set(crdtId, handle);
+      this.transport.subscribe(crdtId);
+      this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
+    }
+    return handle;
+  }
+
+  /**
    * Returns a handle for an ephemeral awareness channel.
    *
    * Awareness updates are fanned out to all other subscribers in the namespace
@@ -450,6 +485,8 @@ export class MeridianClient {
       crdts.push({ type: "presence", crdtId, online: h.online() as { clientId: number; data: unknown; expiresAtMs: number }[] });
     for (const [crdtId, h] of this.cmHandles)
       crdts.push({ type: "crdtmap", crdtId, value: h.value() });
+    for (const [crdtId, h] of this.rgaHandles)
+      crdts.push({ type: "rga", crdtId, text: h.value() });
     return {
       namespace: this.namespace,
       clientId: this.clientId,
@@ -527,6 +564,12 @@ export class MeridianClient {
     if (cmHandle) {
       try { cmHandle.applyDelta(decodeCRDTMapDelta(delta_bytes)); } catch { /* stale */ }
       this.notifyDelta(crdt_id, "crdtmap");
+      return;
+    }
+    const rgaHandle = this.rgaHandles.get(crdt_id);
+    if (rgaHandle) {
+      try { rgaHandle.applyDelta(decodeRGADelta(delta_bytes)); } catch { /* stale */ }
+      this.notifyDelta(crdt_id, "rga");
     }
   }
 

@@ -72,12 +72,22 @@ export const decodePresenceDelta = (bytes: Uint8Array): PresenceDelta => {
   return { changes: raw.changes ?? {} };
 };
 
+export interface RGADelta {
+  text: string;
+}
+
+export const decodeRGADelta = (bytes: Uint8Array): RGADelta => {
+  const raw = decode(bytes) as { text?: string };
+  return { text: raw.text ?? "" };
+};
+
 export type CrdtValueDelta =
   | { GCounter: GCounterDelta }
   | { PNCounter: PNCounterDelta }
   | { ORSet: ORSetDelta }
   | { LwwRegister: LwwDelta }
-  | { Presence: PresenceDelta };
+  | { Presence: PresenceDelta }
+  | { RGA: RGADelta };
 
 export interface CRDTMapDelta {
   deltas: Record<string, CrdtValueDelta>;

@@ -6,6 +6,7 @@ pub mod orset;
 pub mod pncounter;
 pub mod presence;
 pub mod registry;
+pub mod rga;
 
 pub use clock::{HybridLogicalClock, VectorClock};
 pub use crdtmap::CRDTMap;
@@ -15,6 +16,7 @@ pub use orset::ORSet;
 pub use pncounter::PNCounter;
 pub use presence::Presence;
 pub use registry::CrdtValue;
+pub use rga::{Rga, RgaDelta, RgaOp};
 
 use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;

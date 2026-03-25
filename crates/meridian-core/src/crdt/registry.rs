@@ -7,6 +7,7 @@ use super::{
     orset::{ORSet, ORSetOp},
     pncounter::{PNCounter, PNCounterOp},
     presence::{Presence, PresenceOp},
+    rga::{Rga, RgaOp},
     Crdt, CrdtError, VectorClock,
 };
 
@@ -19,6 +20,7 @@ pub enum CrdtType {
     LwwRegister = 0x04,
     Presence    = 0x05,
     CRDTMap     = 0x06,
+    Rga         = 0x07,
 }
 
 impl CrdtType {
@@ -30,6 +32,7 @@ impl CrdtType {
             0x04 => Some(Self::LwwRegister),
             0x05 => Some(Self::Presence),
             0x06 => Some(Self::CRDTMap),
+            0x07 => Some(Self::Rga),
             _ => None,
         }
     }
@@ -42,6 +45,7 @@ impl CrdtType {
             Self::LwwRegister => "lwwregister",
             Self::Presence    => "presence",
             Self::CRDTMap     => "crdtmap",
+            Self::Rga         => "rga",
         }
     }
 }
@@ -62,6 +66,7 @@ impl std::str::FromStr for CrdtType {
             "lwwregister" => Ok(Self::LwwRegister),
             "presence"    => Ok(Self::Presence),
             "crdtmap"     => Ok(Self::CRDTMap),
+            "rga"         => Ok(Self::Rga),
             other         => Err(format!("unknown crdt type: {other}")),
         }
     }
@@ -75,6 +80,7 @@ pub enum CrdtValue {
     LwwRegister(LwwRegister),
     Presence(Presence),
     CRDTMap(CRDTMap),
+    RGA(Rga),
 }
 
 impl CrdtValue {
@@ -86,6 +92,7 @@ impl CrdtValue {
             Self::LwwRegister(_) => CrdtType::LwwRegister,
             Self::Presence(_)    => CrdtType::Presence,
             Self::CRDTMap(_)     => CrdtType::CRDTMap,
+            Self::RGA(_)         => CrdtType::Rga,
         }
     }
 
@@ -97,6 +104,7 @@ impl CrdtValue {
             CrdtType::LwwRegister => Self::LwwRegister(LwwRegister::default()),
             CrdtType::Presence    => Self::Presence(Presence::default()),
             CrdtType::CRDTMap     => Self::CRDTMap(CRDTMap::default()),
+            CrdtType::Rga         => Self::RGA(Rga::default()),
         }
     }
 
@@ -108,6 +116,7 @@ impl CrdtValue {
             Self::LwwRegister(v) => v.is_empty(),
             Self::Presence(v)    => v.is_empty(),
             Self::CRDTMap(v)     => v.is_empty(),
+            Self::RGA(v)         => v.is_empty(),
         }
     }
 
@@ -120,6 +129,7 @@ impl CrdtValue {
             Self::LwwRegister(v) => serde_json::to_value(v.value()).unwrap_or_default(),
             Self::Presence(v)    => serde_json::to_value(v.value()).unwrap_or_default(),
             Self::CRDTMap(v)     => serde_json::to_value(v.value()).unwrap_or_default(),
+            Self::RGA(v)         => serde_json::to_value(v.value()).unwrap_or_default(),
         }
     }
 
@@ -142,6 +152,7 @@ impl CrdtValue {
             Self::LwwRegister(v) => v.delta_since(vc).map(|d| rmp_serde::encode::to_vec_named(&d)),
             Self::Presence(v)    => v.delta_since(vc).map(|d| rmp_serde::encode::to_vec_named(&d)),
             Self::CRDTMap(v)     => v.delta_since(vc).map(|d| rmp_serde::encode::to_vec_named(&d)),
+            Self::RGA(v)         => v.delta_since(vc).map(|d| rmp_serde::encode::to_vec_named(&d)),
         };
         match delta {
             None => Ok(None),
@@ -159,6 +170,7 @@ pub enum CrdtOp {
     LwwRegister(LwwOp),
     Presence(PresenceOp),
     CRDTMap(CRDTMapOp),
+    RGA(RgaOp),
 }
 
 impl CrdtOp {
@@ -170,6 +182,7 @@ impl CrdtOp {
             Self::LwwRegister(_) => CrdtType::LwwRegister,
             Self::Presence(_)    => CrdtType::Presence,
             Self::CRDTMap(_)     => CrdtType::CRDTMap,
+            Self::RGA(_)         => CrdtType::Rga,
         }
     }
 }
@@ -193,6 +206,7 @@ pub fn apply_op(value: &mut CrdtValue, op: CrdtOp) -> Result<Option<Vec<u8>>, Cr
         (CrdtValue::LwwRegister(v), CrdtOp::LwwRegister(op)) => apply_and_serialize!(v, op),
         (CrdtValue::Presence(v),    CrdtOp::Presence(op))    => apply_and_serialize!(v, op),
         (CrdtValue::CRDTMap(v),     CrdtOp::CRDTMap(op))     => apply_and_serialize!(v, op),
+        (CrdtValue::RGA(v),         CrdtOp::RGA(op))         => apply_and_serialize!(v, op),
         _ => Err(CrdtError::InvalidOp("op type does not match crdt type".into())),
     }
 }
