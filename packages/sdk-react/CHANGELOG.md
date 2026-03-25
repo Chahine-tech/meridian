@@ -1,6 +1,19 @@
 # meridian-react
 
-## 2.0.0
+## 1.2.1
+
+### Minor Changes
+
+- 3086c3d: feat(crdt): add TreeCRDT for hierarchical collaborative editing
+
+  Implements a convergent hierarchical tree CRDT based on Kleppmann et al. (2021). Supports addNode, moveNode, updateNode, and deleteNode operations with cycle detection, LWW value updates, and tombstone deletes. The `client.tree(id)` factory and `useTree()` React hook are now available.
+
+### Patch Changes
+
+- Updated dependencies [3086c3d]
+  - meridian-sdk@1.2.1
+
+## 1.2.0
 
 ### Minor Changes
 
