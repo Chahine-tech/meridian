@@ -10,7 +10,7 @@ bun add meridian-react
 npm install meridian-react
 ```
 
-Requires `react ^19.0.0`, `meridian-sdk ^0.3.0`, and `effect ^3.21.0` as peer dependencies.
+Requires `react ^19.0.0`, `meridian-sdk ^1.1.0`, and `effect ^3.21.0` as peer dependencies.
 
 ## Setup
 
@@ -123,6 +123,14 @@ const { peers, update, clear } = useAwareness("cursors", CursorSchema);
 
 `peers` excludes the current client. Use `peers.length + 1` for a total visitor count — or combine with `usePresence` for an accurate count that includes clients who haven't moved yet.
 
+### `useRGA`
+
+Collaborative text editing — ordered sequence CRDT.
+
+```tsx
+const { value, insert, delete: del } = useRGA("rg:doc-123");
+```
+
 ### `useCRDTMap`
 
 ```tsx
@@ -162,4 +170,4 @@ function DebugPanel() {
 ## Requirements
 
 - React 19+
-- meridian-sdk 0.3+
+- meridian-sdk 1.1+

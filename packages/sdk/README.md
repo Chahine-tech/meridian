@@ -95,6 +95,7 @@ await Effect.runPromise(
 | `client.presence(id, schema?)` | `PresenceHandle<T>` | Optional |
 | `client.crdtmap(id)` | `CRDTMapHandle` | — |
 | `client.awareness(key, schema?)` | `AwarenessHandle<T>` | Optional |
+| `client.rga(id)` | `RGAHandle` | — |
 
 Without a schema, `T = unknown`. With a schema, incoming deltas are validated at runtime via `Schema.decodeUnknownSync`.
 
