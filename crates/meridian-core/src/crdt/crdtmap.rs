@@ -10,6 +10,7 @@ use super::{
     presence::{Presence, PresenceDelta, PresenceOp},
     registry::CrdtType,
     rga::{Rga, RgaDelta, RgaOp},
+    tree::{TreeCrdt, TreeDelta, TreeOp},
     Crdt, CrdtError, VectorClock,
 };
 
@@ -33,6 +34,7 @@ pub enum CrdtValueDelta {
     LwwRegister(LwwDelta),
     Presence(PresenceDelta),
     RGA(RgaDelta),
+    Tree(TreeDelta),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -43,6 +45,7 @@ pub enum CrdtInnerOp {
     LwwRegister(LwwOp),
     Presence(PresenceOp),
     RGA(RgaOp),
+    Tree(TreeOp),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -66,6 +69,7 @@ pub enum CrdtMapInnerValue {
     LwwRegister(LwwRegister),
     Presence(Presence),
     RGA(Rga),
+    Tree(TreeCrdt),
 }
 
 impl CrdtMapInnerValue {
@@ -77,6 +81,7 @@ impl CrdtMapInnerValue {
             CrdtType::LwwRegister => Self::LwwRegister(LwwRegister::default()),
             CrdtType::Presence    => Self::Presence(Presence::default()),
             CrdtType::Rga         => Self::RGA(Rga::default()),
+            CrdtType::Tree        => Self::Tree(TreeCrdt::default()),
             CrdtType::CRDTMap     => unreachable!("CRDTMap cannot be nested"),
         }
     }
@@ -89,6 +94,7 @@ impl CrdtMapInnerValue {
             Self::LwwRegister(_) => CrdtType::LwwRegister,
             Self::Presence(_)    => CrdtType::Presence,
             Self::RGA(_)         => CrdtType::Rga,
+            Self::Tree(_)        => CrdtType::Tree,
         }
     }
 
@@ -100,6 +106,7 @@ impl CrdtMapInnerValue {
             Self::LwwRegister(v) => serde_json::to_value(v.value()).unwrap_or_default(),
             Self::Presence(v)    => serde_json::to_value(v.value()).unwrap_or_default(),
             Self::RGA(v)         => serde_json::to_value(v.value()).unwrap_or_default(),
+            Self::Tree(v)        => serde_json::to_value(v.value()).unwrap_or_default(),
         }
     }
 }
@@ -120,6 +127,7 @@ fn apply_inner(
         (CrdtMapInnerValue::LwwRegister(v), CrdtInnerOp::LwwRegister(o)) => Ok(v.apply(o)?.map(CrdtValueDelta::LwwRegister)),
         (CrdtMapInnerValue::Presence(v),    CrdtInnerOp::Presence(o))    => Ok(v.apply(o)?.map(CrdtValueDelta::Presence)),
         (CrdtMapInnerValue::RGA(v),         CrdtInnerOp::RGA(o))         => Ok(v.apply(o)?.map(CrdtValueDelta::RGA)),
+        (CrdtMapInnerValue::Tree(v),        CrdtInnerOp::Tree(o))        => Ok(v.apply(o)?.map(CrdtValueDelta::Tree)),
         _ => Err(CrdtError::InvalidOp("inner op type does not match inner crdt type".into())),
     }
 }
@@ -132,6 +140,7 @@ fn merge_inner(a: &mut CrdtMapInnerValue, b: &CrdtMapInnerValue) {
         (CrdtMapInnerValue::LwwRegister(x), CrdtMapInnerValue::LwwRegister(y)) => x.merge(y),
         (CrdtMapInnerValue::Presence(x),    CrdtMapInnerValue::Presence(y))    => x.merge(y),
         (CrdtMapInnerValue::RGA(x),         CrdtMapInnerValue::RGA(y))         => x.merge(y),
+        (CrdtMapInnerValue::Tree(x),        CrdtMapInnerValue::Tree(y))        => x.merge(y),
         _ => {} // type mismatch — self wins
     }
 }
@@ -144,6 +153,7 @@ fn merge_delta_inner(inner: &mut CrdtMapInnerValue, delta: CrdtValueDelta) {
         (CrdtMapInnerValue::LwwRegister(v), CrdtValueDelta::LwwRegister(d)) => v.merge_delta(d),
         (CrdtMapInnerValue::Presence(v),    CrdtValueDelta::Presence(d))    => v.merge_delta(d),
         (CrdtMapInnerValue::RGA(v),         CrdtValueDelta::RGA(d))         => v.merge_delta(d),
+        (CrdtMapInnerValue::Tree(v),        CrdtValueDelta::Tree(d))        => v.merge_delta(d),
         _ => {} // type mismatch — no-op
     }
 }
@@ -180,6 +190,11 @@ fn inner_from_delta(delta: CrdtValueDelta) -> CrdtMapInnerValue {
             v.merge_delta(d);
             CrdtMapInnerValue::RGA(v)
         }
+        CrdtValueDelta::Tree(d) => {
+            let mut v = TreeCrdt::default();
+            v.merge_delta(d);
+            CrdtMapInnerValue::Tree(v)
+        }
     }
 }
 
@@ -191,6 +206,7 @@ fn delta_since_inner(inner: &CrdtMapInnerValue, since: &VectorClock) -> Option<C
         CrdtMapInnerValue::LwwRegister(v) => v.delta_since(since).map(CrdtValueDelta::LwwRegister),
         CrdtMapInnerValue::Presence(v)    => v.delta_since(since).map(CrdtValueDelta::Presence),
         CrdtMapInnerValue::RGA(v)         => v.delta_since(since).map(CrdtValueDelta::RGA),
+        CrdtMapInnerValue::Tree(v)        => v.delta_since(since).map(CrdtValueDelta::Tree),
     }
 }
 

@@ -8,6 +8,7 @@ use super::{
     pncounter::{PNCounter, PNCounterOp},
     presence::{Presence, PresenceOp},
     rga::{Rga, RgaOp},
+    tree::{TreeCrdt, TreeOp},
     Crdt, CrdtError, VectorClock,
 };
 
@@ -21,6 +22,7 @@ pub enum CrdtType {
     Presence    = 0x05,
     CRDTMap     = 0x06,
     Rga         = 0x07,
+    Tree        = 0x08,
 }
 
 impl CrdtType {
@@ -33,6 +35,7 @@ impl CrdtType {
             0x05 => Some(Self::Presence),
             0x06 => Some(Self::CRDTMap),
             0x07 => Some(Self::Rga),
+            0x08 => Some(Self::Tree),
             _ => None,
         }
     }
@@ -46,6 +49,7 @@ impl CrdtType {
             Self::Presence    => "presence",
             Self::CRDTMap     => "crdtmap",
             Self::Rga         => "rga",
+            Self::Tree        => "tree",
         }
     }
 }
@@ -67,6 +71,7 @@ impl std::str::FromStr for CrdtType {
             "presence"    => Ok(Self::Presence),
             "crdtmap"     => Ok(Self::CRDTMap),
             "rga"         => Ok(Self::Rga),
+            "tree"        => Ok(Self::Tree),
             other         => Err(format!("unknown crdt type: {other}")),
         }
     }
@@ -81,6 +86,7 @@ pub enum CrdtValue {
     Presence(Presence),
     CRDTMap(CRDTMap),
     RGA(Rga),
+    Tree(TreeCrdt),
 }
 
 impl CrdtValue {
@@ -93,6 +99,7 @@ impl CrdtValue {
             Self::Presence(_)    => CrdtType::Presence,
             Self::CRDTMap(_)     => CrdtType::CRDTMap,
             Self::RGA(_)         => CrdtType::Rga,
+            Self::Tree(_)        => CrdtType::Tree,
         }
     }
 
@@ -105,6 +112,7 @@ impl CrdtValue {
             CrdtType::Presence    => Self::Presence(Presence::default()),
             CrdtType::CRDTMap     => Self::CRDTMap(CRDTMap::default()),
             CrdtType::Rga         => Self::RGA(Rga::default()),
+            CrdtType::Tree        => Self::Tree(TreeCrdt::default()),
         }
     }
 
@@ -117,6 +125,7 @@ impl CrdtValue {
             Self::Presence(v)    => v.is_empty(),
             Self::CRDTMap(v)     => v.is_empty(),
             Self::RGA(v)         => v.is_empty(),
+            Self::Tree(v)        => v.is_empty(),
         }
     }
 
@@ -130,6 +139,7 @@ impl CrdtValue {
             Self::Presence(v)    => serde_json::to_value(v.value()).unwrap_or_default(),
             Self::CRDTMap(v)     => serde_json::to_value(v.value()).unwrap_or_default(),
             Self::RGA(v)         => serde_json::to_value(v.value()).unwrap_or_default(),
+            Self::Tree(v)        => serde_json::to_value(v.value()).unwrap_or_default(),
         }
     }
 
@@ -153,6 +163,7 @@ impl CrdtValue {
             Self::Presence(v)    => v.delta_since(vc).map(|d| rmp_serde::encode::to_vec_named(&d)),
             Self::CRDTMap(v)     => v.delta_since(vc).map(|d| rmp_serde::encode::to_vec_named(&d)),
             Self::RGA(v)         => v.delta_since(vc).map(|d| rmp_serde::encode::to_vec_named(&d)),
+            Self::Tree(v)        => v.delta_since(vc).map(|d| rmp_serde::encode::to_vec_named(&d)),
         };
         match delta {
             None => Ok(None),
@@ -171,6 +182,7 @@ pub enum CrdtOp {
     Presence(PresenceOp),
     CRDTMap(CRDTMapOp),
     RGA(RgaOp),
+    Tree(TreeOp),
 }
 
 impl CrdtOp {
@@ -183,6 +195,7 @@ impl CrdtOp {
             Self::Presence(_)    => CrdtType::Presence,
             Self::CRDTMap(_)     => CrdtType::CRDTMap,
             Self::RGA(_)         => CrdtType::Rga,
+            Self::Tree(_)        => CrdtType::Tree,
         }
     }
 }
@@ -207,6 +220,7 @@ pub fn apply_op(value: &mut CrdtValue, op: CrdtOp) -> Result<Option<Vec<u8>>, Cr
         (CrdtValue::Presence(v),    CrdtOp::Presence(op))    => apply_and_serialize!(v, op),
         (CrdtValue::CRDTMap(v),     CrdtOp::CRDTMap(op))     => apply_and_serialize!(v, op),
         (CrdtValue::RGA(v),         CrdtOp::RGA(op))         => apply_and_serialize!(v, op),
+        (CrdtValue::Tree(v),        CrdtOp::Tree(op))        => apply_and_serialize!(v, op),
         _ => Err(CrdtError::InvalidOp("op type does not match crdt type".into())),
     }
 }

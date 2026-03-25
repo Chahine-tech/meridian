@@ -11,6 +11,7 @@ import { PresenceHandle } from "./crdt/presence.js";
 import { CRDTMapHandle } from "./crdt/crdtmap.js";
 import { AwarenessHandle } from "./crdt/awareness.js";
 import { RGAHandle } from "./crdt/rga.js";
+import { TreeHandle } from "./crdt/tree.js";
 import {
   decodeGCounterDelta,
   decodePNCounterDelta,
@@ -19,7 +20,9 @@ import {
   decodePresenceDelta,
   decodeCRDTMapDelta,
   decodeRGADelta,
+  decodeTreeDelta,
 } from "./sync/delta.js";
+import type { TreeNodeValue } from "./sync/delta.js";
 import { parseAndValidateToken } from "./auth/token.js";
 import type { ServerMsg, TokenClaims } from "./schema.js";
 import type { TokenParseError, TokenExpiredError } from "./errors.js";
@@ -63,6 +66,11 @@ export interface RGASnapshotEntry {
   crdtId: string;
   text: string;
 }
+export interface TreeSnapshotEntry {
+  type: "tree";
+  crdtId: string;
+  roots: TreeNodeValue[];
+}
 export type CRDTSnapshotEntry =
   | GCounterSnapshotEntry
   | PNCounterSnapshotEntry
@@ -70,7 +78,8 @@ export type CRDTSnapshotEntry =
   | LwwRegisterSnapshotEntry
   | PresenceSnapshotEntry
   | CRDTMapSnapshotEntry
-  | RGASnapshotEntry;
+  | RGASnapshotEntry
+  | TreeSnapshotEntry;
 
 export interface DeltaEvent {
   crdtId: string;
@@ -136,6 +145,7 @@ export class MeridianClient {
   private readonly cmHandles = new Map<string, CRDTMapHandle>();
   private readonly awHandles = new Map<string, AwarenessHandle<unknown>>();
   private readonly rgaHandles = new Map<string, RGAHandle>();
+  private readonly treeHandles = new Map<string, TreeHandle>();
 
   private readonly anyListeners = new Set<() => void>();
   private readonly deltaListeners = new Set<(event: DeltaEvent) => void>();
@@ -394,6 +404,36 @@ export class MeridianClient {
   }
 
   /**
+   * Returns a handle for a TreeCRDT — a convergent hierarchical tree.
+   *
+   * Use this for outlines, document trees, mind maps, or any nested structure
+   * that needs concurrent editing. Concurrent moves use Kleppmann (2021)
+   * move semantics: cycle-creating moves are discarded, all replicas converge.
+   *
+   * Handles are cached by `crdtId`; the same handle is returned for repeated calls.
+   *
+   * @param crdtId - Logical CRDT identifier (e.g. `"tree:outline"`).
+   *
+   * @example
+   * ```ts
+   * const tree = client.tree('doc:outline');
+   * const rootId = tree.addNode(null, 'a0', 'Introduction');
+   * const childId = tree.addNode(rootId, 'a0', 'Chapter 1');
+   * tree.onChange(t => console.log(t.roots));
+   * ```
+   */
+  tree(crdtId: string): TreeHandle {
+    let handle = this.treeHandles.get(crdtId);
+    if (!handle) {
+      handle = new TreeHandle({ crdtId, clientId: this.clientId, transport: this.transport });
+      this.treeHandles.set(crdtId, handle);
+      this.transport.subscribe(crdtId);
+      this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
+    }
+    return handle;
+  }
+
+  /**
    * Returns a handle for an ephemeral awareness channel.
    *
    * Awareness updates are fanned out to all other subscribers in the namespace
@@ -487,6 +527,8 @@ export class MeridianClient {
       crdts.push({ type: "crdtmap", crdtId, value: h.value() });
     for (const [crdtId, h] of this.rgaHandles)
       crdts.push({ type: "rga", crdtId, text: h.value() });
+    for (const [crdtId, h] of this.treeHandles)
+      crdts.push({ type: "tree", crdtId, roots: h.value().roots });
     return {
       namespace: this.namespace,
       clientId: this.clientId,
@@ -570,6 +612,12 @@ export class MeridianClient {
     if (rgaHandle) {
       try { rgaHandle.applyDelta(decodeRGADelta(delta_bytes)); } catch { /* stale */ }
       this.notifyDelta(crdt_id, "rga");
+      return;
+    }
+    const treeHandle = this.treeHandles.get(crdt_id);
+    if (treeHandle) {
+      try { treeHandle.applyDelta(decodeTreeDelta(delta_bytes)); } catch { /* stale */ }
+      this.notifyDelta(crdt_id, "tree");
     }
   }
 

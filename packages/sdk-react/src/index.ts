@@ -8,3 +8,4 @@ export { useCRDTMap } from "./hooks/useCRDTMap.js";
 export { usePendingOpCount } from "./hooks/usePendingOpCount.js";
 export { useAwareness } from "./hooks/useAwareness.js";
 export { useRGA } from "./hooks/useRGA.js";
+export { useTree } from "./hooks/useTree.js";

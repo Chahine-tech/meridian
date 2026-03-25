@@ -81,13 +81,29 @@ export const decodeRGADelta = (bytes: Uint8Array): RGADelta => {
   return { text: raw.text ?? "" };
 };
 
+export interface TreeNodeValue {
+  id: string;
+  value: string;
+  children: TreeNodeValue[];
+}
+
+export interface TreeDelta {
+  roots: TreeNodeValue[];
+}
+
+export const decodeTreeDelta = (bytes: Uint8Array): TreeDelta => {
+  const raw = decode(bytes) as { roots?: TreeNodeValue[] };
+  return { roots: raw.roots ?? [] };
+};
+
 export type CrdtValueDelta =
   | { GCounter: GCounterDelta }
   | { PNCounter: PNCounterDelta }
   | { ORSet: ORSetDelta }
   | { LwwRegister: LwwDelta }
   | { Presence: PresenceDelta }
-  | { RGA: RGADelta };
+  | { RGA: RGADelta }
+  | { Tree: TreeDelta };
 
 export interface CRDTMapDelta {
   deltas: Record<string, CrdtValueDelta>;
