@@ -12,6 +12,7 @@ export type {
   LwwRegisterSnapshotEntry,
   PresenceSnapshotEntry,
   CRDTMapSnapshotEntry,
+  RGASnapshotEntry,
 } from "./client.js";
 
 // CRDT handles
@@ -25,6 +26,7 @@ export { CRDTMapHandle } from "./crdt/crdtmap.js";
 export type { CrdtMapValue } from "./crdt/crdtmap.js";
 export { AwarenessHandle } from "./crdt/awareness.js";
 export type { AwarenessEntry } from "./crdt/awareness.js";
+export { RGAHandle } from "./crdt/rga.js";
 
 // Transport
 export { HttpClient } from "./transport/http.js";

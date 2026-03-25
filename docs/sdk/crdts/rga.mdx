@@ -1,0 +1,80 @@
+---
+title: RGA
+description: Replicated Growable Array. Conflict-free ordered sequence for collaborative text editing.
+---
+
+An RGA (Replicated Growable Array) is an ordered sequence CRDT designed for collaborative text editing. Concurrent inserts and deletes from multiple clients converge to the same result without conflicts.
+
+Each character is assigned a unique identifier at insert time. Deletions are soft (tombstoned) and removed from the visible value. Concurrent inserts at the same position are deterministically ordered by author ID.
+
+## Usage
+
+```ts
+const doc = client.rga("rg:doc-123");
+
+// Insert at position
+doc.insert(0, "Hello");
+doc.insert(5, " world");
+
+// Delete characters
+doc.delete(5, 6); // delete " world"
+
+console.log(doc.value()); // "Hello"
+
+doc.onChange(text => console.log("text:", text));
+```
+
+## React
+
+```tsx
+import { useRGA } from "meridian-react";
+
+function Editor() {
+  const { value, insert, delete: del } = useRGA("rg:doc-123");
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newText = e.target.value;
+    // Simple diff: replace all (for demo — use a proper diff for production)
+    del(0, value.length);
+    insert(0, newText);
+  };
+
+  return <textarea value={value} onChange={handleChange} />;
+}
+```
+
+## Effect stream
+
+```ts
+import { Stream, Effect } from "effect";
+
+await Effect.runPromise(
+  doc.stream().pipe(
+    Stream.runForEach(text => Effect.log(`doc: ${text}`))
+  )
+);
+```
+
+## API
+
+| Method | Description |
+|--------|-------------|
+| `insert(pos: number, text: string, ttlMs?)` | Insert characters at position |
+| `delete(pos: number, length: number, ttlMs?)` | Delete `length` characters starting at `pos` |
+| `value()` | Returns current text as `string` |
+| `onChange(fn)` | Subscribe — returns unsubscribe function |
+| `stream()` | Returns an Effect `Stream<string>` that emits on every change |
+
+## Conflict semantics
+
+- **Concurrent inserts** at the same position are ordered by author ID (deterministic, total order)
+- **Concurrent delete + insert**: the insert survives — deletions only remove characters that existed at the time of the delete op
+- **Idempotent**: applying the same op twice has no effect
+
+## CRDT key prefix
+
+Use the `rg:` prefix by convention:
+
+```ts
+const doc = client.rga("rg:document-42");
+```
