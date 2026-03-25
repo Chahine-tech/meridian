@@ -1,6 +1,6 @@
 # meridian-devtools
 
-## 2.0.0
+## 1.2.1
 
 ### Patch Changes
 
@@ -9,9 +9,9 @@
   Implements a convergent hierarchical tree CRDT based on Kleppmann et al. (2021). Supports addNode, moveNode, updateNode, and deleteNode operations with cycle detection, LWW value updates, and tombstone deletes. The `client.tree(id)` factory and `useTree()` React hook are now available.
 
 - Updated dependencies [3086c3d]
-  - meridian-sdk@1.3.0
+  - meridian-sdk@1.2.1
 
-## 2.0.0
+## 1.2.0
 
 ### Patch Changes
 
