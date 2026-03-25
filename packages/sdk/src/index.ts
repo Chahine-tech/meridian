@@ -13,6 +13,7 @@ export type {
   PresenceSnapshotEntry,
   CRDTMapSnapshotEntry,
   RGASnapshotEntry,
+  TreeSnapshotEntry,
 } from "./client.js";
 
 // CRDT handles
@@ -27,6 +28,8 @@ export type { CrdtMapValue } from "./crdt/crdtmap.js";
 export { AwarenessHandle } from "./crdt/awareness.js";
 export type { AwarenessEntry } from "./crdt/awareness.js";
 export { RGAHandle } from "./crdt/rga.js";
+export { TreeHandle } from "./crdt/tree.js";
+export type { TreeNodeValue, TreeDelta } from "./sync/delta.js";
 
 // Transport
 export { HttpClient } from "./transport/http.js";

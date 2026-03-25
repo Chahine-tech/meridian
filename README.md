@@ -114,6 +114,7 @@ client.close();
 | `Presence` | Who's online, visitor count | `pr:room` |
 | `CRDTMap` | Structured document with typed fields | `cm:doc` |
 | `RGA` | Ordered sequence — collaborative text editing | `rg:doc` |
+| `TreeCRDT` | Hierarchical tree — outlines, document trees, mind maps | `tr:outline` |
 
 ### Awareness
 

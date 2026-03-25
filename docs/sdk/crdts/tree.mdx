@@ -1,0 +1,114 @@
+---
+title: TreeCRDT
+description: Convergent hierarchical tree for collaborative outlines, document trees, and mind maps.
+---
+
+A TreeCRDT is a hierarchical CRDT where nodes can be added, moved, updated, and deleted concurrently across multiple clients. All replicas converge to the same tree without conflicts.
+
+Move operations use the algorithm from Kleppmann et al. (2021) — moves that would create cycles are silently discarded, and concurrent moves to different parents are resolved deterministically via Hybrid Logical Clock ordering.
+
+## Usage
+
+```ts
+const tree = client.tree("tr:outline");
+
+// Add root nodes
+const introId = tree.addNode(null, "a0", "Introduction");
+const ch1Id   = tree.addNode(null, "b0", "Chapter 1");
+
+// Add children
+const sectionId = tree.addNode(ch1Id, "a0", "Section 1.1");
+
+// Update a node value (last-write-wins)
+tree.updateNode(sectionId, "Section 1.1 — Overview");
+
+// Move a node to a new parent
+tree.moveNode(sectionId, introId, "a0");
+
+// Delete a node (tombstone — children preserved)
+tree.deleteNode(sectionId);
+
+// Read current tree
+const { roots } = tree.value();
+console.log(roots); // [{ id, value, children: [...] }]
+
+tree.onChange(({ roots }) => console.log("tree:", roots));
+```
+
+## React
+
+```tsx
+import { useTree } from "meridian-react";
+
+function Outline() {
+  const { roots, addNode, moveNode, updateNode, deleteNode } = useTree("tr:outline");
+
+  return (
+    <ul>
+      {roots.map(node => (
+        <li key={node.id}>
+          {node.value}
+          <button onClick={() => addNode(node.id, "z0", "New child")}>+</button>
+          <button onClick={() => deleteNode(node.id)}>×</button>
+        </li>
+      ))}
+      <button onClick={() => addNode(null, "a0", "New root")}>Add root</button>
+    </ul>
+  );
+}
+```
+
+## Effect stream
+
+```ts
+import { Stream, Effect } from "effect";
+
+await Effect.runPromise(
+  tree.stream().pipe(
+    Stream.runForEach(({ roots }) => Effect.log(`roots: ${roots.length}`))
+  )
+);
+```
+
+## Node IDs
+
+`addNode()` returns the new node's ID as a string (`"wall_ms:logical:node_id"`). Pass this ID to `moveNode()`, `updateNode()`, and `deleteNode()`.
+
+```ts
+const id = tree.addNode(null, "a0", "Root");
+tree.updateNode(id, "Root — updated");
+tree.moveNode(id, otherParentId, "b0");
+tree.deleteNode(id);
+```
+
+## Sibling ordering
+
+Siblings are ordered lexicographically by their `position` string, with ties broken by author ID descending. Use a fractional indexing scheme (e.g. `"a0"`, `"a0V"`, `"b0"`) to insert between existing siblings without rewriting all positions.
+
+## API
+
+| Method | Description |
+|--------|-------------|
+| `addNode(parentId, position, value, ttlMs?)` | Add a new node. Returns the new node ID. `parentId` is `null` for root nodes. |
+| `moveNode(nodeId, newParentId, newPosition, ttlMs?)` | Move node to a new parent and/or position. Cycle-creating moves are discarded. |
+| `updateNode(nodeId, value, ttlMs?)` | Update node value. Last-write-wins via HLC timestamp. |
+| `deleteNode(nodeId, ttlMs?)` | Tombstone-delete a node. Children are preserved. |
+| `value()` | Returns `{ roots: TreeNodeValue[] }` — the full visible tree. |
+| `onChange(fn)` | Subscribe — returns unsubscribe function. |
+| `stream()` | Returns an Effect `Stream<{ roots: TreeNodeValue[] }>` that emits on every change. |
+
+## Conflict semantics
+
+- **Concurrent adds** to the same parent converge — siblings are ordered by `(position, id desc)`
+- **Concurrent moves**: both moves apply in HLC order. The last move (highest `op_id`) wins for each node's parent pointer
+- **Cycle prevention**: a move that would place a node under its own descendant is silently discarded
+- **Tombstones**: deleted nodes are never GC'd — children are preserved and restored if a concurrent move targets a deleted parent
+- **Value updates**: last-write-wins via the `updated_at` HLC timestamp
+
+## CRDT key prefix
+
+Use the `tr:` prefix by convention:
+
+```ts
+const tree = client.tree("tr:document-outline");
+```

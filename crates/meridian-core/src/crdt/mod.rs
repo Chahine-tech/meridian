@@ -7,6 +7,7 @@ pub mod pncounter;
 pub mod presence;
 pub mod registry;
 pub mod rga;
+pub mod tree;
 
 pub use clock::{HybridLogicalClock, VectorClock};
 pub use crdtmap::CRDTMap;
@@ -17,6 +18,7 @@ pub use pncounter::PNCounter;
 pub use presence::Presence;
 pub use registry::CrdtValue;
 pub use rga::{Rga, RgaDelta, RgaOp};
+pub use tree::{TreeCrdt, TreeDelta, TreeOp};
 
 use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;

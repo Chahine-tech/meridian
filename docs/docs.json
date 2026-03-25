@@ -67,7 +67,8 @@
               "sdk/crdts/presence",
               "sdk/crdts/crdtmap",
               "sdk/crdts/awareness",
-              "sdk/crdts/rga"
+              "sdk/crdts/rga",
+              "sdk/crdts/tree"
             ]
           }
         ]

@@ -22,6 +22,7 @@ function CRDTRow({ entry, onSelect, selected }: { entry: CRDTSnapshotEntry; onSe
       case "presence":   return JSON.stringify({ online: entry.online });
       case "crdtmap":    return JSON.stringify({ value: entry.value });
       case "rga":        return JSON.stringify({ text: entry.text });
+      case "tree":       return JSON.stringify({ roots: entry.roots });
     }
   })();
 
