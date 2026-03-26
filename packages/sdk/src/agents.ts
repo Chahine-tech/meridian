@@ -1,18 +1,41 @@
 /**
- * Meridian × Anthropic Claude tool use helpers.
+ * Meridian AI agent tool use helpers.
  *
- * Generates Anthropic-compatible `Tool` definitions from a list of CRDT IDs
+ * Generates provider-compatible tool definitions from a list of CRDT IDs
  * and executes tool calls against a Meridian server via HTTP (no WebSocket).
  *
- * Usage:
+ * Supported providers:
+ * - Anthropic Claude — `getMeridianTools()` (default)
+ * - OpenAI GPT       — `toOpenAITools(getMeridianTools(...))`
+ * - Google Gemini    — `toGeminiTools(getMeridianTools(...))`
+ *
+ * Usage (Anthropic):
  * ```ts
  * import { getMeridianTools, executeMeridianTool } from "meridian-sdk";
  *
- * const tools = getMeridianTools({ baseUrl, token, namespace, crdtIds: ["counter", "tasks"] });
+ * const tools = getMeridianTools(config, ["counter", "tasks"]);
+ * // Pass to Anthropic messages.create({ tools })
+ * const result = await executeMeridianTool(config, toolUseBlock);
+ * ```
  *
- * // Pass tools to Anthropic messages.create(...)
- * // Then for each tool_use block in the response:
- * const result = await executeMeridianTool({ baseUrl, token, namespace }, toolUseBlock);
+ * Usage (OpenAI):
+ * ```ts
+ * import { getMeridianTools, toOpenAITools, executeOpenAITool } from "meridian-sdk";
+ *
+ * const tools = toOpenAITools(getMeridianTools(config, ["counter", "tasks"]));
+ * // Pass to openai.chat.completions.create({ tools })
+ * // For each tool_call in the response — pass directly, no wrapping:
+ * const result = await executeOpenAITool(config, call);
+ * ```
+ *
+ * Usage (Gemini):
+ * ```ts
+ * import { getMeridianTools, toGeminiTools, executeGeminiTool } from "meridian-sdk";
+ *
+ * const tools = toGeminiTools(getMeridianTools(config, ["counter", "tasks"]));
+ * // Pass to model.generateContent({ tools })
+ * // For each functionCall part — pass directly, no wrapping:
+ * const result = await executeGeminiTool(config, part.functionCall);
  * ```
  */
 
@@ -28,11 +51,122 @@ export interface Tool {
   };
 }
 
+// ---------------------------------------------------------------------------
+// OpenAI adapter
+// ---------------------------------------------------------------------------
+
+/** OpenAI-compatible tool definition (Chat Completions `tools` array entry). */
+export interface OpenAITool {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: {
+      type: "object";
+      properties: Record<string, { type: string; description: string }>;
+      required?: string[];
+    };
+  };
+}
+
+/**
+ * Convert Meridian tools to OpenAI Chat Completions format.
+ *
+ * ```ts
+ * const tools = toOpenAITools(getMeridianTools(config, crdtIds));
+ * // openai.chat.completions.create({ tools })
+ * ```
+ */
+export function toOpenAITools(tools: Tool[]): OpenAITool[] {
+  return tools.map(t => ({
+    type: "function",
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: {
+        type: "object",
+        properties: t.input_schema.properties,
+        ...(t.input_schema.required ? { required: t.input_schema.required } : {}),
+      },
+    },
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Gemini adapter
+// ---------------------------------------------------------------------------
+
+/** Gemini FunctionDeclaration (single entry inside a `Tool.functionDeclarations` array). */
+export interface GeminiFunctionDeclaration {
+  name: string;
+  description: string;
+  parameters: {
+    type: "OBJECT";
+    properties: Record<string, { type: string; description: string }>;
+    required?: string[];
+  };
+}
+
+/** Gemini `Tool` wrapper passed to `model.generateContent({ tools })`. */
+export interface GeminiTool {
+  functionDeclarations: GeminiFunctionDeclaration[];
+}
+
+/**
+ * Convert Meridian tools to Google Gemini format.
+ *
+ * ```ts
+ * const tools = toGeminiTools(getMeridianTools(config, crdtIds));
+ * // model.generateContent({ tools })
+ * ```
+ */
+export function toGeminiTools(tools: Tool[]): GeminiTool {
+  return {
+    functionDeclarations: tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      parameters: {
+        type: "OBJECT",
+        properties: t.input_schema.properties,
+        ...(t.input_schema.required ? { required: t.input_schema.required } : {}),
+      },
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Provider-specific input types (structural matches — no provider SDK deps)
+// ---------------------------------------------------------------------------
+
+/** Anthropic tool_use block — matches `ContentBlock` from `@anthropic-ai/sdk`. */
 export interface ToolUseBlock {
   type: "tool_use";
   id: string;
   name: string;
   input: Record<string, unknown>;
+}
+
+/**
+ * OpenAI tool call — structurally matches `ChatCompletionMessageToolCall`
+ * from the `openai` package. Pass directly from `response.choices[0].message.tool_calls`.
+ */
+export interface OpenAIToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    /** JSON-encoded arguments string, as returned by the OpenAI API. */
+    arguments: string;
+  };
+}
+
+/**
+ * Gemini function call — structurally matches `FunctionCall` from
+ * `@google/generative-ai`. Pass directly from `part.functionCall`.
+ */
+export interface GeminiFunctionCall {
+  name: string;
+  args: Record<string, unknown>;
 }
 
 export interface MeridianAgentConfig {
@@ -114,19 +248,21 @@ export function getMeridianTools(
   return tools;
 }
 
+// ---------------------------------------------------------------------------
+// Shared dispatcher (private)
+// ---------------------------------------------------------------------------
+
 /**
- * Execute a Meridian tool call returned by Claude.
- *
- * Returns a JSON string suitable for the `content` field of a `tool_result` block.
+ * Core dispatch logic — routes a (name, input) pair to the right HTTP operation.
+ * All provider-specific executors delegate here.
  */
-export async function executeMeridianTool(
+async function dispatchTool(
   config: MeridianAgentConfig,
-  toolUse: ToolUseBlock,
+  name: string,
+  input: Record<string, unknown>,
 ): Promise<string> {
   const { baseUrl, token, namespace } = config;
-  const { name, input } = toolUse;
 
-  // Detect operation type and crdt_id from tool name
   const readMatch = name.match(/^meridian_read_(.+)$/);
   const incrementMatch = name.match(/^meridian_increment_(.+)$/);
   const setMatch = name.match(/^meridian_set_(.+)$/);
@@ -156,7 +292,7 @@ export async function executeMeridianTool(
   if (addMatch?.[1]) {
     const crdtId = addMatch[1].replace(/_/g, "-");
     // Always store as a string so useORSet<string> can read it back directly.
-    // If Claude passes a JSON object, re-serialize it to a stable string.
+    // If the model passes a JSON object, re-serialize it to a stable string.
     const rawEl = input.element;
     const element: string = typeof rawEl === "string" ? rawEl : JSON.stringify(rawEl ?? null);
     const clientId = Number(input.client_id ?? 1);
@@ -164,6 +300,79 @@ export async function executeMeridianTool(
   }
 
   return JSON.stringify({ error: `Unknown tool: ${name}` });
+}
+
+// ---------------------------------------------------------------------------
+// Provider executors
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute a Meridian tool call returned by **Anthropic Claude**.
+ *
+ * Returns a JSON string suitable for the `content` field of a `tool_result` block.
+ *
+ * ```ts
+ * for (const block of response.content) {
+ *   if (block.type === "tool_use") {
+ *     const result = await executeMeridianTool(config, block);
+ *     toolResults.push({ type: "tool_result", tool_use_id: block.id, content: result });
+ *   }
+ * }
+ * ```
+ */
+export async function executeMeridianTool(
+  config: MeridianAgentConfig,
+  toolUse: ToolUseBlock,
+): Promise<string> {
+  return dispatchTool(config, toolUse.name, toolUse.input);
+}
+
+/**
+ * Execute a Meridian tool call returned by **OpenAI**.
+ *
+ * Pass `tool_call` directly from `response.choices[0].message.tool_calls` —
+ * no wrapping required. Returns a JSON string for the `tool` role message content.
+ *
+ * ```ts
+ * for (const call of response.choices[0].message.tool_calls ?? []) {
+ *   const result = await executeOpenAITool(config, call);
+ *   messages.push({ role: "tool", tool_call_id: call.id, content: result });
+ * }
+ * ```
+ */
+export async function executeOpenAITool(
+  config: MeridianAgentConfig,
+  toolCall: OpenAIToolCall,
+): Promise<string> {
+  let input: Record<string, unknown>;
+  try {
+    input = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
+  } catch {
+    return JSON.stringify({ error: "Failed to parse tool call arguments" });
+  }
+  return dispatchTool(config, toolCall.function.name, input);
+}
+
+/**
+ * Execute a Meridian tool call returned by **Google Gemini**.
+ *
+ * Pass `part.functionCall` directly — no wrapping, no id hack required.
+ * Returns a JSON string for the `functionResponse` part content.
+ *
+ * ```ts
+ * for (const part of response.candidates?.[0].content.parts ?? []) {
+ *   if (part.functionCall) {
+ *     const result = await executeGeminiTool(config, part.functionCall);
+ *     // pass result back as functionResponse part
+ *   }
+ * }
+ * ```
+ */
+export async function executeGeminiTool(
+  config: MeridianAgentConfig,
+  functionCall: GeminiFunctionCall,
+): Promise<string> {
+  return dispatchTool(config, functionCall.name, functionCall.args);
 }
 
 async function readCrdt(

@@ -42,6 +42,10 @@ fn json_depth(v: &JsonValue) -> u32 {
 pub struct ORSet {
     /// element_key → set of live add-tags
     pub entries: HashMap<String, HashSet<Uuid>>,
+    /// tag → (node_id, logical_seq) — used for delta_since filtering.
+    /// Populated on Add; entries removed when the tag is removed.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub tag_versions: HashMap<Uuid, (u64, u32)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -50,6 +54,12 @@ pub enum ORSetOp {
     Add {
         element: JsonValue,
         tag: Uuid,
+        /// Node (client) ID of the author — used for delta_since VectorClock tracking.
+        #[serde(default)]
+        node_id: u64,
+        /// Logical sequence number from the author's local counter — used for delta_since.
+        #[serde(default)]
+        seq: u32,
     },
     /// Remove an element — carries snapshot of tags known at remove-time.
     Remove {
@@ -67,6 +77,9 @@ pub struct ORSetDelta {
     pub adds: HashMap<String, HashSet<Uuid>>,
     /// element_key → tags to remove (tombstones)
     pub removes: HashMap<String, HashSet<Uuid>>,
+    /// tag → (node_id, seq) version info for added tags — propagated for delta tracking.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub tag_versions: HashMap<Uuid, (u64, u32)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -88,7 +101,7 @@ impl Crdt for ORSet {
 
     fn apply(&mut self, op: ORSetOp) -> Result<Option<ORSetDelta>, CrdtError> {
         match op {
-            ORSetOp::Add { element, tag } => {
+            ORSetOp::Add { element, tag, node_id, seq } => {
                 if json_depth(&element) > MAX_ELEMENT_DEPTH {
                     return Err(CrdtError::InvalidOp(format!(
                         "ORSet element nesting depth {} exceeds maximum {}",
@@ -102,13 +115,18 @@ impl Crdt for ORSet {
                     return Ok(None); // already present — idempotent
                 }
                 tags.insert(tag);
+                // Track version for delta_since filtering.
+                self.tag_versions.insert(tag, (node_id, seq));
 
                 let mut adds = HashMap::new();
                 let mut add_tags = HashSet::new();
                 add_tags.insert(tag);
                 adds.insert(key, add_tags);
 
-                Ok(Some(ORSetDelta { adds, removes: HashMap::new() }))
+                let mut tag_versions = HashMap::new();
+                tag_versions.insert(tag, (node_id, seq));
+
+                Ok(Some(ORSetDelta { adds, removes: HashMap::new(), tag_versions }))
             }
 
             ORSetOp::Remove { element, known_tags } => {
@@ -130,9 +148,14 @@ impl Crdt for ORSet {
                     return Ok(None);
                 }
 
+                // Clean up tag_versions for removed tags.
+                for t in &actually_removed {
+                    self.tag_versions.remove(t);
+                }
+
                 let mut removes = HashMap::new();
                 removes.insert(key, actually_removed);
-                Ok(Some(ORSetDelta { adds: HashMap::new(), removes }))
+                Ok(Some(ORSetDelta { adds: HashMap::new(), removes, tag_versions: HashMap::new() }))
             }
         }
     }
@@ -144,23 +167,31 @@ impl Crdt for ORSet {
                 my_tags.insert(*tag);
             }
         }
+        // Merge tag_versions from the other replica.
+        for (tag, version) in &other.tag_versions {
+            self.tag_versions.entry(*tag).or_insert(*version);
+        }
         // Remove entries that ended up empty (defensive — shouldn't happen in practice).
         self.entries.retain(|_, tags| !tags.is_empty());
     }
 
     fn merge_delta(&mut self, delta: ORSetDelta) {
-        // Apply adds first
+        // Apply adds first, propagating version info.
         for (key, add_tags) in delta.adds {
             let tags = self.entries.entry(key).or_default();
             for tag in add_tags {
                 tags.insert(tag);
             }
         }
-        // Then removes
+        for (tag, version) in delta.tag_versions {
+            self.tag_versions.entry(tag).or_insert(version);
+        }
+        // Then removes — clean up tag_versions too.
         for (key, remove_tags) in delta.removes {
             if let Some(tags) = self.entries.get_mut(&key) {
-                for tag in remove_tags {
-                    tags.remove(&tag);
+                for tag in &remove_tags {
+                    tags.remove(tag);
+                    self.tag_versions.remove(tag);
                 }
                 if tags.is_empty() {
                     self.entries.remove(&key);
@@ -169,18 +200,44 @@ impl Crdt for ORSet {
         }
     }
 
-    fn delta_since(&self, _since: &VectorClock) -> Option<ORSetDelta> {
-        // Conservative: return full add-set as delta.
-        // A more precise implementation would track per-tag timestamps.
-        if self.entries.is_empty() {
-            return None;
+    fn delta_since(&self, since: &VectorClock) -> Option<ORSetDelta> {
+        // Include only tags the receiver hasn't seen yet, based on VectorClock.
+        // A tag is "unseen" if its (node_id, seq) is not covered by `since`:
+        //   since.get(node_id) < seq  →  receiver hasn't seen this add yet.
+        //
+        // Tags without version info (added by old clients before this field existed)
+        // are always included conservatively.
+        let mut adds: HashMap<String, HashSet<Uuid>> = HashMap::new();
+        let mut tag_versions: HashMap<Uuid, (u64, u32)> = HashMap::new();
+
+        for (key, tags) in &self.entries {
+            let unseen: HashSet<Uuid> = tags
+                .iter()
+                .filter(|tag| {
+                    match self.tag_versions.get(tag) {
+                        // No version info — include conservatively (old wire format).
+                        None => true,
+                        Some(&(node_id, seq)) => since.get(node_id) < seq,
+                    }
+                })
+                .copied()
+                .collect();
+
+            if !unseen.is_empty() {
+                for tag in &unseen {
+                    if let Some(&v) = self.tag_versions.get(tag) {
+                        tag_versions.insert(*tag, v);
+                    }
+                }
+                adds.insert(key.clone(), unseen);
+            }
         }
-        let adds: HashMap<String, HashSet<Uuid>> = self
-            .entries
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        Some(ORSetDelta { adds, removes: HashMap::new() })
+
+        if adds.is_empty() {
+            None
+        } else {
+            Some(ORSetDelta { adds, removes: HashMap::new(), tag_versions })
+        }
     }
 
     fn value(&self) -> ORSetValue {
@@ -206,6 +263,8 @@ mod tests {
         ORSetOp::Add {
             element: JsonValue::String(val.to_string()),
             tag: Uuid::new_v4(),
+            node_id: 1,
+            seq: 1,
         }
     }
 
@@ -322,23 +381,23 @@ mod tests {
     #[test]
     fn add_scalar_accepted() {
         let mut s = ORSet::default();
-        assert!(s.apply(ORSetOp::Add { element: JsonValue::Number(42.into()), tag: Uuid::new_v4() }).is_ok());
-        assert!(s.apply(ORSetOp::Add { element: JsonValue::String("ok".into()), tag: Uuid::new_v4() }).is_ok());
-        assert!(s.apply(ORSetOp::Add { element: JsonValue::Bool(true), tag: Uuid::new_v4() }).is_ok());
+        assert!(s.apply(ORSetOp::Add { element: JsonValue::Number(42.into()), tag: Uuid::new_v4(), node_id: 1, seq: 1 }).is_ok());
+        assert!(s.apply(ORSetOp::Add { element: JsonValue::String("ok".into()), tag: Uuid::new_v4(), node_id: 1, seq: 2 }).is_ok());
+        assert!(s.apply(ORSetOp::Add { element: JsonValue::Bool(true), tag: Uuid::new_v4(), node_id: 1, seq: 3 }).is_ok());
     }
 
     #[test]
     fn add_shallow_array_accepted() {
         let mut s = ORSet::default();
         let arr = JsonValue::Array(vec![JsonValue::Number(1.into()), JsonValue::String("x".into())]);
-        assert!(s.apply(ORSetOp::Add { element: arr, tag: Uuid::new_v4() }).is_ok());
+        assert!(s.apply(ORSetOp::Add { element: arr, tag: Uuid::new_v4(), node_id: 1, seq: 1 }).is_ok());
     }
 
     #[test]
     fn add_nested_array_rejected() {
         let mut s = ORSet::default();
         let nested = JsonValue::Array(vec![JsonValue::Array(vec![JsonValue::Number(1.into())])]);
-        let result = s.apply(ORSetOp::Add { element: nested, tag: Uuid::new_v4() });
+        let result = s.apply(ORSetOp::Add { element: nested, tag: Uuid::new_v4(), node_id: 1, seq: 1 });
         assert!(result.is_err());
     }
 
@@ -349,7 +408,55 @@ mod tests {
         inner.insert("x".into(), JsonValue::Number(1.into()));
         let mut outer = serde_json::Map::new();
         outer.insert("nested".into(), JsonValue::Object(inner));
-        let result = s.apply(ORSetOp::Add { element: JsonValue::Object(outer), tag: Uuid::new_v4() });
+        let result = s.apply(ORSetOp::Add { element: JsonValue::Object(outer), tag: Uuid::new_v4(), node_id: 1, seq: 1 });
         assert!(result.is_err());
+    }
+
+    // --- delta_since ---
+
+    #[test]
+    fn delta_since_returns_only_unseen_adds() {
+        use crate::crdt::VectorClock;
+
+        let mut s = ORSet::default();
+        // Node 1 adds "apple" at seq=1, "banana" at seq=2
+        s.apply(ORSetOp::Add { element: JsonValue::String("apple".into()), tag: Uuid::new_v4(), node_id: 1, seq: 1 }).unwrap();
+        s.apply(ORSetOp::Add { element: JsonValue::String("banana".into()), tag: Uuid::new_v4(), node_id: 1, seq: 2 }).unwrap();
+
+        // Receiver has already seen node_id=1 up to seq=1 — only "banana" (seq=2) is new.
+        let mut seen = VectorClock::new();
+        seen.entries.insert(1, 1);
+
+        let delta = s.delta_since(&seen).unwrap();
+        assert!(!delta.adds.contains_key(&element_key(&JsonValue::String("apple".into()))),
+            "apple was already seen — should not be in delta");
+        assert!(delta.adds.contains_key(&element_key(&JsonValue::String("banana".into()))),
+            "banana is new — must be in delta");
+    }
+
+    #[test]
+    fn delta_since_empty_when_all_seen() {
+        use crate::crdt::VectorClock;
+
+        let mut s = ORSet::default();
+        s.apply(ORSetOp::Add { element: JsonValue::String("x".into()), tag: Uuid::new_v4(), node_id: 1, seq: 1 }).unwrap();
+
+        let mut seen = VectorClock::new();
+        seen.entries.insert(1, 1);
+
+        assert!(s.delta_since(&seen).is_none(), "nothing new — delta should be None");
+    }
+
+    #[test]
+    fn delta_since_full_state_when_vc_empty() {
+        use crate::crdt::VectorClock;
+
+        let mut s = ORSet::default();
+        s.apply(ORSetOp::Add { element: JsonValue::String("a".into()), tag: Uuid::new_v4(), node_id: 1, seq: 1 }).unwrap();
+        s.apply(ORSetOp::Add { element: JsonValue::String("b".into()), tag: Uuid::new_v4(), node_id: 2, seq: 1 }).unwrap();
+
+        let seen = VectorClock::new(); // empty — receiver has seen nothing
+        let delta = s.delta_since(&seen).unwrap();
+        assert_eq!(delta.adds.len(), 2, "empty VC → both elements should be in delta");
     }
 }

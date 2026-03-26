@@ -182,11 +182,6 @@ async fn handle_client_message<S: WsState>(
         }
 
         ClientMsg::Op { crdt_id, op_bytes, ttl_ms, client_seq } => {
-            if !claims.can_write_key(&crdt_id) {
-                send_error(socket, 403, "insufficient permissions for key").await;
-                return true;
-            }
-
             let op: CrdtOp = match rmp_serde::decode::from_slice(&op_bytes) {
                 Ok(o) => o,
                 Err(e) => {
@@ -195,6 +190,12 @@ async fn handle_client_message<S: WsState>(
                     return true;
                 }
             };
+
+            // Single permission check: V1 uses key-level glob, V2 uses op-level mask.
+            if !claims.can_write_key_op(&crdt_id, op.op_mask()) {
+                send_error(socket, 403, "op not permitted by token").await;
+                return true;
+            }
 
             match apply_op_atomic(state.store(), ns, &crdt_id, op, ttl_ms).await {
                 Ok(Some(delta_bytes)) => {
@@ -258,10 +259,6 @@ async fn handle_client_message<S: WsState>(
             struct Parsed { crdt_id: String, op: CrdtOp, ttl_ms: Option<u64> }
             let mut parsed: Vec<Parsed> = Vec::with_capacity(ops.len());
             for BatchItem { crdt_id, op_bytes, ttl_ms } in ops {
-                if !claims.can_write_key(&crdt_id) {
-                    send_error(socket, 403, "insufficient permissions for key").await;
-                    return true;
-                }
                 let op: CrdtOp = match rmp_serde::decode::from_slice(&op_bytes) {
                     Ok(o) => o,
                     Err(e) => {
@@ -272,6 +269,11 @@ async fn handle_client_message<S: WsState>(
                 };
                 if let Err(e) = validate_clock_drift(&op, server_now) {
                     send_error(socket, 400, &format!("batch: {crdt_id}: {e}")).await;
+                    return true;
+                }
+                // Single permission check: V1 uses key-level glob, V2 uses op-level mask.
+                if !claims.can_write_key_op(&crdt_id, op.op_mask()) {
+                    send_error(socket, 403, &format!("batch: op not permitted on {crdt_id}")).await;
                     return true;
                 }
                 parsed.push(Parsed { crdt_id, op, ttl_ms });

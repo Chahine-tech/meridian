@@ -21,11 +21,34 @@ export const ClientId = Schema.Union(Schema.Number, Schema.BigIntFromSelf.pipe(S
 )));
 export type ClientId = number;
 
-export const Permissions = Schema.Struct({
+/** V1 permissions — glob-list style (legacy tokens). */
+export const PermissionsV1 = Schema.Struct({
   read: Schema.Array(Schema.String),
   write: Schema.Array(Schema.String),
   admin: Schema.Boolean,
 });
+export type PermissionsV1 = typeof PermissionsV1.Type;
+
+/** A single permission rule in a V2 token. */
+export const PermEntry = Schema.Struct({
+  p: Schema.String,
+  o: Schema.optional(Schema.Number),
+  e: Schema.optional(Schema.Number),
+});
+export type PermEntry = typeof PermEntry.Type;
+
+/** V2 fine-grained permissions. */
+export const PermissionsV2 = Schema.Struct({
+  v: Schema.Literal(2),
+  r: Schema.Array(PermEntry),
+  w: Schema.Array(PermEntry),
+  admin: Schema.Boolean,
+  rl: Schema.optional(Schema.Number),
+});
+export type PermissionsV2 = typeof PermissionsV2.Type;
+
+/** Token permissions — V1 or V2. */
+export const Permissions = Schema.Union(PermissionsV2, PermissionsV1);
 export type Permissions = typeof Permissions.Type;
 
 export const TokenClaims = Schema.Struct({

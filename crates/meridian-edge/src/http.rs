@@ -1,5 +1,6 @@
 use meridian_core::{
     auth::{Permissions, TokenClaims, TokenSigner},
+    crdt::registry::CrdtOp,
     namespace::NamespaceId,
 };
 use serde::Deserialize;
@@ -52,6 +53,13 @@ pub async fn post_op(mut req: Request, ctx: RouteContext<()>) -> worker::Result<
         .and_then(|(_, v)| v.parse().ok());
 
     let body = req.bytes().await?;
+
+    // Op-level permission check (V2 tokens).
+    if let Ok(op) = rmp_serde::decode::from_slice::<CrdtOp>(&body)
+        && !claims.can_write_key_op(&id, op.op_mask())
+    {
+        return Response::error("op not permitted by token", 403);
+    }
 
     let mut do_url = format!("http://do/{ns}/op?crdt_id={id}");
     if let Some(ms) = ttl_ms {

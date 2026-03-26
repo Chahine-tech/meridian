@@ -61,7 +61,7 @@ pub async fn post_op<S: AppStateExt>(
     State(state): State<S>,
     body: axum::body::Bytes,
 ) -> Response {
-    if claims.namespace != ns || !claims.can_write_key(&id) {
+    if claims.namespace != ns {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -75,6 +75,15 @@ pub async fn post_op<S: AppStateExt>(
                 .into_response();
         }
     };
+
+    // For V1 tokens: key-level glob check. For V2: op-level mask check (subsumes key check).
+    if !claims.can_write_key_op(&id, op.op_mask()) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "op_not_permitted", "detail": "token does not allow this operation on this key" })),
+        )
+            .into_response();
+    }
 
     // Validate HLC clock drift for LwwRegister ops (piège critique)
     if let CrdtOp::LwwRegister(ref lww_op) = op {

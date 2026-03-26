@@ -235,11 +235,11 @@ proptest! {
     ) {
         let mut a = ORSet::default();
         for el in &adds_a {
-            let _ = a.apply(ORSetOp::Add { element: el.clone(), tag: Uuid::new_v4() });
+            let _ = a.apply(ORSetOp::Add { element: el.clone(), tag: Uuid::new_v4(), node_id: 1, seq: 1 });
         }
         let mut b = ORSet::default();
         for el in &adds_b {
-            let _ = b.apply(ORSetOp::Add { element: el.clone(), tag: Uuid::new_v4() });
+            let _ = b.apply(ORSetOp::Add { element: el.clone(), tag: Uuid::new_v4(), node_id: 1, seq: 1 });
         }
 
         let mut ab = a.clone(); ab.merge(&b);
@@ -258,7 +258,7 @@ proptest! {
     ) {
         let mut a = ORSet::default();
         for el in &adds {
-            let _ = a.apply(ORSetOp::Add { element: el.clone(), tag: Uuid::new_v4() });
+            let _ = a.apply(ORSetOp::Add { element: el.clone(), tag: Uuid::new_v4(), node_id: 1, seq: 1 });
         }
         let copy = a.clone();
         a.merge(&copy);
@@ -276,7 +276,7 @@ proptest! {
         // Classic add-wins scenario: concurrent add and remove should leave element present.
         let mut base = ORSet::default();
         let initial_tag = Uuid::new_v4();
-        base.apply(ORSetOp::Add { element: element.clone(), tag: initial_tag }).unwrap();
+        base.apply(ORSetOp::Add { element: element.clone(), tag: initial_tag, node_id: 1, seq: 1 }).unwrap();
 
         let mut node_a = base.clone(); // will remove
         let mut node_b = base.clone(); // will add concurrently
@@ -287,7 +287,7 @@ proptest! {
         node_a.apply(ORSetOp::Remove { element: element.clone(), known_tags: known }).unwrap();
 
         // B adds with a fresh tag (concurrent — A doesn't know about it)
-        node_b.apply(ORSetOp::Add { element: element.clone(), tag: Uuid::new_v4() }).unwrap();
+        node_b.apply(ORSetOp::Add { element: element.clone(), tag: Uuid::new_v4(), node_id: 2, seq: 1 }).unwrap();
 
         // Merge: B's new tag survives A's remove
         node_a.merge(&node_b);
@@ -301,7 +301,7 @@ proptest! {
     ) {
         let mut s = ORSet::default();
         let nested = JsonValue::Array(vec![JsonValue::Array(vec![inner])]);
-        prop_assert!(s.apply(ORSetOp::Add { element: nested, tag: Uuid::new_v4() }).is_err(),
+        prop_assert!(s.apply(ORSetOp::Add { element: nested, tag: Uuid::new_v4(), node_id: 1, seq: 1 }).is_err(),
             "nested arrays must be rejected by apply()");
     }
 }

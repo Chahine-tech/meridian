@@ -47,7 +47,7 @@ A floating **M** button appears in the bottom-right corner. Click it to toggle t
 - WebSocket state: `CONNECTED`, `CONNECTING`, `DISCONNECTED`, or `CLOSING`
 - Current namespace and client ID
 - Pending ops count — non-zero when disconnected with buffered writes
-- Op latency — P50 and P99 round-trip time in ms, updated every second once at least 2 samples have been collected. P99 turns red above 200ms.
+- Op latency — P50 and P99 round-trip time in ms, updated every second once at least one op has been sent. P99 turns red above 200ms.
 
 **CRDTs tab**
 
@@ -61,6 +61,8 @@ All active handles are listed with their current value as JSON, color-coded by t
 | Violet | `lwwregister` |
 | Pink | `presence` |
 | Green | `crdtmap` |
+| Orange | `rga` |
+| Sky | `tree` |
 
 Click a row to select it — the selection carries over to the History tab.
 

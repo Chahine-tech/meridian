@@ -231,6 +231,44 @@ impl CrdtOp {
             Self::Tree(_)        => CrdtType::Tree,
         }
     }
+
+    /// Returns the op-level permission mask for this op.
+    ///
+    /// Used by the granular permissions system (V2 tokens) to check whether
+    /// a token is allowed to perform this specific operation on a CRDT key.
+    pub fn op_mask(&self) -> crate::auth::claims::OpMask {
+        use crate::auth::claims::op_masks;
+        use crate::crdt::{
+            orset::ORSetOp,
+            pncounter::PNCounterOp,
+            rga::RgaOp,
+            tree::TreeOp,
+        };
+        match self {
+            Self::GCounter(_)    => op_masks::GC_INCREMENT,
+            Self::PNCounter(op)  => match op {
+                PNCounterOp::Increment { .. } => op_masks::PN_INCREMENT,
+                PNCounterOp::Decrement { .. } => op_masks::PN_DECREMENT,
+            },
+            Self::ORSet(op) => match op {
+                ORSetOp::Add { .. }    => op_masks::OR_ADD,
+                ORSetOp::Remove { .. } => op_masks::OR_REMOVE,
+            },
+            Self::LwwRegister(_) => op_masks::LWW_SET,
+            Self::Presence(_)    => op_masks::PRESENCE_UPDATE,
+            Self::CRDTMap(_)     => op_masks::MAP_WRITE,
+            Self::RGA(op) => match op {
+                RgaOp::Insert { .. } => op_masks::RGA_INSERT,
+                RgaOp::Delete { .. } => op_masks::RGA_DELETE,
+            },
+            Self::Tree(op) => match op {
+                TreeOp::AddNode { .. }    => op_masks::TREE_ADD,
+                TreeOp::MoveNode { .. }   => op_masks::TREE_MOVE,
+                TreeOp::UpdateNode { .. } => op_masks::TREE_UPDATE,
+                TreeOp::DeleteNode { .. } => op_masks::TREE_DELETE,
+            },
+        }
+    }
 }
 
 /// Maximum allowed clock drift between a client HLC and the server wall clock.

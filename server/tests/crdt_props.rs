@@ -279,7 +279,7 @@ fn str_val(s: &str) -> JsonValue {
 }
 
 fn orset_add(val: &str) -> ORSetOp {
-    ORSetOp::Add { element: str_val(val), tag: Uuid::new_v4() }
+    ORSetOp::Add { element: str_val(val), tag: Uuid::new_v4(), node_id: 1, seq: 1 }
 }
 
 fn orset_remove_all(s: &ORSet, val: &str) -> ORSetOp {
