@@ -32,8 +32,12 @@ impl RateLimiter {
     }
 
     /// Returns `true` if the request is allowed, `false` if rate-limited.
+    ///
+    /// `limit` overrides the default `RATE_LIMIT_MAX_REQUESTS` for this check.
+    /// Pass `None` to use the server default.
     #[must_use]
-    pub fn check(&self, key: &str) -> bool {
+    pub fn check(&self, key: &str, limit: Option<usize>) -> bool {
+        let max = limit.unwrap_or(RATE_LIMIT_MAX_REQUESTS);
         let now = Instant::now();
         let cutoff = now - RATE_LIMIT_WINDOW;
 
@@ -41,7 +45,7 @@ impl RateLimiter {
         // Drop timestamps outside the window.
         entry.retain(|&timestamp| timestamp > cutoff);
 
-        if entry.len() >= RATE_LIMIT_MAX_REQUESTS {
+        if entry.len() >= max {
             return false;
         }
 
@@ -58,7 +62,7 @@ mod tests {
     fn allows_requests_under_limit() {
         let limiter = RateLimiter::new();
         for _ in 0..99 {
-            assert!(limiter.check("client:ns"));
+            assert!(limiter.check("client:ns", None));
         }
     }
 
@@ -66,18 +70,27 @@ mod tests {
     fn blocks_requests_over_limit() {
         let limiter = RateLimiter::new();
         for _ in 0..100 {
-            let _ = limiter.check("client:ns");
+            let _ = limiter.check("client:ns", None);
         }
-        assert!(!limiter.check("client:ns"));
+        assert!(!limiter.check("client:ns", None));
     }
 
     #[test]
     fn different_keys_are_independent() {
         let limiter = RateLimiter::new();
         for _ in 0..100 {
-            let _ = limiter.check("client-a:ns");
+            let _ = limiter.check("client-a:ns", None);
         }
-        assert!(!limiter.check("client-a:ns"));
-        assert!(limiter.check("client-b:ns"));
+        assert!(!limiter.check("client-a:ns", None));
+        assert!(limiter.check("client-b:ns", None));
+    }
+
+    #[test]
+    fn custom_limit_respected() {
+        let limiter = RateLimiter::new();
+        for _ in 0..5 {
+            assert!(limiter.check("client:ns", Some(5)));
+        }
+        assert!(!limiter.check("client:ns", Some(5)));
     }
 }

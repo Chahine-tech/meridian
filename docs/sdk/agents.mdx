@@ -1,18 +1,23 @@
 ---
 title: AI Agents
-description: Use Meridian CRDTs as shared state for Claude AI agents via HTTP tool use.
+description: Use Meridian CRDTs as shared state for AI agents — Anthropic, OpenAI, and Gemini.
 ---
 
-Meridian ships a built-in integration for [Anthropic Claude tool use](https://docs.anthropic.com/en/docs/tool-use). Stateless agents (serverless functions, Lambda, Cloudflare Workers) can read and write CRDTs via pure HTTP — no persistent WebSocket required.
+Meridian ships built-in tool use helpers for AI agents. Stateless agents (serverless functions, Lambda, Cloudflare Workers) can read and write CRDTs via pure HTTP — no persistent WebSocket required.
 
-<Note>
-  The `getMeridianTools` / `executeMeridianTool` helpers currently return **Anthropic-compatible** tool definitions. OpenAI and Gemini adapters are planned — see the [Roadmap](https://github.com/Chahine-tech/meridian/blob/main/ROADMAP.md).
-</Note>
+`getMeridianTools()` returns Anthropic-compatible tool definitions by default. Use `toOpenAITools()` or `toGeminiTools()` to convert to the format expected by OpenAI or Gemini.
 
 ## Install
 
 ```bash
+# Anthropic
 npm install meridian-sdk @anthropic-ai/sdk
+
+# OpenAI
+npm install meridian-sdk openai
+
+# Gemini
+npm install meridian-sdk @google/generative-ai
 ```
 
 ## Quick start
@@ -64,6 +69,55 @@ while (true) {
 }
 ```
 
+## OpenAI
+
+```ts
+import OpenAI from "openai";
+import { getMeridianTools, toOpenAITools, executeOpenAITool } from "meridian-sdk";
+
+const openai = new OpenAI();
+const tools = toOpenAITools(getMeridianTools(config, ["views", "notes", "tags"]));
+
+const response = await openai.chat.completions.create({
+  model: "gpt-4o",
+  tools,
+  messages: [{ role: "user", content: "Increment views and update notes." }],
+});
+
+const msg = response.choices[0].message;
+const toolResults = [];
+
+for (const call of msg.tool_calls ?? []) {
+  // Pass call directly — no wrapping needed
+  const result = await executeOpenAITool(config, call);
+  toolResults.push({ role: "tool", tool_call_id: call.id, content: result });
+}
+```
+
+## Gemini
+
+```ts
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getMeridianTools, toGeminiTools, executeGeminiTool } from "meridian-sdk";
+
+const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const model = genai.getGenerativeModel({
+  model: "gemini-1.5-pro",
+  tools: [toGeminiTools(getMeridianTools(config, ["views", "notes", "tags"]))],
+});
+
+const result = await model.generateContent("Increment views and update notes.");
+const parts = result.response.candidates?.[0].content.parts ?? [];
+
+for (const part of parts) {
+  if (part.functionCall) {
+    // Pass part.functionCall directly — no id hack, no wrapping
+    const toolResult = await executeGeminiTool(config, part.functionCall);
+    // pass toolResult back as functionResponse part
+  }
+}
+```
+
 ## `getMeridianTools`
 
 ```ts
@@ -100,6 +154,44 @@ Dispatches to the correct HTTP endpoint based on the tool name:
 - `increment` → `POST /v1/namespaces/:ns/crdts/:id/ops` (GCounter or PNCounter op)
 - `set` → `POST /v1/namespaces/:ns/crdts/:id/ops` (LwwRegister op)
 - `add` → `POST /v1/namespaces/:ns/crdts/:id/ops` (ORSet Add op)
+
+## `toOpenAITools`
+
+```ts
+function toOpenAITools(tools: Tool[]): OpenAITool[]
+```
+
+Converts Meridian tools to OpenAI Chat Completions format (`{ type: "function", function: { name, description, parameters } }`).
+
+## `toGeminiTools`
+
+```ts
+function toGeminiTools(tools: Tool[]): GeminiTool
+```
+
+Converts Meridian tools to Google Gemini format (`{ functionDeclarations: [...] }`). Returns a single `GeminiTool` object to pass directly in the `tools` array of `model.generateContent()`.
+
+## `executeOpenAITool`
+
+```ts
+function executeOpenAITool(
+  config: MeridianAgentConfig,
+  toolCall: OpenAIToolCall,
+): Promise<string>
+```
+
+Executes a tool call from OpenAI. `OpenAIToolCall` structurally matches `ChatCompletionMessageToolCall` from the `openai` package — pass `tool_calls[n]` directly. Parses `function.arguments` (JSON string) internally.
+
+## `executeGeminiTool`
+
+```ts
+function executeGeminiTool(
+  config: MeridianAgentConfig,
+  functionCall: GeminiFunctionCall,
+): Promise<string>
+```
+
+Executes a tool call from Gemini. `GeminiFunctionCall` structurally matches `FunctionCall` from `@google/generative-ai` — pass `part.functionCall` directly.
 
 ## `MeridianAgentConfig`
 

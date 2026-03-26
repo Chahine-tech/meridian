@@ -10,6 +10,8 @@ const typeColor = (type: string): string => {
     case "lwwregister": return "#7c3aed";
     case "presence": return "#be185d";
     case "crdtmap": return "#4d7c0f";
+    case "rga": return "#c2410c";
+    case "tree": return "#0369a1";
     default: return "#52525b";
   }
 };

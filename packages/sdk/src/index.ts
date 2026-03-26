@@ -54,6 +54,9 @@ export {
 export {
   TokenClaims,
   Permissions,
+  PermissionsV1,
+  PermissionsV2,
+  PermEntry,
   VectorClock,
   ClientMsg,
   ServerMsg,
@@ -83,14 +86,23 @@ export type { CrdtValidator } from "./validation/index.js";
 export type { ConflictEvent, MoveDiscardedEvent, MoveReorderedEvent, LwwOverwriteEvent } from "./conflict/types.js";
 export type { DiscardedMove } from "./sync/delta.js";
 
-// AI Agents — Claude tool use helpers
+// AI Agents — provider-agnostic tool use helpers (Anthropic, OpenAI, Gemini)
 export {
   getMeridianTools,
+  toOpenAITools,
+  toGeminiTools,
   executeMeridianTool,
+  executeOpenAITool,
+  executeGeminiTool,
 } from "./agents.js";
 export type {
   Tool,
+  OpenAITool,
+  GeminiFunctionDeclaration,
+  GeminiTool,
   ToolUseBlock,
+  OpenAIToolCall,
+  GeminiFunctionCall,
   MeridianAgentConfig,
 } from "./agents.js";
 

@@ -18,7 +18,7 @@ Claims:
 | `namespace` | `string` | The namespace this token grants access to |
 | `client_id` | `number` | Unique numeric ID for this client |
 | `expires_at` | `number` | Expiry timestamp in milliseconds |
-| `permissions` | `object` | `{ read: string[], write: string[] }` — glob patterns |
+| `permissions` | `object` | V1 glob lists or V2 fine-grained rules (see below) |
 
 ## Issue a token via HTTP
 
@@ -35,41 +35,11 @@ Response:
 { "token": "eyJ..." }
 ```
 
-## Issue a token from the SDK
+## Permissions — V1 (glob lists)
 
-```ts
-import { Effect } from "effect";
-import { MeridianClient } from "meridian-sdk";
-
-const client = await Effect.runPromise(MeridianClient.create({ ... }));
-
-const result = await Effect.runPromise(
-  client.http.issueToken("my-room", {
-    client_id: 42,
-    ttl_ms: 3_600_000,
-    permissions: { read: ["*"], write: ["*"] },
-  })
-);
-
-console.log(result.token);
-```
-
-## Scoped permissions
-
-Permissions use glob patterns matched against the CRDT key (`crdt_id`). This lets you issue tokens that only access specific keys — critical for multi-tenant namespaces where multiple users share the same namespace.
-
-| Pattern | Matches |
-|---------|---------|
-| `"*"` | All keys (full access) |
-| `"gc:*"` | All GCounter keys |
-| `"or:cart-42"` | Only `or:cart-42` |
-| `"or:cart-*"` | All cart keys for any user |
-| `"lw:title"` | Only the `lw:title` key |
-
-### Example: per-user scoped token
+V1 permissions use glob patterns matched against the CRDT key (`crdt_id`). Issue a V1 token with the `permissions` field:
 
 ```bash
-# User 42 can read everything but only write to their own cart
 curl -X POST http://localhost:3000/v1/namespaces/shop/tokens \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -82,23 +52,115 @@ curl -X POST http://localhost:3000/v1/namespaces/shop/tokens \
   }'
 ```
 
-### Example: read-only observer token
+| Pattern | Matches |
+|---------|---------|
+| `"*"` | All keys (full access) |
+| `"gc:*"` | All GCounter keys |
+| `"or:cart-42"` | Only `or:cart-42` |
+| `"or:cart-*"` | All cart keys for any user |
+| `"lw:title"` | Only the `lw:title` key |
+
+## Permissions — V2 (fine-grained rules)
+
+V2 tokens add per-rule **op masks**, **per-rule TTLs**, and a **rate limit override**. Issue a V2 token with the `rules` field:
 
 ```bash
 curl -X POST http://localhost:3000/v1/namespaces/shop/tokens \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "client_id": 99,
-    "permissions": {
-      "read": ["gc:views", "pn:votes"],
-      "write": []
+    "client_id": 42,
+    "rules": {
+      "r": [{ "p": "*" }],
+      "w": [
+        { "p": "gc:views", "o": 1 },
+        { "p": "or:cart-42" }
+      ],
+      "rl": 200
     }
   }'
 ```
 
+### Rule fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `p` | `string` | Glob pattern matched against `crdt_id` |
+| `o` | `number` | Op mask bitmask — which operations are allowed. Absent = all ops |
+| `e` | `number` | Per-rule expiry timestamp in ms. Absent = no extra expiry |
+
+Rules are evaluated **first-match-wins** in order. The token-level `expires_at` still applies.
+
+### Op mask constants
+
+Each CRDT type uses its own bit positions:
+
+| CRDT | Op | Mask |
+|------|----|------|
+| GCounter | increment | `0x01` |
+| PNCounter | increment | `0x01` |
+| PNCounter | decrement | `0x02` |
+| ORSet | add | `0x01` |
+| ORSet | remove | `0x02` |
+| LwwRegister | set | `0x01` |
+| Presence | update | `0x01` |
+| RGA | insert | `0x01` |
+| RGA | delete | `0x02` |
+| Tree | add node | `0x01` |
+| Tree | move node | `0x02` |
+| Tree | update node | `0x04` |
+| Tree | delete node | `0x08` |
+
+Combine masks with bitwise OR: `0x01 | 0x02 = 0x03` allows both operations.
+
+### Example: read-only observer + increment-only counter
+
+```bash
+# Can read everything, can only increment gc:views (no decrement), rate-limited to 50 req/s
+curl -X POST http://localhost:3000/v1/namespaces/analytics/tokens \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_id": 99,
+    "rules": {
+      "r": [{ "p": "*" }],
+      "w": [{ "p": "gc:views", "o": 1 }],
+      "rl": 50
+    }
+  }'
+```
+
+### Example: time-limited write rule
+
+```bash
+# Write access to or:promo expires at a specific time, read access is permanent
+curl -X POST http://localhost:3000/v1/namespaces/shop/tokens \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_id": 7,
+    "ttl_ms": 86400000,
+    "rules": {
+      "r": [{ "p": "*" }],
+      "w": [{ "p": "or:promo", "e": 1740000000000 }]
+    }
+  }'
+```
+
+### Rate limit override
+
+The `rl` field (V2 only) sets a per-token rate limit in requests per second. This overrides the server default (100 req/s) for this specific token — useful to give trusted services higher throughput or restrict untrusted clients.
+
+```json
+{ "rules": { "r": [{ "p": "*" }], "w": [{ "p": "*" }], "rl": 500 } }
+```
+
+## Backward compatibility
+
+V1 and V2 tokens coexist without migration. Old V1 tokens continue to work unchanged. The server detects the version automatically from the token payload.
+
 <Warning>
-  A token with `write: ["*"]` can write to **any** key in the namespace. In multi-user namespaces, always scope write permissions to the keys the client actually owns.
+  A token with `write: ["*"]` (V1) or `w: [{ "p": "*" }]` (V2) can write to **any** key in the namespace. In multi-user namespaces, always scope write permissions to the keys the client actually owns.
 </Warning>
 
 ## Verify a token (SDK)

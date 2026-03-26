@@ -59,7 +59,8 @@ pub async fn auth_middleware(
             }
             Ok(claims) => {
                 let rate_key = format!("{}:{}", claims.namespace, claims.client_id);
-                if !auth_state.rate_limiter.check(&rate_key) {
+                let rate_limit = claims.rate_limit().map(|rl| rl as usize);
+                if !auth_state.rate_limiter.check(&rate_key, rate_limit) {
                     return (
                         StatusCode::TOO_MANY_REQUESTS,
                         Json(json!({ "error": "rate_limited", "message": "too many requests" })),
