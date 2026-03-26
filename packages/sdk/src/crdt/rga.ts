@@ -28,6 +28,9 @@ export class RGAHandle {
     this.transport = opts.transport;
   }
 
+  /** The CRDT key this handle is bound to. */
+  get id(): string { return this.crdtId; }
+
   /** Returns the current text content. */
   value(): string {
     return this.text;
@@ -53,14 +56,16 @@ export class RGAHandle {
 
   /**
    * Inserts `text` at visible position `pos` (0 = before all characters).
-   * Characters are inserted one by one in order using the RGA Insert op.
+   * Characters are inserted one by one using RGA Insert ops.
    *
-   * @param pos  - Visible character position (0-indexed).
-   * @param text - String to insert.
+   * @param pos   - Visible character position (0-indexed).
+   * @param text  - String to insert.
    * @param ttlMs - Optional TTL for the op.
+   * @returns The HLC strings ("wall_ms:logical:node_id") of the inserted nodes,
+   *          in insertion order. Used by UndoManager to record undo entries.
    */
-  insert(pos: number, text: string, ttlMs?: number): void {
-    if (text.length === 0) return;
+  insert(pos: number, text: string, ttlMs?: number): string[] {
+    if (text.length === 0) return [];
 
     // Optimistic local update.
     this.text = this.text.slice(0, pos) + text + this.text.slice(pos);
@@ -69,12 +74,15 @@ export class RGAHandle {
     // Send each character as a separate RGA Insert op. The server reorders
     // them using their HLC IDs — sending individually preserves per-char identity.
     const wallMs = Date.now();
+    const nodeIds: string[] = [];
     for (let i = 0; i < text.length; i++) {
+      const id = { wall_ms: wallMs, logical: i, node_id: this.clientId };
+      nodeIds.push(`${wallMs}:${i}:${this.clientId}`);
       const op = encode({
         RGA: {
           Insert: {
-            id: { wall_ms: wallMs, logical: i, node_id: this.clientId },
-            origin_id: pos + i === 0 ? null : null, // server resolves via WAL
+            id,
+            origin_id: null, // server resolves via WAL
             content: text[i],
           },
         },
@@ -87,6 +95,32 @@ export class RGAHandle {
         },
       });
     }
+    return nodeIds;
+  }
+
+  /**
+   * Deletes the RGA node with the given HLC string ID directly.
+   * Used by UndoManager to undo an insert by its exact node identity,
+   * regardless of the current visible position.
+   *
+   * @param hlcString - HLC string "wall_ms:logical:node_id" returned by insert().
+   * @param ttlMs     - Optional TTL.
+   */
+  deleteById(hlcString: string, ttlMs?: number): void {
+    const parts = hlcString.split(":");
+    const id = {
+      wall_ms: Number(parts[0]),
+      logical: Number(parts[1]),
+      node_id: Number(parts[2]),
+    };
+    const op = encode({ RGA: { Delete: { id } } });
+    this.transport.send({
+      Op: {
+        crdt_id: this.crdtId,
+        op_bytes: op,
+        ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+      },
+    });
   }
 
   /**

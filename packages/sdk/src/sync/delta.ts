@@ -84,16 +84,29 @@ export const decodeRGADelta = (bytes: Uint8Array): RGADelta => {
 export interface TreeNodeValue {
   id: string;
   value: string;
+  /** Fractional index string for sibling ordering (e.g. "a0", "b0"). */
+  position: string;
   children: TreeNodeValue[];
+}
+
+/** A MoveNode op that was rejected by the server due to cycle prevention. */
+export interface DiscardedMove {
+  node_id: { wall_ms: number; logical: number; node_id: number };
+  attempted_parent_id: { wall_ms: number; logical: number; node_id: number } | null;
+  attempted_position: string;
+  actual_parent_id: { wall_ms: number; logical: number; node_id: number } | null;
+  actual_position: string;
 }
 
 export interface TreeDelta {
   roots: TreeNodeValue[];
+  /** MoveNode ops discarded due to cycle prevention. Empty in the common case. */
+  discarded_moves?: DiscardedMove[];
 }
 
 export const decodeTreeDelta = (bytes: Uint8Array): TreeDelta => {
-  const raw = decode(bytes) as { roots?: TreeNodeValue[] };
-  return { roots: raw.roots ?? [] };
+  const raw = decode(bytes) as { roots?: TreeNodeValue[]; discarded_moves?: DiscardedMove[] };
+  return { roots: raw.roots ?? [], discarded_moves: raw.discarded_moves ?? [] };
 };
 
 export type CrdtValueDelta =

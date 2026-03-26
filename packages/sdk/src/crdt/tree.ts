@@ -2,6 +2,8 @@ import { Chunk, Effect, Stream } from "effect";
 import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { TreeDelta, TreeNodeValue } from "../sync/delta.js";
+import type { ConflictEvent, LwwOverwriteEvent, MoveDiscardedEvent, MoveReorderedEvent } from "../conflict/types.js";
+import type { DiscardedMove } from "../sync/delta.js";
 
 /**
  * Low-level handle for a TreeCRDT — a convergent hierarchical tree.
@@ -13,13 +15,28 @@ import type { TreeDelta, TreeNodeValue } from "../sync/delta.js";
  * Node IDs are returned by `addNode()` as opaque strings of the form
  * "wall_ms:logical:node_id" matching the Rust HLC serialization.
  */
+export interface TreeNodeMeta {
+  parentId: string | null;
+  position: string;
+  /** HLC string "wall_ms:logical:node_id" of the last UpdateNode op on this node. */
+  updatedAt: string;
+  value: string;
+}
+
+/** Maximum number of conflict events retained in the in-memory log. */
+const CONFLICT_LOG_CAP = 200;
+
 export class TreeHandle {
   private roots: TreeNodeValue[] = [];
   private readonly crdtId: string;
   private readonly clientId: number;
   private readonly transport: WsTransport;
   private readonly listeners = new Set<(value: { roots: TreeNodeValue[] }) => void>();
+  private readonly conflictListeners = new Set<(event: ConflictEvent) => void>();
+  private readonly conflictHistory: ConflictEvent[] = [];
   private opCounter = 0;
+  /** Tracks parent, position, updatedAt, and value per node for undo support. */
+  private readonly nodeMetaMap = new Map<string, TreeNodeMeta>();
 
   constructor(opts: {
     crdtId: string;
@@ -30,6 +47,9 @@ export class TreeHandle {
     this.clientId = opts.clientId;
     this.transport = opts.transport;
   }
+
+  /** The CRDT key this handle is bound to. */
+  get id(): string { return this.crdtId; }
 
   /** Returns the current tree value. */
   value(): { roots: TreeNodeValue[] } {
@@ -69,6 +89,14 @@ export class TreeHandle {
     const id = { wall_ms: wallMs, logical, node_id: this.clientId };
     const idStr = `${wallMs}:${logical}:${this.clientId}`;
 
+    // Optimistic meta update — allows UndoManager to read state immediately.
+    this.nodeMetaMap.set(idStr, {
+      parentId,
+      position,
+      updatedAt: idStr,
+      value,
+    });
+
     const op = encode({
       Tree: {
         AddNode: {
@@ -104,6 +132,12 @@ export class TreeHandle {
     const logical = this.opCounter++;
     const opId = { wall_ms: wallMs, logical, node_id: this.clientId };
 
+    // Optimistic meta update.
+    const existing = this.nodeMetaMap.get(nodeId);
+    if (existing !== undefined) {
+      this.nodeMetaMap.set(nodeId, { ...existing, parentId: newParentId, position: newPosition });
+    }
+
     const op = encode({
       Tree: {
         MoveNode: {
@@ -135,6 +169,13 @@ export class TreeHandle {
     const wallMs = Date.now();
     const logical = this.opCounter++;
     const updatedAt = { wall_ms: wallMs, logical, node_id: this.clientId };
+    const updatedAtStr = `${wallMs}:${logical}:${this.clientId}`;
+
+    // Optimistic meta update.
+    const existing = this.nodeMetaMap.get(nodeId);
+    if (existing !== undefined) {
+      this.nodeMetaMap.set(nodeId, { ...existing, value, updatedAt: updatedAtStr });
+    }
 
     const op = encode({
       Tree: {
@@ -180,10 +221,127 @@ export class TreeHandle {
     });
   }
 
+  /**
+   * Returns the last-known metadata for a node (parent, position, value, updatedAt).
+   * Used by UndoManager to capture pre-op state before mutations.
+   */
+  getNodeMeta(nodeId: string): TreeNodeMeta | undefined {
+    return this.nodeMetaMap.get(nodeId);
+  }
+
+  /**
+   * Registers a listener called whenever a conflict is detected in an incoming delta.
+   * Conflicts include concurrent move resolutions, LWW overwrites, and discarded moves.
+   *
+   * @returns An unsubscribe function.
+   */
+  onConflict(listener: (event: ConflictEvent) => void): () => void {
+    this.conflictListeners.add(listener);
+    return () => { this.conflictListeners.delete(listener); };
+  }
+
+  /**
+   * Returns the last up-to-200 conflict events in chronological order.
+   * Useful for rendering an audit log or "track changes" UI.
+   */
+  conflictLog(): readonly ConflictEvent[] {
+    return this.conflictHistory;
+  }
+
   /** Apply a delta received from the server. Replaces local state with authoritative tree. */
   applyDelta(delta: TreeDelta): void {
+    this.detectConflicts(delta.roots, null, delta.discarded_moves ?? []);
     this.roots = delta.roots;
+    this.rebuildMetaMap(delta.roots, null);
     this.emit();
+  }
+
+  /** Emit a conflict event to all listeners and append to history. */
+  private emitConflict(event: ConflictEvent): void {
+    if (this.conflictHistory.length >= CONFLICT_LOG_CAP) {
+      this.conflictHistory.shift();
+    }
+    this.conflictHistory.push(event);
+    for (const listener of this.conflictListeners) listener(event);
+  }
+
+  /**
+   * Walks the incoming delta tree and compares each node's server-authoritative
+   * parent/position/value against what the local client last recorded.
+   * Also processes discarded_moves from the server to emit move_discarded events.
+   * Emits conflict events for discrepancies caused by concurrent op resolution.
+   */
+  private detectConflicts(
+    nodes: TreeNodeValue[],
+    serverParentId: string | null,
+    discardedMoves: DiscardedMove[],
+  ): void {
+    const now = Date.now();
+
+    // Emit move_discarded events for server-rejected cycle moves.
+    for (const dm of discardedMoves) {
+      const hlcToStr = (hlc: { wall_ms: number; logical: number; node_id: number }): string =>
+        `${hlc.wall_ms}:${hlc.logical}:${hlc.node_id}`;
+      const event: MoveDiscardedEvent = {
+        kind: "move_discarded",
+        nodeId: hlcToStr(dm.node_id),
+        attemptedParentId: dm.attempted_parent_id !== null ? hlcToStr(dm.attempted_parent_id) : null,
+        attemptedPosition: dm.attempted_position,
+        actualParentId: dm.actual_parent_id !== null ? hlcToStr(dm.actual_parent_id) : null,
+        actualPosition: dm.actual_position,
+        at: now,
+      };
+      this.emitConflict(event);
+    }
+
+    for (const node of nodes) {
+      const local = this.nodeMetaMap.get(node.id);
+      if (local !== undefined) {
+        // Detect move reordering: server placed the node somewhere different
+        // from what the local optimistic update recorded.
+        if (local.parentId !== serverParentId || local.position !== node.position) {
+          const event: MoveReorderedEvent = {
+            kind: "move_reordered",
+            nodeId: node.id,
+            localParentId: local.parentId,
+            localPosition: local.position,
+            serverParentId,
+            serverPosition: node.position,
+            at: now,
+          };
+          this.emitConflict(event);
+        }
+
+        // Detect LWW overwrite: server has a different value than local recorded.
+        if (local.value !== node.value) {
+          const event: LwwOverwriteEvent = {
+            kind: "lww_overwrite",
+            nodeId: node.id,
+            discardedValue: local.value,
+            winnerValue: node.value,
+            at: now,
+          };
+          this.emitConflict(event);
+        }
+      }
+      // Recurse into children — serverParentId for children is this node's id.
+      // discardedMoves are top-level only (already processed above).
+      this.detectConflicts(node.children, node.id, []);
+    }
+  }
+
+  /** Rebuilds nodeMetaMap from a full tree snapshot (called on each server delta). */
+  private rebuildMetaMap(nodes: TreeNodeValue[], parentId: string | null): void {
+    for (const node of nodes) {
+      const existing = this.nodeMetaMap.get(node.id);
+      this.nodeMetaMap.set(node.id, {
+        parentId,
+        position: node.position,
+        updatedAt: existing?.updatedAt ?? node.id,
+        value: node.value,
+      });
+      this.rebuildMetaMap(node.children, node.id);
+    }
   }
 
   private emit(): void {
