@@ -21,8 +21,22 @@ use super::{Crdt, CrdtError, VectorClock};
 //   - The remove only removes tags it knew about at remove-time
 //   - After merge: new add-tag survives → add wins by construction
 //
-// Element type: serde_json::Value restricted to scalars and shallow arrays
-// (depth ≤ 2, enforced on ingress by the HTTP handler, not here).
+// Element type: serde_json::Value restricted to scalars and shallow arrays/objects
+// (depth ≤ 2). Enforced here in apply() so it cannot be bypassed via WebSocket
+// or anti-entropy, not just at the HTTP handler level.
+
+/// Maximum allowed JSON nesting depth for ORSet elements.
+/// Scalars = depth 0, `[1, 2]` = depth 1, `[[1]]` = depth 2 (rejected).
+const MAX_ELEMENT_DEPTH: u32 = 1;
+
+/// Returns the nesting depth of a JSON value (0 = scalar).
+fn json_depth(v: &JsonValue) -> u32 {
+    match v {
+        JsonValue::Array(arr) => 1 + arr.iter().map(json_depth).max().unwrap_or(0),
+        JsonValue::Object(map) => 1 + map.values().map(json_depth).max().unwrap_or(0),
+        _ => 0,
+    }
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ORSet {
@@ -75,6 +89,13 @@ impl Crdt for ORSet {
     fn apply(&mut self, op: ORSetOp) -> Result<Option<ORSetDelta>, CrdtError> {
         match op {
             ORSetOp::Add { element, tag } => {
+                if json_depth(&element) > MAX_ELEMENT_DEPTH {
+                    return Err(CrdtError::InvalidOp(format!(
+                        "ORSet element nesting depth {} exceeds maximum {}",
+                        json_depth(&element),
+                        MAX_ELEMENT_DEPTH
+                    )));
+                }
                 let key = element_key(&element);
                 let tags = self.entries.entry(key.clone()).or_default();
                 if tags.contains(&tag) {
@@ -294,5 +315,41 @@ mod tests {
             known_tags: HashSet::new(),
         }).unwrap();
         assert!(delta.is_none());
+    }
+
+    // --- depth validation ---
+
+    #[test]
+    fn add_scalar_accepted() {
+        let mut s = ORSet::default();
+        assert!(s.apply(ORSetOp::Add { element: JsonValue::Number(42.into()), tag: Uuid::new_v4() }).is_ok());
+        assert!(s.apply(ORSetOp::Add { element: JsonValue::String("ok".into()), tag: Uuid::new_v4() }).is_ok());
+        assert!(s.apply(ORSetOp::Add { element: JsonValue::Bool(true), tag: Uuid::new_v4() }).is_ok());
+    }
+
+    #[test]
+    fn add_shallow_array_accepted() {
+        let mut s = ORSet::default();
+        let arr = JsonValue::Array(vec![JsonValue::Number(1.into()), JsonValue::String("x".into())]);
+        assert!(s.apply(ORSetOp::Add { element: arr, tag: Uuid::new_v4() }).is_ok());
+    }
+
+    #[test]
+    fn add_nested_array_rejected() {
+        let mut s = ORSet::default();
+        let nested = JsonValue::Array(vec![JsonValue::Array(vec![JsonValue::Number(1.into())])]);
+        let result = s.apply(ORSetOp::Add { element: nested, tag: Uuid::new_v4() });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn add_nested_object_rejected() {
+        let mut s = ORSet::default();
+        let mut inner = serde_json::Map::new();
+        inner.insert("x".into(), JsonValue::Number(1.into()));
+        let mut outer = serde_json::Map::new();
+        outer.insert("nested".into(), JsonValue::Object(inner));
+        let result = s.apply(ORSetOp::Add { element: JsonValue::Object(outer), tag: Uuid::new_v4() });
+        assert!(result.is_err());
     }
 }

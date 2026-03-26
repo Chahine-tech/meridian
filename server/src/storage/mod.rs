@@ -11,6 +11,9 @@ pub use meridian_storage::{MemoryStore, NoopWal};
 #[cfg(feature = "storage-postgres")]
 pub use meridian_storage::{PgStore, PgWal};
 
+#[cfg(feature = "storage-redis")]
+pub use meridian_storage::{RedisStore, RedisWal};
+
 // ---------------------------------------------------------------------------
 // CrdtStore — Store<CrdtValue> convenience bound
 // ---------------------------------------------------------------------------

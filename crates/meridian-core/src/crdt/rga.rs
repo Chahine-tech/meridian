@@ -57,6 +57,41 @@ pub struct RgaValue {
 }
 
 impl Rga {
+    /// Remove tombstoned nodes that are safe to garbage-collect.
+    ///
+    /// A tombstone is safe to remove when no live node references it as its
+    /// `origin_id` (i.e. no future insert can land "after" the deleted node).
+    /// Removing tombstones that are still referenced as origins would break
+    /// the insertion position algorithm for clients that haven't yet received
+    /// concurrent inserts anchored to those origins.
+    ///
+    /// This should only be called after confirming that all connected clients
+    /// have acknowledged the corresponding WAL entries (i.e. after WAL
+    /// compaction, when `checkpoint_seq` covers the tombstone's seq).
+    ///
+    /// Returns the number of tombstones removed.
+    pub fn compact(&mut self) -> usize {
+        // A tombstone is safe to GC when no *live* node uses its id as an
+        // `origin_id`. The `origin_id` field is only consulted when placing a
+        // *new* insert — tombstoned nodes can never serve as the origin of a
+        // future insert, so their own origin_id chains do not matter.
+        //
+        // Rule: keep a tombstone iff some live node has `origin_id == tombstone.id`.
+        let live_origin_ids: std::collections::BTreeSet<HybridLogicalClock> = self
+            .nodes
+            .iter()
+            .filter(|n| !n.deleted)
+            .filter_map(|n| n.origin_id)
+            .collect();
+
+        let before = self.nodes.len();
+        self.nodes.retain(|n| {
+            // Keep if: live, OR a live node references it as its origin.
+            !n.deleted || live_origin_ids.contains(&n.id)
+        });
+        before - self.nodes.len()
+    }
+
     /// Find the insertion index for a node with the given origin_id and id.
     ///
     /// Algorithm:
@@ -172,8 +207,13 @@ impl Crdt for Rga {
                     });
                 }
 
-                // Emit delete if node is tombstoned (client may have missed it).
-                if node.deleted && seen_logical < u32::from(node.id.logical) {
+                // Always emit delete for tombstoned nodes, regardless of seen_logical.
+                //
+                // The delete op may have been authored by a *different* client than
+                // the insert (different node_id), so the insert's VectorClock entry
+                // gives no information about whether the client has seen the delete.
+                // Emitting conservatively is safe: Delete is idempotent on the receiver.
+                if node.deleted {
                     out.push(RgaOp::Delete { id: node.id });
                 }
 
@@ -351,5 +391,92 @@ mod tests {
         let bytes = rmp_serde::encode::to_vec_named(&r).unwrap();
         let r2: Rga = rmp_serde::decode::from_slice(&bytes).unwrap();
         assert_eq!(r, r2);
+    }
+
+    #[test]
+    fn delta_since_emits_delete_for_tombstone_even_if_insert_was_seen() {
+        // Node 1 inserts 'A' (seen by client). Node 2 deletes 'A' (not seen by client).
+        // delta_since must include the Delete op even though the client's VC shows
+        // it has seen node 1's inserts up to that logical counter.
+        let id_a = hlc(1, 1, 1); // authored by node 1
+
+        let mut server = Rga::default();
+        insert(&mut server, id_a, None, 'A');
+        // Delete authored by node 2 — different node_id.
+        server.apply(RgaOp::Delete { id: id_a }).unwrap();
+
+        // Client has seen node 1's insert (logical=1) but nothing from node 2.
+        let mut vc = VectorClock::new();
+        vc.increment(1); // seen node_id=1, logical=1
+
+        let delta = server.delta_since(&vc).unwrap();
+        let has_delete = delta.ops.iter().any(|op| matches!(op, RgaOp::Delete { id } if *id == id_a));
+        assert!(has_delete, "delta_since must emit Delete even when insert was already seen by client");
+    }
+
+    #[test]
+    fn compact_removes_unreferenced_tombstones() {
+        let mut r = Rga::default();
+        let id_a = hlc(1, 1, 1);
+        let id_b = hlc(1, 2, 1);
+        let id_c = hlc(1, 3, 1);
+        insert(&mut r, id_a, None, 'A');
+        insert(&mut r, id_b, Some(id_a), 'B');
+        insert(&mut r, id_c, Some(id_b), 'C');
+
+        // Delete A — no live node uses A as origin (B uses A, but B is live)
+        // Actually B uses A as origin, so A must be kept.
+        delete(&mut r, id_a);
+        let removed = r.compact();
+        // A is still referenced by B as origin — must NOT be GC'd
+        assert_eq!(removed, 0, "A is still origin of B, must be kept");
+        assert_eq!(r.nodes.len(), 3);
+
+        // Now delete B too — B was the last node referencing A as origin.
+        delete(&mut r, id_b);
+        let removed = r.compact();
+        // Now A and B are both tombstones. C uses B as origin, so B is kept.
+        // A is referenced by nothing live — can be removed.
+        // B is still referenced by C — must be kept.
+        assert_eq!(removed, 1, "A (unreferenced tombstone) must be GC'd");
+        assert_eq!(text(&r), "C");
+
+        // Delete C — now B is referenced by nothing.
+        delete(&mut r, id_c);
+        let removed = r.compact();
+        // B and C are tombstones, neither referenced.
+        assert_eq!(removed, 2, "B and C (unreferenced tombstones) must be GC'd");
+        assert_eq!(r.nodes.len(), 0);
+    }
+
+    #[test]
+    fn compact_preserves_text_correctness() {
+        let mut r = Rga::default();
+        // Build: H-e-l-l-o
+        let ids: Vec<_> = (1u16..=5).map(|i| hlc(1, i, 1)).collect();
+        insert(&mut r, ids[0], None, 'H');
+        insert(&mut r, ids[1], Some(ids[0]), 'e');
+        insert(&mut r, ids[2], Some(ids[1]), 'l');
+        insert(&mut r, ids[3], Some(ids[2]), 'l');
+        insert(&mut r, ids[4], Some(ids[3]), 'o');
+
+        // Delete 'e' and first 'l'
+        delete(&mut r, ids[1]);
+        delete(&mut r, ids[2]);
+
+        assert_eq!(text(&r), "Hlo");
+        let _ = r.compact();
+        // Text must be identical after compaction
+        assert_eq!(text(&r), "Hlo");
+    }
+
+    #[test]
+    fn compact_noop_when_no_tombstones() {
+        let mut r = Rga::default();
+        insert(&mut r, hlc(1, 1, 1), None, 'X');
+        insert(&mut r, hlc(1, 2, 1), Some(hlc(1, 1, 1)), 'Y');
+        let removed = r.compact();
+        assert_eq!(removed, 0);
+        assert_eq!(r.nodes.len(), 2);
     }
 }

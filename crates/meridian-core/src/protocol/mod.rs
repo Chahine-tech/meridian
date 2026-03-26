@@ -1,6 +1,17 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 
+/// A single operation within a `BatchOp`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchItem {
+    pub crdt_id: String,
+    /// msgpack-encoded `CrdtOp`.
+    pub op_bytes: ByteBuf,
+    /// Optional TTL in milliseconds for this specific CRDT entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_ms: Option<u64>,
+}
+
 /// Messages sent by the client over the WebSocket connection.
 /// Encoded as msgpack binary frames.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +31,20 @@ pub enum ClientMsg {
         op_bytes: ByteBuf,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ttl_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_seq: Option<u64>,
+    },
+
+    /// Apply multiple operations atomically.
+    ///
+    /// All ops are validated and applied in order, fanned out together, and
+    /// written as a single WAL entry. If any op fails validation (clock drift,
+    /// type mismatch, etc.) the entire batch is rejected — no partial state
+    /// is persisted or broadcast.
+    ///
+    /// `client_seq` — echoed back in `BatchAck` for latency tracking.
+    BatchOp {
+        ops: Vec<BatchItem>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         client_seq: Option<u64>,
     },
@@ -51,6 +76,17 @@ pub enum ServerMsg {
     /// allowing the client to correlate acks with sent ops for latency tracking.
     Ack {
         seq: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_seq: Option<u64>,
+    },
+
+    /// Acknowledgement of a successfully applied `BatchOp`.
+    /// `seq` — WAL sequence number of the batch entry.
+    /// `count` — number of ops in the batch that produced a delta.
+    /// `client_seq` — echoed back from `BatchOp.client_seq`.
+    BatchAck {
+        seq: u64,
+        count: usize,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         client_seq: Option<u64>,
     },
