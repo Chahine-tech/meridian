@@ -134,10 +134,10 @@ impl PermEntry {
     /// the operation is permitted by the op mask.
     pub fn matches(&self, crdt_id: &str, op_mask: OpMask, now_ms: u64) -> bool {
         // TTL gate
-        if let Some(exp) = self.e {
-            if now_ms >= exp {
-                return false;
-            }
+        if let Some(exp) = self.e
+            && now_ms >= exp
+        {
+            return false;
         }
         // Pattern gate
         if !glob_match(&self.p, crdt_id) {
