@@ -73,6 +73,8 @@ interface PresenceEntry<T> {
 
 Entries expire when `now > expiresAtMs`. Call `heartbeat()` periodically to keep the entry alive. `online()` always filters out expired entries before returning.
 
+The server runs a background GC task every few seconds that removes expired entries and broadcasts tombstone deltas to all connected clients — so peers see removals in near-real-time without waiting for the next heartbeat.
+
 ## Server restart behavior
 
 Presence is **ephemeral by design** — entries are stored in sled but the TTL clock is wall-time based. When the server restarts:

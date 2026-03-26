@@ -72,6 +72,39 @@ Each token is limited to **100 requests per second** (sliding window). Requests 
 { "error": "rate_limited", "message": "too many requests" }
 ```
 
+## Health checks
+
+Meridian exposes two unauthenticated health endpoints:
+
+| Endpoint | Status | Description |
+|----------|--------|-------------|
+| `GET /health/live` | 200 always | Process is running. Used by load balancers to detect dead instances. |
+| `GET /health/ready` | 200 / 503 | Storage and WAL are operational. Use for readiness probes. |
+
+`/health/ready` returns `503` if the store is unreachable. Example response:
+
+```json
+{ "status": "ready", "wal_last_seq": 1042 }
+```
+
+**Kubernetes example:**
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: 3000
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: 3000
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
 ## Metrics
 
 Meridian exposes a Prometheus-compatible metrics endpoint at `GET /metrics` (no authentication required).
@@ -81,6 +114,8 @@ Meridian exposes a Prometheus-compatible metrics endpoint at `GET /metrics` (no 
 | `meridian_ops_total` | Counter | CRDT operations applied, labeled by `ns`, `crdt_id`, `op_type` |
 | `meridian_ws_connections_active` | Gauge | Active WebSocket connections |
 | `meridian_wal_entries_total` | Counter | WAL entries written |
+| `meridian_merge_duration_seconds` | Histogram | CRDT merge/apply latency, labeled by `ns` |
+| `meridian_subscriptions_active` | Gauge | Active WebSocket subscription receivers |
 
 Example Prometheus scrape config:
 

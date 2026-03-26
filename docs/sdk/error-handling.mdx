@@ -14,6 +14,16 @@ description: All SDK errors are Data.TaggedError — matchable with Effect.catch
 | `CodecError` | msgpack decode or schema validation failed |
 | `TransportError` | WebSocket error |
 
+## Server-side validation errors
+
+Some ops are rejected by the server with `400` before being applied. These surface as `HttpError` (REST) or `ServerMsg::Error { code: 400 }` (WebSocket):
+
+| Rejection | Affected CRDTs | Detail |
+|-----------|---------------|--------|
+| Clock drift > 30s | LwwRegister, Presence | Client HLC timestamp is more than 30 seconds ahead or behind server time. Sync your system clock. |
+| Element depth > 1 | ORSet | Element contains nested objects/arrays. Flatten your data structure. |
+| WAL write failure | All | Storage is full or unavailable. Server returns `503`. |
+
 ## Handling errors
 
 All errors are `Data.TaggedError` from Effect, matchable with `Effect.catchTag`:

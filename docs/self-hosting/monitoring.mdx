@@ -11,7 +11,9 @@ Meridian exposes a Prometheus-compatible metrics endpoint at `GET /metrics` (no 
 |--------|------|--------|-------------|
 | `meridian_ops_total` | Counter | `ns`, `crdt_id`, `op_type` | CRDT operations applied |
 | `meridian_ws_connections_active` | Gauge | — | Active WebSocket connections |
-| `meridian_wal_entries_total` | Counter | — | WAL entries written |
+| `meridian_wal_entries_total` | Counter | — | WAL entries written (ops that produced a delta) |
+| `meridian_merge_duration_seconds` | Histogram | `ns` | CRDT merge/apply latency |
+| `meridian_subscriptions_active` | Gauge | — | Active WebSocket subscription receivers |
 
 `op_type` is either `http` (REST) or `ws` (WebSocket).
 
@@ -116,14 +118,31 @@ topk(10, sum by (crdt_id) (meridian_ops_total))
 sum by (op_type) (rate(meridian_ops_total[5m]))
 ```
 
+**Merge latency P99 (by namespace)**
+```promql
+histogram_quantile(0.99, sum by (le, ns) (rate(meridian_merge_duration_seconds_bucket[5m])))
+```
+
+**Merge latency P50**
+```promql
+histogram_quantile(0.50, sum by (le, ns) (rate(meridian_merge_duration_seconds_bucket[5m])))
+```
+
+**Active subscriptions**
+```promql
+meridian_subscriptions_active
+```
+
 ### Recommended panels
 
 | Panel | Query | Visualization |
 |-------|-------|---------------|
 | Ops/s | `rate(meridian_ops_total[1m])` | Time series |
 | Active connections | `meridian_ws_connections_active` | Stat |
+| Active subscriptions | `meridian_subscriptions_active` | Stat |
 | Total ops | `sum(meridian_ops_total)` | Stat |
 | Ops by namespace | `sum by (ns) (rate(meridian_ops_total[5m]))` | Bar chart |
+| Merge P99 latency | `histogram_quantile(0.99, sum by (le, ns) (rate(meridian_merge_duration_seconds_bucket[5m])))` | Time series |
 
 ## Alerts
 

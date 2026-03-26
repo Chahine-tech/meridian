@@ -38,6 +38,22 @@ cart.onChange(items => {
 
 Incoming deltas are validated against the schema at runtime via `Schema.decodeUnknownSync`. Invalid entries are discarded.
 
+## Element depth limit
+
+ORSet elements must be **scalars or single-level objects/arrays** (depth ≤ 1). Nested structures are rejected by the server:
+
+```ts
+// ✅ allowed
+tags.add("typescript");
+tags.add(42);
+tags.add({ id: "prod-1", name: "Keyboard" }); // flat object
+
+// ❌ rejected — nested object, depth > 1
+cart.add({ id: "prod-1", meta: { color: "red" } });
+```
+
+Rejected ops return a `400` error with the message `ORSet element nesting depth X exceeds maximum 1`. This limit is enforced at the server level and cannot be bypassed.
+
 ## API
 
 | Method | Description |
