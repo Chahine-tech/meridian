@@ -47,7 +47,7 @@ struct WebhookDlqEntry {
 }
 
 /// Backoff delays for webhook retries (ms).
-/// attempts=1 → 5 min, attempts=2 → 30 min, attempts=3 → 2 h, then drop.
+/// After attempt 1 fails → wait 5 min; after 2 → 30 min; after 3 → 2 h, then drop.
 const WEBHOOK_RETRY_DELAYS_MS: [u64; 3] = [
     5 * 60 * 1000,
     30 * 60 * 1000,
@@ -205,7 +205,11 @@ impl DurableObject for NsObject {
 
                 let delta_bytes = match apply_op(&mut value, op) {
                     Ok(d) => d,
-                    Err(_) => return Ok(()),
+                    Err(e) => {
+                        let err = ServerMsg::Error { code: 400, message: e.to_string() };
+                        if let Ok(b) = err.to_msgpack() { let _ = ws.send_with_bytes(&b); }
+                        return Ok(());
+                    }
                 };
 
                 let _ = self.save_crdt(&crdt_id, &value).await;
@@ -720,13 +724,13 @@ impl NsObject {
             }
 
             let delivered = self.send_webhook(&entry.hook_url, entry.hook_secret.as_deref(), &entry.payload_json).await;
+            entry.attempts += 1;
 
-            if delivered || entry.attempts >= WEBHOOK_MAX_ATTEMPTS {
+            if delivered || entry.attempts > WEBHOOK_MAX_ATTEMPTS {
                 // Success or exhausted — remove from DLQ.
                 let _ = self.state.storage().delete(&key).await;
             } else {
-                // Schedule next retry.
-                entry.attempts += 1;
+                // Schedule next retry with exponential backoff.
                 let delay_idx = (entry.attempts as usize - 1).min(WEBHOOK_RETRY_DELAYS_MS.len() - 1);
                 entry.retry_after_ms = now_ms + WEBHOOK_RETRY_DELAYS_MS[delay_idx];
                 if let Ok(json) = serde_json::to_string(&entry) {
