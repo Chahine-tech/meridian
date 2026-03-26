@@ -82,6 +82,15 @@ impl DurableObject for NsObject {
         let url = req.url()?;
         let path = url.path();
 
+        // Persist namespace on first request so fire_webhooks can read it later.
+        // Path format: /{ns}/op, /{ns}/ws, etc. — namespace is the first segment.
+        if self.state.storage().get::<String>("ns:name").await.ok().flatten().is_none() {
+            let ns = path.trim_start_matches('/').split('/').next().unwrap_or("");
+            if !ns.is_empty() {
+                let _ = self.state.storage().put("ns:name", ns.to_owned()).await;
+            }
+        }
+
         // WebSocket upgrade: triggered either by the original client request
         // (forwarded directly from the main worker) or by an internal `/ws` path.
         let is_ws_upgrade = req
@@ -180,7 +189,11 @@ impl DurableObject for NsObject {
                 }
 
                 // Write-ahead: persist the op before applying the snapshot.
-                let _ = self.append_wal(&crdt_id, &op_bytes).await;
+                if self.append_wal(&crdt_id, &op_bytes).await.is_err() {
+                    let err = ServerMsg::Error { code: 503, message: "wal write failed".into() };
+                    if let Ok(b) = err.to_msgpack() { let _ = ws.send_with_bytes(&b); }
+                    return Ok(());
+                }
                 self.touch_activity().await;
 
                 let crdt_type = op.crdt_type();
@@ -276,7 +289,11 @@ impl DurableObject for NsObject {
                 // Client-side atomicity (all-or-nothing visibility) is provided by
                 // the grouped fan-out in Phase 4, not by the WAL.
                 for item in &parsed {
-                    let _ = self.append_wal(&item.crdt_id, &item.op_bytes).await;
+                    if self.append_wal(&item.crdt_id, &item.op_bytes).await.is_err() {
+                        let err = ServerMsg::Error { code: 503, message: "wal write failed".into() };
+                        if let Ok(b) = err.to_msgpack() { let _ = ws.send_with_bytes(&b); }
+                        return Ok(());
+                    }
                 }
                 self.touch_activity().await;
 
@@ -489,7 +506,7 @@ impl NsObject {
             .map_err(|e| worker::Error::RustError(e.to_string()))?;
 
         // Write-ahead: persist the op before applying the snapshot.
-        let _ = self.append_wal(&crdt_id, &body).await;
+        self.append_wal(&crdt_id, &body).await?;
         self.touch_activity().await;
 
         let crdt_type = op.crdt_type();
@@ -618,8 +635,9 @@ impl NsObject {
         }
 
         let now_ms = js_sys::Date::now() as u64;
+        let ns: String = self.state.storage().get("ns:name").await.ok().flatten().unwrap_or_default();
         let payload = WebhookPayload {
-            namespace: "",
+            namespace: &ns,
             crdt_id,
             seq,
             timestamp_ms: now_ms,

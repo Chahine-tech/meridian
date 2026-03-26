@@ -92,7 +92,7 @@ impl PgWal {
 impl WalBackend for PgWal {
     #[instrument(skip(self, op_bytes))]
     async fn append(&self, namespace: &str, crdt_id: &str, op_bytes: Vec<u8>) -> Result<u64> {
-        let timestamp_ms = now_ms() as i64;
+        let timestamp_ms = now_ms().min(i64::MAX as u64) as i64;
 
         let seq: i64 = sqlx::query_scalar(
             r#"
@@ -141,7 +141,7 @@ impl WalBackend for PgWal {
             "SELECT seq, namespace, crdt_id, op_bytes, timestamp_ms FROM wal_entries WHERE seq >= $1 AND timestamp_ms <= $2 ORDER BY seq",
         )
         .bind(from_seq as i64)
-        .bind(until_ms as i64)
+        .bind(until_ms.min(i64::MAX as u64) as i64)
         .fetch_all(&self.pool)
         .await?;
 
