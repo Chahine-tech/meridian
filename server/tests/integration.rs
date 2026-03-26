@@ -382,6 +382,8 @@ async fn orset_add_and_get_returns_element() {
     let op = CrdtOp::ORSet(ORSetOp::Add {
         element: serde_json::json!("hello"),
         tag: uuid::Uuid::new_v4(),
+        node_id: 1,
+        seq: 1,
     });
     let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
 
