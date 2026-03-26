@@ -55,10 +55,10 @@ pub async fn post_op(mut req: Request, ctx: RouteContext<()>) -> worker::Result<
     let body = req.bytes().await?;
 
     // Op-level permission check (V2 tokens).
-    if let Ok(op) = rmp_serde::decode::from_slice::<CrdtOp>(&body) {
-        if !claims.can_write_key_op(&id, op.op_mask()) {
-            return Response::error("op not permitted by token", 403);
-        }
+    if let Ok(op) = rmp_serde::decode::from_slice::<CrdtOp>(&body)
+        && !claims.can_write_key_op(&id, op.op_mask())
+    {
+        return Response::error("op not permitted by token", 403);
     }
 
     let mut do_url = format!("http://do/{ns}/op?crdt_id={id}");
