@@ -33,6 +33,9 @@ pub enum StorageError {
     #[error("invalid key format: {0}")]
     InvalidKey(String),
 
+    #[error("store capacity exceeded: max {max} entries, currently {current}")]
+    CapacityExceeded { max: usize, current: usize },
+
     #[cfg(feature = "wal-archive-s3")]
     #[error("S3 error: {0}")]
     S3(Box<aws_sdk_s3::Error>),

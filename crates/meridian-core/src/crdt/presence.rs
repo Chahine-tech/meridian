@@ -67,13 +67,19 @@ pub struct PresenceDelta {
 }
 
 /// Returns true if `candidate` should replace `existing`.
-/// Primary key: HLC (higher wins). Tie-break: ttl_ms (longer wins → favors liveness).
-/// This ensures merge is commutative even when HLCs are identical.
+/// Primary key: HLC (higher wins). Tie-break 1: ttl_ms (longer wins → favors liveness).
+/// Tie-break 2: node_id from HLC (higher wins) — makes merge totally deterministic
+/// even when two nodes produce an entry with the exact same HLC and TTL.
 fn presence_entry_wins(candidate: &PresenceEntry, existing: &PresenceEntry) -> bool {
     match candidate.hlc.cmp(&existing.hlc) {
         std::cmp::Ordering::Greater => true,
-        std::cmp::Ordering::Equal => candidate.ttl_ms > existing.ttl_ms,
         std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => match candidate.ttl_ms.cmp(&existing.ttl_ms) {
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Less => false,
+            // Final tie-break on node_id: deterministic across all replicas.
+            std::cmp::Ordering::Equal => candidate.hlc.node_id > existing.hlc.node_id,
+        },
     }
 }
 

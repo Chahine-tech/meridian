@@ -15,7 +15,7 @@ path = "src/lib.rs"
 default = ["storage-sled"]
 storage-sled = ["meridian-storage/storage-sled"]
 storage-memory = ["meridian-storage/storage-memory"]
-storage-postgres = ["meridian-storage/storage-postgres"]
+storage-postgres = ["meridian-storage/storage-postgres", "dep:sqlx"]
 storage-redis = ["meridian-storage/storage-redis"]
 cluster = ["dep:meridian-cluster", "meridian-cluster/transport-redis"]
 cluster-http = ["dep:meridian-cluster", "meridian-cluster/transport-http"]
@@ -28,6 +28,9 @@ meridian-core = { path = "../crates/meridian-core" }
 meridian-storage = { path = "../crates/meridian-storage", default-features = false }
 # Cluster support (optional)
 meridian-cluster = { path = "../crates/meridian-cluster", optional = true }
+
+# PostgreSQL client — only needed when storage-postgres feature is enabled
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"], optional = true }
 
 # bytes — needed for cluster delta bytes
 bytes = "1"

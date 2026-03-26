@@ -2,6 +2,7 @@ use thiserror::Error;
 
 use crate::{
     crdt::registry::{apply_op, CrdtOp, CrdtValue},
+    metrics,
     storage::{CrdtStore, StorageError},
 };
 
@@ -55,6 +56,7 @@ pub async fn apply_op_atomic<S: CrdtStore>(
         crate::crdt::clock::now_ms().saturating_add(ms)
     });
 
+    let t = metrics::merge_start();
     let delta = store
         .merge_put_with_expiry(
             ns,
@@ -70,6 +72,11 @@ pub async fn apply_op_atomic<S: CrdtStore>(
         .await
         .map_err(ApplyError::Storage)?
         .map_err(ApplyError::Crdt)?;
+    metrics::record_merge_duration(ns, t.elapsed());
+
+    if delta.is_some() {
+        metrics::record_wal_entry();
+    }
 
     Ok(delta)
 }

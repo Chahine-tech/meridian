@@ -10,12 +10,14 @@ use axum::{
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{debug, info, warn};
 
+use meridian_core::protocol::BatchItem;
+
 use crate::{
     auth::ClaimsExt,
     crdt::{
         clock::now_ms,
         ops::{apply_op_atomic, ApplyError},
-        registry::CrdtOp,
+        registry::{validate_clock_drift, CrdtOp},
     },
     metrics,
     storage::{CrdtStore, Store},
@@ -241,6 +243,99 @@ async fn handle_client_message<S: WsState>(
                     warn!(error = %e, "store failed during apply");
                     send_error(socket, 500, "internal error").await;
                 }
+            }
+        }
+
+        ClientMsg::BatchOp { ops, client_seq } => {
+            if ops.is_empty() {
+                send_error(socket, 400, "batch must not be empty").await;
+                return true;
+            }
+
+            let server_now = now_ms();
+
+            // Phase 1: decode + validate all ops before touching any state.
+            struct Parsed { crdt_id: String, op: CrdtOp, ttl_ms: Option<u64> }
+            let mut parsed: Vec<Parsed> = Vec::with_capacity(ops.len());
+            for BatchItem { crdt_id, op_bytes, ttl_ms } in ops {
+                if !claims.can_write_key(&crdt_id) {
+                    send_error(socket, 403, "insufficient permissions for key").await;
+                    return true;
+                }
+                let op: CrdtOp = match rmp_serde::decode::from_slice(&op_bytes) {
+                    Ok(o) => o,
+                    Err(e) => {
+                        warn!(error = %e, crdt_id, "batch: malformed CrdtOp");
+                        send_error(socket, 400, &format!("batch: malformed op for {crdt_id}")).await;
+                        return true;
+                    }
+                };
+                if let Err(e) = validate_clock_drift(&op, server_now) {
+                    send_error(socket, 400, &format!("batch: {crdt_id}: {e}")).await;
+                    return true;
+                }
+                parsed.push(Parsed { crdt_id, op, ttl_ms });
+            }
+
+            // Phase 2: apply all ops and collect deltas + messages to broadcast.
+            let mut delta_count = 0usize;
+            let mut broadcast_msgs: Vec<Arc<ServerMsg>> = Vec::new();
+            #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+            let mut cluster_deltas: Vec<(String, bytes::Bytes)> = Vec::new();
+
+            for item in parsed {
+                match apply_op_atomic(state.store(), ns, &item.crdt_id, item.op, item.ttl_ms).await {
+                    Ok(Some(delta_bytes)) => {
+                        *seq += 1;
+                        delta_count += 1;
+                        metrics::record_op(ns, &item.crdt_id, "ws_batch");
+
+                        if let Some(dispatcher) = state.webhooks() {
+                            dispatcher.send(WebhookEvent {
+                                ns: ns.to_owned(),
+                                crdt_id: item.crdt_id.clone(),
+                                source: "ws_batch".into(),
+                                timestamp_ms: server_now,
+                            });
+                        }
+
+                        #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+                        cluster_deltas.push((item.crdt_id.clone(), bytes::Bytes::from(delta_bytes.clone())));
+
+                        broadcast_msgs.push(Arc::new(ServerMsg::Delta {
+                            crdt_id: item.crdt_id,
+                            delta_bytes: delta_bytes.into(),
+                        }));
+                    }
+                    Ok(None) => {} // no-op — stale/idempotent
+                    Err(ApplyError::Crdt(e)) => {
+                        warn!(error = %e, crdt_id = item.crdt_id, "batch: crdt op rejected");
+                        send_error(socket, 400, &e.to_string()).await;
+                        return true;
+                    }
+                    Err(ApplyError::Storage(e)) => {
+                        warn!(error = %e, crdt_id = item.crdt_id, "batch: store failed");
+                        send_error(socket, 500, "internal error").await;
+                        return true;
+                    }
+                }
+            }
+
+            // Phase 3: fan-out all deltas atomically.
+            for msg in broadcast_msgs {
+                state.subscriptions().publish(ns, msg);
+            }
+
+            #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+            if let Some(cluster) = state.cluster() {
+                for (crdt_id, delta) in cluster_deltas {
+                    cluster.on_delta(ns, &crdt_id, delta).await;
+                }
+            }
+
+            let ack = ServerMsg::BatchAck { seq: *seq, count: delta_count, client_seq };
+            if let Ok(b) = ack.to_msgpack() {
+                let _ = socket.send(Message::Binary(b.into())).await;
             }
         }
 

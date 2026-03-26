@@ -47,8 +47,9 @@ pub struct LwwValue {
 
 /// Returns true if `a` beats `b` in LWW order.
 /// Primary key: HLC (higher wins). Tie-break 1: author (higher wins).
-/// Tie-break 2: value serialized as JSON string (lexicographic) — makes merge
+/// Tie-break 2: value serialized as JSON bytes (lexicographic) — makes merge
 /// totally ordered and commutative even when two writers share the same HLC and author.
+/// Serialized once per call to avoid redundant allocations on large values.
 fn wins_over(
     a_hlc: HybridLogicalClock, a_author: u64, a_value: &serde_json::Value,
     b_hlc: HybridLogicalClock, b_author: u64, b_value: &serde_json::Value,
@@ -59,7 +60,11 @@ fn wins_over(
         std::cmp::Ordering::Equal => match a_author.cmp(&b_author) {
             std::cmp::Ordering::Greater => true,
             std::cmp::Ordering::Less => false,
-            std::cmp::Ordering::Equal => a_value.to_string().as_bytes() > b_value.to_string().as_bytes(),
+            std::cmp::Ordering::Equal => {
+                let a_bytes = serde_json::to_vec(a_value).unwrap_or_default();
+                let b_bytes = serde_json::to_vec(b_value).unwrap_or_default();
+                a_bytes > b_bytes
+            }
         },
     }
 }

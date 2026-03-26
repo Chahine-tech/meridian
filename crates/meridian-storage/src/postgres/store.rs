@@ -219,8 +219,9 @@ where
         let bytes =
             rmp_serde::encode::to_vec_named(&merged).map_err(StorageError::Serialization)?;
 
-        // Cast to i64 for PostgreSQL BIGINT compatibility.
-        let expires: Option<i64> = expires_at_ms.map(|ms| ms as i64);
+        // Cast to i64 for PostgreSQL BIGINT — clamp to i64::MAX to avoid overflow
+        // for TTLs in the far future (> year 292 million).
+        let expires: Option<i64> = expires_at_ms.map(|ms| ms.min(i64::MAX as u64) as i64);
 
         sqlx::query(
             r#"

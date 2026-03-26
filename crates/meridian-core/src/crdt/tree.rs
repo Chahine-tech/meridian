@@ -176,6 +176,60 @@ impl TreeCrdt {
         }
     }
 
+    /// Compact the CRDT state by removing tombstoned nodes and truncating the
+    /// move log to only keep the most recent move per node.
+    ///
+    /// **Safety conditions (caller must ensure both before calling):**
+    /// 1. All connected clients have acknowledged WAL entries up to at least
+    ///    `checkpoint_seq` — tombstoned nodes whose AddNode seq < checkpoint
+    ///    are safe to drop since no new inserts can reference them as parents.
+    /// 2. The move log is only needed for merge replay. Once all replicas are
+    ///    caught up, older entries that have been superseded by later moves on
+    ///    the same node serve no purpose.
+    ///
+    /// Returns `(nodes_removed, move_records_removed)`.
+    pub fn compact(&mut self) -> (usize, usize) {
+        // Step 1: remove tombstoned nodes whose children have all been deleted
+        // or moved away. A deleted node is safe to drop when:
+        //   - It is itself deleted (tombstone), AND
+        //   - No live node has it as a parent (so removing it won't orphan children).
+        let live_parent_ids: std::collections::BTreeSet<Option<HybridLogicalClock>> = self
+            .nodes
+            .iter()
+            .filter(|n| !n.deleted)
+            .map(|n| n.parent_id)
+            .collect();
+
+        let nodes_before = self.nodes.len();
+        self.nodes.retain(|n| {
+            // Keep if: live, OR if any live node uses it as parent.
+            !n.deleted || live_parent_ids.contains(&Some(n.id))
+        });
+        let nodes_removed = nodes_before - self.nodes.len();
+
+        // Step 2: truncate move_log — keep only the latest move per node.
+        // The log is sorted ascending by op_id, so the last entry per node_id
+        // is the one that matters for current parent state.
+        let mut seen_nodes = std::collections::BTreeSet::new();
+        // Walk backward to find the latest move per node, then retain those.
+        let mut to_keep = std::collections::BTreeSet::new();
+        for (i, record) in self.move_log.iter().enumerate().rev() {
+            if seen_nodes.insert(record.node_id) {
+                to_keep.insert(i);
+            }
+        }
+        let records_before = self.move_log.len();
+        let mut idx = 0;
+        self.move_log.retain(|_| {
+            let keep = to_keep.contains(&idx);
+            idx += 1;
+            keep
+        });
+        let records_removed = records_before - self.move_log.len();
+
+        (nodes_removed, records_removed)
+    }
+
     /// Insert a MoveRecord into move_log, keeping it sorted by op_id ascending.
     fn insert_move_record(&mut self, record: MoveRecord) {
         let idx = self.move_log.partition_point(|r| r.op_id < record.op_id);
@@ -702,5 +756,78 @@ mod tests {
         let bytes = rmp_serde::encode::to_vec_named(&t).unwrap();
         let t2: TreeCrdt = rmp_serde::decode::from_slice(&bytes).unwrap();
         assert_eq!(t, t2);
+    }
+
+    #[test]
+    fn compact_removes_isolated_tombstone_nodes() {
+        let mut t = TreeCrdt::default();
+        let root = hlc(1, 1, 1);
+        let child = hlc(1, 2, 1);
+        add(&mut t, root, None, "a0", "Root");
+        add(&mut t, child, Some(root), "a0", "Child");
+
+        // Delete child — it has no children of its own.
+        t.apply(TreeOp::DeleteNode { id: child }).unwrap();
+
+        let (nodes_removed, _) = t.compact();
+        assert_eq!(nodes_removed, 1, "deleted leaf with no live children must be GC'd");
+        // Root is still live.
+        assert_eq!(t.nodes.len(), 1);
+        assert_eq!(t.value().roots[0].value, "Root");
+    }
+
+    #[test]
+    fn compact_keeps_tombstone_with_live_children() {
+        let mut t = TreeCrdt::default();
+        let root = hlc(1, 1, 1);
+        let child = hlc(1, 2, 1);
+        let grandchild = hlc(1, 3, 1);
+        add(&mut t, root, None, "a0", "Root");
+        add(&mut t, child, Some(root), "a0", "Child");
+        add(&mut t, grandchild, Some(child), "a0", "Grandchild");
+
+        // Delete child — grandchild is still live under it.
+        t.apply(TreeOp::DeleteNode { id: child }).unwrap();
+
+        let (nodes_removed, _) = t.compact();
+        // Child must be kept because grandchild.parent_id == child.
+        assert_eq!(nodes_removed, 0, "tombstone with live child must be kept");
+        assert_eq!(t.nodes.len(), 3);
+    }
+
+    #[test]
+    fn compact_truncates_move_log_to_latest_per_node() {
+        let mut t = TreeCrdt::default();
+        let r1 = hlc(1, 1, 1);
+        let r2 = hlc(1, 2, 1);
+        let child = hlc(1, 3, 1);
+        add(&mut t, r1, None, "a0", "R1");
+        add(&mut t, r2, None, "b0", "R2");
+        add(&mut t, child, Some(r1), "a0", "Child");
+
+        // Move child three times.
+        t.apply(TreeOp::MoveNode { op_id: hlc(2, 1, 1), node_id: child, new_parent_id: Some(r2), new_position: "a0".into() }).unwrap();
+        t.apply(TreeOp::MoveNode { op_id: hlc(3, 1, 1), node_id: child, new_parent_id: None,      new_position: "c0".into() }).unwrap();
+        t.apply(TreeOp::MoveNode { op_id: hlc(4, 1, 1), node_id: child, new_parent_id: Some(r1),  new_position: "z0".into() }).unwrap();
+
+        assert_eq!(t.move_log.len(), 3);
+
+        let (_, records_removed) = t.compact();
+        assert_eq!(records_removed, 2, "only latest move per node should be kept");
+        assert_eq!(t.move_log.len(), 1);
+        // The remaining record should be the last move (op_id = hlc(4,1,1)).
+        assert_eq!(t.move_log[0].op_id, hlc(4, 1, 1));
+        // Tree structure must be unchanged.
+        assert_eq!(t.value().roots[0].children[0].value, "Child");
+    }
+
+    #[test]
+    fn compact_noop_when_nothing_to_gc() {
+        let mut t = TreeCrdt::default();
+        let root = hlc(1, 1, 1);
+        add(&mut t, root, None, "a0", "Root");
+        let (nodes, records) = t.compact();
+        assert_eq!(nodes, 0);
+        assert_eq!(records, 0);
     }
 }

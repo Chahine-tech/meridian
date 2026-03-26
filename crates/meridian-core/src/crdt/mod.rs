@@ -16,7 +16,7 @@ pub use lwwregister::LwwRegister;
 pub use orset::ORSet;
 pub use pncounter::PNCounter;
 pub use presence::Presence;
-pub use registry::CrdtValue;
+pub use registry::{CrdtValue, VersionedOp, OP_VERSION};
 pub use rga::{Rga, RgaDelta, RgaOp};
 pub use tree::{TreeCrdt, TreeDelta, TreeOp};
 

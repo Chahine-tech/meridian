@@ -11,6 +11,7 @@ use crate::auth::AuthState;
 
 use super::handlers::{
     crdt::{get_crdt, get_sync, post_op},
+    health::{health_live, health_ready},
     history::get_history,
     metrics::get_metrics,
     sse::get_sse,
@@ -32,6 +33,8 @@ use crate::auth::auth_middleware;
 /// POST /v1/namespaces/:ns/tokens              -> issue_token
 /// GET  /v1/namespaces/:ns/connect             -> ws_upgrade_handler
 /// GET  /metrics                               -> get_metrics (no auth)
+/// GET  /health/live                           -> health_live (no auth, always 200)
+/// GET  /health/ready                          -> health_ready (no auth, checks store+WAL)
 /// ```
 pub fn build_router<S>(state: S, auth_state: Arc<AuthState>) -> Router
 where
@@ -46,11 +49,17 @@ where
         .route("/v1/namespaces/{ns}/tokens", post(issue_token::<S>))
         .route("/v1/namespaces/{ns}/connect", get(ws_upgrade_handler::<S>))
         .layer(middleware::from_fn_with_state(auth_state, auth_middleware))
+        .with_state(state.clone());
+
+    let unprotected = Router::new()
+        .route("/health/ready", get(health_ready::<S>))
         .with_state(state);
 
     Router::new()
         .merge(protected)
+        .merge(unprotected)
         .route("/metrics", get(get_metrics))
+        .route("/health/live", get(health_live))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
 }

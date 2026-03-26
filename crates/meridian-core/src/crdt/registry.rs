@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tracing::{debug, instrument, warn};
 
 use super::{
     crdtmap::{CRDTMap, CRDTMapOp},
@@ -89,6 +90,15 @@ pub enum CrdtValue {
     Tree(TreeCrdt),
 }
 
+/// Stats returned by `CrdtValue::compact()`.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct CompactStats {
+    /// Number of tombstoned RGA nodes or deleted Tree nodes removed.
+    pub tombstones_removed: usize,
+    /// Number of Tree move_log records removed.
+    pub move_records_removed: usize,
+}
+
 impl CrdtValue {
     pub fn crdt_type(&self) -> CrdtType {
         match self {
@@ -153,6 +163,29 @@ impl CrdtValue {
         rmp_serde::decode::from_slice(bytes).map_err(CrdtError::Deserialization)
     }
 
+    /// Compact internal state to reclaim memory from tombstones and stale log entries.
+    ///
+    /// Only `RGA` and `Tree` types perform meaningful work. All other CRDT types
+    /// are no-ops (they have no unbounded accumulated state).
+    ///
+    /// Returns a human-readable summary of what was removed (for logging).
+    /// Safe to call at any time; see `Rga::compact` and `TreeCrdt::compact`
+    /// for the safety preconditions the caller must ensure.
+    pub fn compact(&mut self) -> CompactStats {
+        match self {
+            Self::RGA(v) => {
+                let removed = v.compact();
+                CompactStats { tombstones_removed: removed, move_records_removed: 0 }
+            }
+            Self::Tree(v) => {
+                let (nodes, records) = v.compact();
+                CompactStats { tombstones_removed: nodes, move_records_removed: records }
+            }
+            // All other types have no unbounded accumulated state.
+            _ => CompactStats::default(),
+        }
+    }
+
     /// Compute delta since `vc` and serialize to msgpack.
     pub fn delta_since_msgpack(&self, vc: &VectorClock) -> Result<Option<Vec<u8>>, CrdtError> {
         let delta = match self {
@@ -200,7 +233,95 @@ impl CrdtOp {
     }
 }
 
+/// Maximum allowed clock drift between a client HLC and the server wall clock.
+/// Ops with `|client_wall_ms - server_now_ms| > CLOCK_DRIFT_TOLERANCE_MS` are rejected
+/// to prevent rogue clients from injecting far-future timestamps and winning all LWW merges.
+pub const CLOCK_DRIFT_TOLERANCE_MS: u64 = 30_000; // 30 seconds
+
+/// Validate that the client-supplied HLC wall time is within the allowed drift window.
+///
+/// Returns `Err(CrdtError::InvalidOp)` if the op should be rejected.
+/// Only ops that carry a client HLC (`LwwRegister`, `Presence`) are checked;
+/// all other op types are accepted unconditionally.
+#[instrument(skip(op), fields(op_type = op.crdt_type().as_str()))]
+pub fn validate_clock_drift(op: &CrdtOp, server_now_ms: u64) -> Result<(), CrdtError> {
+    let client_wall_ms: Option<u64> = match op {
+        CrdtOp::LwwRegister(o) => Some(o.hlc.wall_ms),
+        CrdtOp::Presence(PresenceOp::Heartbeat { hlc, .. }) => Some(hlc.wall_ms),
+        CrdtOp::Presence(PresenceOp::Leave { hlc, .. }) => Some(hlc.wall_ms),
+        _ => None,
+    };
+
+    if let Some(client_ms) = client_wall_ms {
+        let drift = client_ms.abs_diff(server_now_ms);
+        if drift > CLOCK_DRIFT_TOLERANCE_MS {
+            warn!(
+                client_wall_ms = client_ms,
+                server_now_ms,
+                drift_ms = drift,
+                max_ms = CLOCK_DRIFT_TOLERANCE_MS,
+                "clock drift too large — op rejected"
+            );
+            return Err(CrdtError::InvalidOp(format!(
+                "clock drift too large: client_wall_ms={client_ms} server_now_ms={server_now_ms} drift={drift}ms (max {}ms)",
+                CLOCK_DRIFT_TOLERANCE_MS
+            )));
+        }
+        debug!(client_wall_ms = client_ms, server_now_ms, drift_ms = drift, "clock drift ok");
+    }
+
+    Ok(())
+}
+
+/// Current wire format version for `VersionedOp`.
+/// Increment this constant when making breaking changes to the op encoding.
+pub const OP_VERSION: u8 = 1;
+
+/// Wire-format envelope for a `CrdtOp` that carries a schema version number.
+///
+/// Allows future receivers to detect when they receive an op encoded with a
+/// newer format they don't understand, rather than silently misinterpreting it.
+///
+/// Backwards-compatible: `version` defaults to `0` when absent (old clients),
+/// so legacy msgpack payloads without this field still deserialize correctly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionedOp {
+    /// Schema version of the enclosed `op`. `0` = legacy (no version field).
+    #[serde(default)]
+    pub version: u8,
+    /// The actual CRDT operation.
+    pub op: CrdtOp,
+}
+
+impl VersionedOp {
+    /// Wrap a `CrdtOp` with the current protocol version.
+    pub fn new(op: CrdtOp) -> Self {
+        Self { version: OP_VERSION, op }
+    }
+
+    /// Decode from msgpack bytes, accepting both versioned and legacy payloads.
+    ///
+    /// Returns `Err` if the version is newer than what this build understands,
+    /// preventing silent data corruption from future format changes.
+    pub fn from_msgpack(bytes: &[u8]) -> Result<Self, CrdtError> {
+        let v: Self = rmp_serde::decode::from_slice(bytes).map_err(CrdtError::Deserialization)?;
+        if v.version > OP_VERSION {
+            return Err(CrdtError::InvalidOp(format!(
+                "op version {} is newer than supported version {}; upgrade the server",
+                v.version, OP_VERSION
+            )));
+        }
+        Ok(v)
+    }
+
+    /// Encode to msgpack bytes with the current protocol version.
+    pub fn to_msgpack(&self) -> Result<Vec<u8>, CrdtError> {
+        rmp_serde::encode::to_vec_named(self).map_err(CrdtError::Serialization)
+    }
+}
+
 /// Apply a CrdtOp to a CrdtValue. Returns a serialized delta on success.
+#[instrument(skip(value, op), fields(crdt_type = value.crdt_type().as_str(), op_type = op.crdt_type().as_str()))]
 pub fn apply_op(value: &mut CrdtValue, op: CrdtOp) -> Result<Option<Vec<u8>>, CrdtError> {
     macro_rules! apply_and_serialize {
         ($crdt:expr, $op:expr) => {{
@@ -212,7 +333,7 @@ pub fn apply_op(value: &mut CrdtValue, op: CrdtOp) -> Result<Option<Vec<u8>>, Cr
         }};
     }
 
-    match (value, op) {
+    let result = match (value, op) {
         (CrdtValue::GCounter(v),    CrdtOp::GCounter(op))    => apply_and_serialize!(v, op),
         (CrdtValue::PNCounter(v),   CrdtOp::PNCounter(op))   => apply_and_serialize!(v, op),
         (CrdtValue::ORSet(v),       CrdtOp::ORSet(op))       => apply_and_serialize!(v, op),
@@ -222,7 +343,13 @@ pub fn apply_op(value: &mut CrdtValue, op: CrdtOp) -> Result<Option<Vec<u8>>, Cr
         (CrdtValue::RGA(v),         CrdtOp::RGA(op))         => apply_and_serialize!(v, op),
         (CrdtValue::Tree(v),        CrdtOp::Tree(op))        => apply_and_serialize!(v, op),
         _ => Err(CrdtError::InvalidOp("op type does not match crdt type".into())),
+    };
+    match &result {
+        Ok(Some(_)) => debug!("op applied, delta produced"),
+        Ok(None)    => debug!("op applied, no-op (already seen)"),
+        Err(e)      => warn!(error = %e, "op rejected"),
     }
+    result
 }
 
 #[cfg(test)]
@@ -269,5 +396,94 @@ mod tests {
         let bytes = v.to_msgpack().unwrap();
         let v2 = CrdtValue::from_msgpack(&bytes).unwrap();
         assert_eq!(v.to_json_value(), v2.to_json_value());
+    }
+
+    // --- clock drift validation ---
+
+    fn lww_op(wall_ms: u64) -> CrdtOp {
+        use crate::crdt::{HybridLogicalClock, lwwregister::LwwOp};
+        CrdtOp::LwwRegister(LwwOp {
+            value: serde_json::Value::String("v".into()),
+            hlc: HybridLogicalClock { wall_ms, logical: 0, node_id: 1 },
+            author: 1,
+        })
+    }
+
+    fn presence_heartbeat_op(wall_ms: u64) -> CrdtOp {
+        use crate::crdt::{HybridLogicalClock, presence::PresenceOp};
+        CrdtOp::Presence(PresenceOp::Heartbeat {
+            client_id: 1,
+            data: serde_json::Value::Null,
+            hlc: HybridLogicalClock { wall_ms, logical: 0, node_id: 1 },
+            ttl_ms: 5000,
+        })
+    }
+
+    #[test]
+    fn clock_drift_accepts_op_within_tolerance() {
+        let server_now = 100_000u64;
+        // Exactly at tolerance boundary — should pass.
+        assert!(validate_clock_drift(&lww_op(server_now + CLOCK_DRIFT_TOLERANCE_MS), server_now).is_ok());
+        assert!(validate_clock_drift(&lww_op(server_now - CLOCK_DRIFT_TOLERANCE_MS), server_now).is_ok());
+    }
+
+    #[test]
+    fn clock_drift_rejects_future_timestamp() {
+        let server_now = 100_000u64;
+        let future = server_now + CLOCK_DRIFT_TOLERANCE_MS + 1;
+        assert!(validate_clock_drift(&lww_op(future), server_now).is_err());
+    }
+
+    #[test]
+    fn clock_drift_rejects_past_timestamp() {
+        let server_now = 100_000u64;
+        let past = server_now - CLOCK_DRIFT_TOLERANCE_MS - 1;
+        assert!(validate_clock_drift(&lww_op(past), server_now).is_err());
+    }
+
+    #[test]
+    fn clock_drift_validates_presence_heartbeat() {
+        let server_now = 100_000u64;
+        let future = server_now + CLOCK_DRIFT_TOLERANCE_MS + 1;
+        assert!(validate_clock_drift(&presence_heartbeat_op(future), server_now).is_err());
+        assert!(validate_clock_drift(&presence_heartbeat_op(server_now), server_now).is_ok());
+    }
+
+    #[test]
+    fn clock_drift_skips_non_hlc_ops() {
+        // GCounter ops carry no HLC — must always pass regardless of server_now.
+        let op = CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 });
+        assert!(validate_clock_drift(&op, 0).is_ok());
+        assert!(validate_clock_drift(&op, u64::MAX).is_ok());
+    }
+
+    // --- VersionedOp ---
+
+    #[test]
+    fn versioned_op_roundtrip() {
+        let op = CrdtOp::GCounter(GCounterOp { client_id: 7, amount: 3 });
+        let versioned = VersionedOp::new(op);
+        assert_eq!(versioned.version, OP_VERSION);
+        let bytes = versioned.to_msgpack().unwrap();
+        let decoded = VersionedOp::from_msgpack(&bytes).unwrap();
+        assert_eq!(decoded.version, OP_VERSION);
+        assert!(matches!(decoded.op, CrdtOp::GCounter(GCounterOp { client_id: 7, amount: 3 })));
+    }
+
+    #[test]
+    fn versioned_op_rejects_future_version() {
+        // Simulate receiving a payload from a newer server.
+        let future = VersionedOp { version: OP_VERSION + 1, op: CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 }) };
+        let bytes = rmp_serde::encode::to_vec_named(&future).unwrap();
+        assert!(VersionedOp::from_msgpack(&bytes).is_err());
+    }
+
+    #[test]
+    fn versioned_op_accepts_legacy_version_zero() {
+        // A payload with version=0 (old client, no version field) must deserialize.
+        let legacy = VersionedOp { version: 0, op: CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 }) };
+        let bytes = rmp_serde::encode::to_vec_named(&legacy).unwrap();
+        let decoded = VersionedOp::from_msgpack(&bytes).unwrap();
+        assert_eq!(decoded.version, 0);
     }
 }

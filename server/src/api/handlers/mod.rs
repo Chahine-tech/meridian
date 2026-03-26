@@ -1,4 +1,5 @@
 pub mod crdt;
+pub mod health;
 pub mod history;
 pub mod metrics;
 pub mod sse;
