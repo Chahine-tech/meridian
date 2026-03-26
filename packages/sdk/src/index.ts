@@ -75,6 +75,10 @@ export type { UndoEntry, UndoBatch, RgaInsertEntry, TreeAddEntry, TreeDeleteEntr
 // Fractional indexing — position helpers for TreeCRDT
 export { fi, between, before, after, start, end, spread } from "./utils/fractional.js";
 
+// Validation — runtime validators for CRDT string values
+export { CrdtValidationError, zodValidator, fnValidator } from "./validation/index.js";
+export type { CrdtValidator } from "./validation/index.js";
+
 // Conflict visualization — events emitted by TreeHandle on concurrent op resolution
 export type { ConflictEvent, MoveDiscardedEvent, MoveReorderedEvent, LwwOverwriteEvent } from "./conflict/types.js";
 export type { DiscardedMove } from "./sync/delta.js";

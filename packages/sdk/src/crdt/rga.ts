@@ -2,6 +2,7 @@ import { Chunk, Effect, Stream } from "effect";
 import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { RGADelta } from "../sync/delta.js";
+import { type CrdtValidator, runValidator } from "../validation/index.js";
 
 /**
  * Low-level handle for an RGA (Replicated Growable Array) CRDT — collaborative text editing.
@@ -16,16 +17,19 @@ export class RGAHandle {
   private readonly crdtId: string;
   private readonly clientId: number;
   private readonly transport: WsTransport;
+  private readonly validator: CrdtValidator | undefined;
   private readonly listeners = new Set<(value: string) => void>();
 
   constructor(opts: {
     crdtId: string;
     clientId: number;
     transport: WsTransport;
+    validator?: CrdtValidator;
   }) {
     this.crdtId = opts.crdtId;
     this.clientId = opts.clientId;
     this.transport = opts.transport;
+    this.validator = opts.validator;
   }
 
   /** The CRDT key this handle is bound to. */
@@ -66,6 +70,7 @@ export class RGAHandle {
    */
   insert(pos: number, text: string, ttlMs?: number): string[] {
     if (text.length === 0) return [];
+    runValidator(this.validator, text);
 
     // Optimistic local update.
     this.text = this.text.slice(0, pos) + text + this.text.slice(pos);

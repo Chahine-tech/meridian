@@ -4,6 +4,7 @@ import type { WsTransport } from "../transport/websocket.js";
 import type { TreeDelta, TreeNodeValue } from "../sync/delta.js";
 import type { ConflictEvent, LwwOverwriteEvent, MoveDiscardedEvent, MoveReorderedEvent } from "../conflict/types.js";
 import type { DiscardedMove } from "../sync/delta.js";
+import { type CrdtValidator, runValidator } from "../validation/index.js";
 
 /**
  * Low-level handle for a TreeCRDT — a convergent hierarchical tree.
@@ -31,6 +32,7 @@ export class TreeHandle {
   private readonly crdtId: string;
   private readonly clientId: number;
   private readonly transport: WsTransport;
+  private readonly validator: CrdtValidator | undefined;
   private readonly listeners = new Set<(value: { roots: TreeNodeValue[] }) => void>();
   private readonly conflictListeners = new Set<(event: ConflictEvent) => void>();
   private readonly conflictHistory: ConflictEvent[] = [];
@@ -42,10 +44,12 @@ export class TreeHandle {
     crdtId: string;
     clientId: number;
     transport: WsTransport;
+    validator?: CrdtValidator;
   }) {
     this.crdtId = opts.crdtId;
     this.clientId = opts.clientId;
     this.transport = opts.transport;
+    this.validator = opts.validator;
   }
 
   /** The CRDT key this handle is bound to. */
@@ -84,6 +88,7 @@ export class TreeHandle {
    * @returns The new node's ID as a string.
    */
   addNode(parentId: string | null, position: string, value: string, ttlMs?: number): string {
+    runValidator(this.validator, value);
     const wallMs = Date.now();
     const logical = this.opCounter++;
     const id = { wall_ms: wallMs, logical, node_id: this.clientId };
@@ -166,6 +171,7 @@ export class TreeHandle {
    * @param ttlMs   - Optional TTL.
    */
   updateNode(nodeId: string, value: string, ttlMs?: number): void {
+    runValidator(this.validator, value);
     const wallMs = Date.now();
     const logical = this.opCounter++;
     const updatedAt = { wall_ms: wallMs, logical, node_id: this.clientId };
