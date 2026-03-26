@@ -396,7 +396,7 @@ export class MeridianClient {
   rga(crdtId: string, opts?: { validator?: CrdtValidator }): RGAHandle {
     let handle = this.rgaHandles.get(crdtId);
     if (!handle) {
-      handle = new RGAHandle({ crdtId, clientId: this.clientId, transport: this.transport, validator: opts?.validator });
+      handle = new RGAHandle({ crdtId, clientId: this.clientId, transport: this.transport, ...(opts?.validator !== undefined && { validator: opts.validator }) });
       this.rgaHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
@@ -426,7 +426,7 @@ export class MeridianClient {
   tree(crdtId: string, opts?: { validator?: CrdtValidator }): TreeHandle {
     let handle = this.treeHandles.get(crdtId);
     if (!handle) {
-      handle = new TreeHandle({ crdtId, clientId: this.clientId, transport: this.transport, validator: opts?.validator });
+      handle = new TreeHandle({ crdtId, clientId: this.clientId, transport: this.transport, ...(opts?.validator !== undefined && { validator: opts.validator }) });
       this.treeHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));

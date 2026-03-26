@@ -107,6 +107,7 @@ export function zodValidator(schema: {
       if (!result.success) {
         return { ok: false, error: result.error.message };
       }
+      return { ok: true };
     },
   };
 }
