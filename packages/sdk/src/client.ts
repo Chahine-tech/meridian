@@ -12,6 +12,7 @@ import { CRDTMapHandle } from "./crdt/crdtmap.js";
 import { AwarenessHandle } from "./crdt/awareness.js";
 import { RGAHandle } from "./crdt/rga.js";
 import { TreeHandle } from "./crdt/tree.js";
+import type { CrdtValidator } from "./validation/index.js";
 import {
   decodeGCounterDelta,
   decodePNCounterDelta,
@@ -392,10 +393,10 @@ export class MeridianClient {
    * doc.onChange(text => console.log(text));
    * ```
    */
-  rga(crdtId: string): RGAHandle {
+  rga(crdtId: string, opts?: { validator?: CrdtValidator }): RGAHandle {
     let handle = this.rgaHandles.get(crdtId);
     if (!handle) {
-      handle = new RGAHandle({ crdtId, clientId: this.clientId, transport: this.transport });
+      handle = new RGAHandle({ crdtId, clientId: this.clientId, transport: this.transport, ...(opts?.validator !== undefined && { validator: opts.validator }) });
       this.rgaHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
@@ -422,10 +423,10 @@ export class MeridianClient {
    * tree.onChange(t => console.log(t.roots));
    * ```
    */
-  tree(crdtId: string): TreeHandle {
+  tree(crdtId: string, opts?: { validator?: CrdtValidator }): TreeHandle {
     let handle = this.treeHandles.get(crdtId);
     if (!handle) {
-      handle = new TreeHandle({ crdtId, clientId: this.clientId, transport: this.transport });
+      handle = new TreeHandle({ crdtId, clientId: this.clientId, transport: this.transport, ...(opts?.validator !== undefined && { validator: opts.validator }) });
       this.treeHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));

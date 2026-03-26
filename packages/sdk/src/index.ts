@@ -68,6 +68,21 @@ export {
 } from "./schema.js";
 export type { TimestampMs, ClientId } from "./schema.js";
 
+// Undo/redo
+export { UndoManager } from "./undo/UndoManager.js";
+export type { UndoEntry, UndoBatch, RgaInsertEntry, TreeAddEntry, TreeDeleteEntry, TreeMoveEntry, TreeUpdateEntry } from "./undo/types.js";
+
+// Fractional indexing — position helpers for TreeCRDT
+export { fi, between, before, after, start, end, spread } from "./utils/fractional.js";
+
+// Validation — runtime validators for CRDT string values
+export { CrdtValidationError, zodValidator, fnValidator } from "./validation/index.js";
+export type { CrdtValidator } from "./validation/index.js";
+
+// Conflict visualization — events emitted by TreeHandle on concurrent op resolution
+export type { ConflictEvent, MoveDiscardedEvent, MoveReorderedEvent, LwwOverwriteEvent } from "./conflict/types.js";
+export type { DiscardedMove } from "./sync/delta.js";
+
 // AI Agents — Claude tool use helpers
 export {
   getMeridianTools,

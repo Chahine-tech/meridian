@@ -82,10 +82,28 @@ pub enum TreeOp {
     },
 }
 
-#[must_use]
+/// A MoveNode op that was rejected because it would have created a cycle.
+/// Included in the delta so clients can emit `move_discarded` conflict events.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscardedMove {
+    /// The node that was supposed to move.
+    pub node_id: HybridLogicalClock,
+    /// The parent it tried to move under (None = root level).
+    pub attempted_parent_id: Option<HybridLogicalClock>,
+    pub attempted_position: String,
+    /// The parent it actually stayed under (unchanged).
+    pub actual_parent_id: Option<HybridLogicalClock>,
+    pub actual_position: String,
+}
+
+#[must_use]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TreeDelta {
     pub ops: Vec<TreeOp>,
+    /// MoveNode ops that were rejected due to cycle prevention.
+    /// Empty in the common case; populated only when a cycle would have occurred.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discarded_moves: Vec<DiscardedMove>,
 }
 
 /// Recursive tree node as delivered to clients.
@@ -94,6 +112,8 @@ pub struct TreeNodeValue {
     /// HLC serialized as "wall_ms:logical:node_id" — avoids JS bigint issues.
     pub id: String,
     pub value: String,
+    /// Fractional index string for sibling ordering (e.g. "a0", "b0").
+    pub position: String,
     pub children: Vec<TreeNodeValue>,
 }
 
@@ -151,6 +171,7 @@ impl TreeCrdt {
         TreeNodeValue {
             id: Self::hlc_to_str(node.id),
             value: node.value.clone(),
+            position: node.position.clone(),
             children: children.iter().map(|c| self.build_node_value(c)).collect(),
         }
     }
@@ -182,7 +203,7 @@ impl Crdt for TreeCrdt {
                     deleted: false,
                     updated_at: id,
                 });
-                Ok(Some(TreeDelta { ops: vec![op] }))
+                Ok(Some(TreeDelta { ops: vec![op], ..Default::default() }))
             }
 
             TreeOp::MoveNode { op_id, node_id, new_parent_id, ref new_position } => {
@@ -197,7 +218,14 @@ impl Crdt for TreeCrdt {
                 };
                 // Cycle prevention: refuse if new_parent is a descendant of node_id.
                 if new_parent_id.is_some_and(|new_pid| new_pid == node_id || self.is_ancestor(new_pid, node_id)) {
-                    return Ok(None);
+                    let discarded = DiscardedMove {
+                        node_id,
+                        attempted_parent_id: new_parent_id,
+                        attempted_position: new_position.clone(),
+                        actual_parent_id: self.nodes[node_idx].parent_id,
+                        actual_position: self.nodes[node_idx].position.clone(),
+                    };
+                    return Ok(Some(TreeDelta { ops: vec![], discarded_moves: vec![discarded] }));
                 }
                 let old_parent_id = self.nodes[node_idx].parent_id;
                 let old_position = self.nodes[node_idx].position.clone();
@@ -214,7 +242,7 @@ impl Crdt for TreeCrdt {
                     old_position,
                 });
 
-                Ok(Some(TreeDelta { ops: vec![op] }))
+                Ok(Some(TreeDelta { ops: vec![op], ..Default::default() }))
             }
 
             TreeOp::UpdateNode { id, ref value, updated_at } => {
@@ -227,7 +255,7 @@ impl Crdt for TreeCrdt {
                         }
                         node.value = value.clone();
                         node.updated_at = updated_at;
-                        Ok(Some(TreeDelta { ops: vec![op] }))
+                        Ok(Some(TreeDelta { ops: vec![op], ..Default::default() }))
                     }
                 }
             }
@@ -238,7 +266,7 @@ impl Crdt for TreeCrdt {
                     Some(node) if node.deleted => Ok(None),
                     Some(node) => {
                         node.deleted = true;
-                        Ok(Some(TreeDelta { ops: vec![TreeOp::DeleteNode { id }] }))
+                        Ok(Some(TreeDelta { ops: vec![TreeOp::DeleteNode { id }], ..Default::default() }))
                     }
                 }
             }
@@ -371,7 +399,7 @@ impl Crdt for TreeCrdt {
             }
         }
 
-        if ops.is_empty() { None } else { Some(TreeDelta { ops }) }
+        if ops.is_empty() { None } else { Some(TreeDelta { ops, ..Default::default() }) }
     }
 
     fn value(&self) -> TreeValue {
@@ -528,7 +556,12 @@ mod tests {
             new_position: "a0".into(),
         }).unwrap();
 
-        assert!(delta.is_none(), "cycle-creating move must be discarded");
+        // cycle-creating move returns a delta with one discarded_move entry (no ops)
+        let delta = delta.expect("cycle move must return a delta with discarded_moves");
+        assert!(delta.ops.is_empty(), "discarded move must have no ops");
+        assert_eq!(delta.discarded_moves.len(), 1);
+        assert_eq!(delta.discarded_moves[0].node_id, root);
+        assert_eq!(delta.discarded_moves[0].attempted_parent_id, Some(grandchild));
         // root is still at the top level
         assert_eq!(t.value().roots.len(), 1);
         assert_eq!(t.value().roots[0].value, "Root");
@@ -546,7 +579,10 @@ mod tests {
             new_parent_id: Some(id), // move under itself
             new_position: "a0".into(),
         }).unwrap();
-        assert!(delta.is_none());
+        let delta = delta.expect("self-cycle move must return a delta with discarded_moves");
+        assert!(delta.ops.is_empty());
+        assert_eq!(delta.discarded_moves.len(), 1);
+        assert_eq!(delta.discarded_moves[0].node_id, id);
     }
 
     #[test]
