@@ -27,7 +27,7 @@
     "effect": "^3.21.0"
   },
   "peerDependencies": {
-    "meridian-sdk": "workspace:*",
+    "meridian-sdk": ">=1.0.0",
     "react": "^19.0.0",
     "typescript": ">=5.0.0"
   },

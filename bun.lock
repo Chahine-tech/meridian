@@ -69,7 +69,7 @@
     },
     "packages/cli": {
       "name": "meridian-cli",
-      "version": "1.0.0",
+      "version": "1.1.2",
       "bin": {
         "meridian": "./dist/main.js",
       },
@@ -87,11 +87,10 @@
     },
     "packages/devtools": {
       "name": "meridian-devtools",
-      "version": "1.0.1",
+      "version": "1.2.1",
       "devDependencies": {
         "@biomejs/biome": "^2.4.7",
         "@types/react": "^19.0.0",
-        "meridian-sdk": "workspace:*",
         "typescript": "^5.8.0",
       },
       "peerDependencies": {
@@ -102,7 +101,7 @@
     },
     "packages/sdk": {
       "name": "meridian-sdk",
-      "version": "1.0.1",
+      "version": "1.2.1",
       "dependencies": {
         "@msgpack/msgpack": "^3.0.0",
         "effect": "^3.21.0",
@@ -118,14 +117,13 @@
     },
     "packages/sdk-react": {
       "name": "meridian-react",
-      "version": "1.0.1",
+      "version": "1.2.1",
       "dependencies": {
         "effect": "^3.21.0",
       },
       "devDependencies": {
         "@biomejs/biome": "^2.4.7",
         "@types/react": "^19.0.0",
-        "meridian-sdk": "workspace:*",
         "typescript": "^5.8.0",
       },
       "peerDependencies": {
