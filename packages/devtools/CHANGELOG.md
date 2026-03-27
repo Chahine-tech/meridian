@@ -1,5 +1,16 @@
 # meridian-devtools
 
+## 2.0.0
+
+### Patch Changes
+
+- 48647ce: **meridian-sdk**: Add granular permissions V2 schema (`PermissionsV2`, `PermEntry`, `OpMask`), multi-provider AI agent adapters (`executeOpenAITool`, `executeGeminiTool`, `OpenAIToolCall`, `GeminiFunctionCall`), and fix ORSet delta sync to return real deltas based on VectorClock instead of full state.
+
+  **meridian-devtools**: Add colors for `rga` (orange) and `tree` (sky) CRDT types in the visualization panel.
+
+- Updated dependencies [48647ce]
+  - meridian-sdk@1.3.0
+
 ## 1.2.1
 
 ### Patch Changes
