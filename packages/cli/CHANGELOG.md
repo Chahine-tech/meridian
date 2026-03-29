@@ -1,5 +1,12 @@
 # meridian-cli
 
+## 1.1.4
+
+### Patch Changes
+
+- Updated dependencies [f234dcc]
+  - meridian-sdk@1.4.0
+
 ## 1.1.3
 
 ### Patch Changes
