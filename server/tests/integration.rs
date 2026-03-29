@@ -1084,7 +1084,7 @@ async fn ws_live_query_pushed_on_delta() {
 #[tokio::test]
 async fn ws_live_query_unsubscribe_stops_pushes() {
     use futures_util::{SinkExt, StreamExt};
-    use meridian_core::protocol::{ClientMsg, LiveQueryPayload, ServerMsg};
+    use meridian_core::protocol::{ClientMsg, LiveQueryPayload};
 
     let (app, signer) = build_test_app();
     let token = read_write_token(&signer, "ns");
