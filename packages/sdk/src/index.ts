@@ -68,6 +68,8 @@ export {
   CrdtGetResponse,
   CrdtOpResponse,
   ErrorResponse,
+  QuerySpec,
+  QueryResult,
 } from "./schema.js";
 export type { TimestampMs, ClientId } from "./schema.js";
 

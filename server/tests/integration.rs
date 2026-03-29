@@ -577,3 +577,311 @@ async fn v2_no_write_rules_blocks_all_writes() {
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
+
+// ---------------------------------------------------------------------------
+// POST /v1/namespaces/:ns/query
+// ---------------------------------------------------------------------------
+
+async fn post_op_for_query(
+    app: axum::Router,
+    ns: &str,
+    crdt_id: &str,
+    op: CrdtOp,
+    token: &str,
+) {
+    let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
+    let uri = format!("/v1/namespaces/{ns}/crdts/{crdt_id}/ops");
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(uri)
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/msgpack")
+                .body(Body::from(op_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+async fn post_query_req(
+    app: axum::Router,
+    ns: &str,
+    body: serde_json::Value,
+    token: &str,
+) -> (StatusCode, serde_json::Value) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/v1/namespaces/{ns}/query"))
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = body_bytes(response.into_body()).await;
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, json)
+}
+
+#[tokio::test]
+async fn post_query_gcounter_sum() {
+    use meridian_server::crdt::gcounter::GCounterOp;
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "ns");
+
+    // Seed three GCounters: 6 + 10 + 4 = 20
+    for (id, amount) in [("gc:a", 6u64), ("gc:b", 10), ("gc:c", 4)] {
+        post_op_for_query(
+            app.clone(),
+            "ns",
+            id,
+            CrdtOp::GCounter(GCounterOp { client_id: 1, amount }),
+            &token,
+        )
+        .await;
+    }
+
+    let (status, json) = post_query_req(
+        app,
+        "ns",
+        serde_json::json!({ "from": "gc:*", "aggregate": "sum" }),
+        &token,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["value"], 20);
+    assert_eq!(json["matched"], 3);
+    assert_eq!(json["scanned"], 3);
+}
+
+#[tokio::test]
+async fn post_query_count_short_circuit() {
+    use meridian_server::crdt::gcounter::GCounterOp;
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "ns");
+
+    for (id, amount) in [("gc:x", 1u64), ("gc:y", 2), ("gc:z", 3)] {
+        post_op_for_query(
+            app.clone(),
+            "ns",
+            id,
+            CrdtOp::GCounter(GCounterOp { client_id: 1, amount }),
+            &token,
+        )
+        .await;
+    }
+
+    let (status, json) = post_query_req(
+        app,
+        "ns",
+        serde_json::json!({ "from": "gc:*", "aggregate": "count" }),
+        &token,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["value"], 3);
+    assert_eq!(json["matched"], 3);
+}
+
+#[tokio::test]
+async fn post_query_glob_filter() {
+    use meridian_server::crdt::gcounter::GCounterOp;
+    use meridian_server::crdt::pncounter::PNCounterOp;
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "ns");
+
+    post_op_for_query(
+        app.clone(),
+        "ns",
+        "gc:views-home",
+        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 5 }),
+        &token,
+    )
+    .await;
+    post_op_for_query(
+        app.clone(),
+        "ns",
+        "gc:views-dash",
+        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 8 }),
+        &token,
+    )
+    .await;
+    post_op_for_query(
+        app.clone(),
+        "ns",
+        "pn:score",
+        CrdtOp::PNCounter(PNCounterOp::Increment { client_id: 1, amount: 3 }),
+        &token,
+    )
+    .await;
+
+    let (status, json) = post_query_req(
+        app,
+        "ns",
+        serde_json::json!({ "from": "gc:views-*", "aggregate": "sum" }),
+        &token,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["value"], 13);
+    assert_eq!(json["matched"], 2);
+    assert_eq!(json["scanned"], 3);
+}
+
+#[tokio::test]
+async fn post_query_type_filter() {
+    use meridian_server::crdt::gcounter::GCounterOp;
+    use meridian_server::crdt::pncounter::PNCounterOp;
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "ns");
+
+    post_op_for_query(
+        app.clone(),
+        "ns",
+        "gc:counter",
+        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 7 }),
+        &token,
+    )
+    .await;
+    post_op_for_query(
+        app.clone(),
+        "ns",
+        "pn:score",
+        CrdtOp::PNCounter(PNCounterOp::Increment { client_id: 1, amount: 3 }),
+        &token,
+    )
+    .await;
+
+    let (status, json) = post_query_req(
+        app,
+        "ns",
+        serde_json::json!({ "from": "*", "type": "gcounter", "aggregate": "sum" }),
+        &token,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["value"], 7);
+    assert_eq!(json["matched"], 1);
+    assert_eq!(json["scanned"], 2);
+}
+
+#[tokio::test]
+async fn post_query_orset_union() {
+    use meridian_server::crdt::orset::ORSetOp;
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "ns");
+    let tag_a = uuid::Uuid::new_v4();
+    let tag_b = uuid::Uuid::new_v4();
+
+    post_op_for_query(
+        app.clone(),
+        "ns",
+        "or:tags-a",
+        CrdtOp::ORSet(ORSetOp::Add {
+            element: serde_json::json!("apple"),
+            tag: tag_a,
+            node_id: 1,
+            seq: 1,
+        }),
+        &token,
+    )
+    .await;
+    post_op_for_query(
+        app.clone(),
+        "ns",
+        "or:tags-b",
+        CrdtOp::ORSet(ORSetOp::Add {
+            element: serde_json::json!("banana"),
+            tag: tag_b,
+            node_id: 1,
+            seq: 2,
+        }),
+        &token,
+    )
+    .await;
+
+    let (status, json) = post_query_req(
+        app,
+        "ns",
+        serde_json::json!({ "from": "or:*", "aggregate": "union" }),
+        &token,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let elements = json["value"].as_array().unwrap();
+    assert_eq!(elements.len(), 2);
+    assert_eq!(json["matched"], 2);
+}
+
+#[tokio::test]
+async fn post_query_wrong_ns_returns_403() {
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "other-ns");
+
+    let (status, _) = post_query_req(
+        app,
+        "ns",
+        serde_json::json!({ "from": "*", "aggregate": "count" }),
+        &token,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn post_query_incompatible_aggregate_returns_400() {
+    use meridian_server::crdt::gcounter::GCounterOp;
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "ns");
+
+    post_op_for_query(
+        app.clone(),
+        "ns",
+        "gc:counter",
+        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 5 }),
+        &token,
+    )
+    .await;
+
+    let (status, json) = post_query_req(
+        app,
+        "ns",
+        serde_json::json!({ "from": "gc:*", "aggregate": "union" }),
+        &token,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"], "incompatible_aggregate");
+}
+
+#[tokio::test]
+async fn post_query_empty_namespace_returns_null() {
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "empty-ns");
+
+    let (status, json) = post_query_req(
+        app,
+        "empty-ns",
+        serde_json::json!({ "from": "*", "aggregate": "sum" }),
+        &token,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["matched"], 0);
+    assert_eq!(json["value"], serde_json::Value::Null);
+}

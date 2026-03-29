@@ -158,3 +158,27 @@ export const ErrorResponse = Schema.Struct({
   message: Schema.String,
 });
 export type ErrorResponse = typeof ErrorResponse.Type;
+
+export const QuerySpec = Schema.Struct({
+  from: Schema.String,
+  type: Schema.optional(Schema.String),
+  aggregate: Schema.Literal(
+    "sum", "max", "min", "count",
+    "union", "intersection",
+    "latest", "collect",
+    "merge",
+  ),
+  where: Schema.optional(Schema.Struct({
+    contains: Schema.optional(Schema.Unknown),
+    updatedAfter: Schema.optional(Schema.Number),
+  })),
+});
+export type QuerySpec = typeof QuerySpec.Type;
+
+export const QueryResult = Schema.Struct({
+  value: Schema.Unknown,
+  matched: Schema.Number,
+  scanned: Schema.Number,
+  execution_ms: Schema.Number,
+});
+export type QueryResult = typeof QueryResult.Type;

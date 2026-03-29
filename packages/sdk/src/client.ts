@@ -1,4 +1,5 @@
 import { Effect, type Schema } from "effect";
+import type { QuerySpec, QueryResult } from "./schema.js";
 import type { WsState } from "./transport/websocket.js";
 import { WsTransport } from "./transport/websocket.js";
 import type { CrdtMapValue } from "./crdt/crdtmap.js";
@@ -557,6 +558,19 @@ export class MeridianClient {
   /** Re-opens the WebSocket after a `close()`. Used by MeridianProvider to survive React StrictMode double-mount. */
   reopen(): void {
     this.transport.reopen();
+  }
+
+  /**
+   * Execute a cross-CRDT query against the namespace.
+   *
+   * @example
+   * ```ts
+   * const result = await client.query({ from: "gc:views-*", aggregate: "sum" });
+   * console.log(result.value); // total view count
+   * ```
+   */
+  query(spec: QuerySpec): Promise<QueryResult> {
+    return Effect.runPromise(this.http.query(this.namespace, spec));
   }
 
   private notifyAnyChange(): void {

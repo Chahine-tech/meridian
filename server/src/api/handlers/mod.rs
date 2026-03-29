@@ -2,6 +2,7 @@ pub mod crdt;
 pub mod health;
 pub mod history;
 pub mod metrics;
+pub mod query;
 pub mod sse;
 pub mod tokens;
 

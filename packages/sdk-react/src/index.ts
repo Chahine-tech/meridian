@@ -10,3 +10,4 @@ export { useAwareness } from "./hooks/useAwareness.js";
 export { useRGA } from "./hooks/useRGA.js";
 export { useTree } from "./hooks/useTree.js";
 export { useUndoRedo } from "./hooks/useUndoRedo.js";
+export { useQuery } from "./hooks/useQuery.js";
