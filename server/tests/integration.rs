@@ -1083,7 +1083,7 @@ async fn ws_live_query_pushed_on_delta() {
 /// `UnsubscribeQuery` stops future pushes.
 #[tokio::test]
 async fn ws_live_query_unsubscribe_stops_pushes() {
-    use futures_util::{SinkExt, StreamExt};
+    use futures_util::SinkExt;
     use meridian_core::protocol::{ClientMsg, LiveQueryPayload};
 
     let (app, signer) = build_test_app();
@@ -1104,20 +1104,32 @@ async fn ws_live_query_unsubscribe_stops_pushes() {
     .await
     .unwrap();
 
-    // Consume the initial result.
-    let _ = ws.next().await.unwrap().unwrap();
+    // Consume the initial result (empty namespace).
+    let _ = expect_query_result(&mut ws, "q3", 2_000).await;
 
-    // Unsubscribe.
+    // Apply a first op and wait for the push — this confirms the subscription
+    // is active and the server has processed the op before we unsubscribe.
+    post_op_for_query(
+        app.clone(),
+        "ns",
+        "gc:unsub-1",
+        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 }),
+        &token,
+    )
+    .await;
+    let _ = expect_query_result(&mut ws, "q3", 2_000).await;
+
+    // Now unsubscribe.
     ws.send(ws_encode(&ClientMsg::UnsubscribeQuery { query_id: "q3".into() }))
         .await
         .unwrap();
 
-    // Apply an op — delta is broadcast but should NOT be followed by a QueryResult.
+    // Apply a second op — the server must NOT push a QueryResult for q3.
     post_op_for_query(
         app,
         "ns",
-        "gc:unsub-1",
-        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 }),
+        "gc:unsub-2",
+        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 2 }),
         &token,
     )
     .await;
