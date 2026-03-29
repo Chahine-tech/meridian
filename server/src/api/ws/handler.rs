@@ -13,6 +13,7 @@ use tracing::{debug, info, warn};
 use meridian_core::protocol::BatchItem;
 
 use crate::{
+    api::handlers::{ExecuteQueryError, infer_crdt_type, query::{execute_query, AggregateOp, WhereClause}},
     auth::ClaimsExt,
     crdt::{
         clock::now_ms,
@@ -26,6 +27,7 @@ use crate::{
 
 use super::{
     protocol::{ClientMsg, ServerMsg},
+    query_registry::QueryRegistry,
     subscription::SubscriptionManager,
 };
 
@@ -89,6 +91,7 @@ async fn handle_socket<S: WsState>(mut socket: WebSocket, ns: String, client_id:
     let mut broadcast_rx = state.subscriptions().subscribe(&ns);
 
     let mut op_seq: u64 = 0;
+    let mut query_registry = QueryRegistry::default();
 
     loop {
         tokio::select! {
@@ -104,7 +107,7 @@ async fn handle_socket<S: WsState>(mut socket: WebSocket, ns: String, client_id:
                         break;
                     }
                     Some(Ok(msg)) => {
-                        if !handle_client_message(&mut socket, &state, &ns, client_id, &claims, msg, &mut op_seq).await {
+                        if !handle_client_message(&mut socket, &state, &ns, client_id, &claims, msg, &mut op_seq, &mut query_registry).await {
                             break;
                         }
                     }
@@ -115,10 +118,37 @@ async fn handle_socket<S: WsState>(mut socket: WebSocket, ns: String, client_id:
             broadcast_result = broadcast_rx.recv() => {
                 match broadcast_result {
                     Ok(server_msg) => {
+                        // Forward the delta to the client.
                         if let Ok(bytes) = server_msg.to_msgpack()
                             && socket.send(Message::Binary(bytes.into())).await.is_err()
                         {
                             break;
+                        }
+
+                        // Re-execute any live queries that match the changed CRDT.
+                        if !query_registry.is_empty()
+                            && let ServerMsg::Delta { crdt_id, .. } = server_msg.as_ref()
+                        {
+                            let bare_id = crdt_id.trim_start_matches(&format!("{ns}/"));
+                            // Infer the CRDT type from the ID prefix so we can skip
+                            // queries that have an incompatible type filter.
+                            let changed_type = infer_crdt_type(bare_id)
+                                .unwrap_or(crate::crdt::registry::CrdtType::GCounter);
+                            let matching: Vec<(String, _)> = query_registry
+                                .matching(bare_id, changed_type)
+                                .map(|(id, payload)| (id.to_owned(), payload.clone()))
+                                .collect();
+
+                            for (query_id, payload) in matching {
+                                push_live_query_result(
+                                    &mut socket,
+                                    state.store(),
+                                    &ns,
+                                    &query_id,
+                                    &payload,
+                                )
+                                .await;
+                            }
                         }
                     }
                     Err(RecvError::Lagged(n)) => {
@@ -142,7 +172,51 @@ async fn handle_socket<S: WsState>(mut socket: WebSocket, ns: String, client_id:
     debug!(ns, client_id, "WebSocket handler exiting");
 }
 
+/// Execute a live query and push the result to the socket.
+async fn push_live_query_result<S: CrdtStore>(
+    socket: &mut WebSocket,
+    store: &S,
+    ns: &str,
+    query_id: &str,
+    payload: &meridian_core::protocol::LiveQueryPayload,
+) {
+    let filter: Option<WhereClause> = payload.filter.as_ref().map(|f| WhereClause {
+        contains: f.contains.clone(),
+        updated_after: f.updated_after,
+    });
+
+    let agg_op: AggregateOp = match payload.aggregate.parse() {
+        Ok(op) => op,
+        Err(_) => {
+            warn!(query_id, aggregate = %payload.aggregate, "live query: unknown aggregate op");
+            return;
+        }
+    };
+
+    match execute_query(store, ns, &payload.from, payload.crdt_type.as_deref(), agg_op, filter.as_ref()).await {
+        Ok(outcome) => {
+            let msg = ServerMsg::QueryResult {
+                query_id: query_id.to_owned(),
+                value: outcome.value,
+                matched: outcome.matched,
+            };
+            if let Ok(b) = msg.to_msgpack() {
+                let _ = socket.send(Message::Binary(b.into())).await;
+            }
+        }
+        Err(e) => {
+            let detail = match &e {
+                ExecuteQueryError::UnknownCrdtType(s) => s.as_str(),
+                ExecuteQueryError::IncompatibleAggregate { aggregate, .. } => aggregate.as_str(),
+                ExecuteQueryError::Storage(s) => s.as_str(),
+            };
+            warn!(query_id, error = detail, "live query execution failed");
+        }
+    }
+}
+
 /// Returns false if the connection should be closed.
+#[allow(clippy::too_many_arguments)]
 async fn handle_client_message<S: WsState>(
     socket: &mut WebSocket,
     state: &S,
@@ -151,6 +225,7 @@ async fn handle_client_message<S: WsState>(
     claims: &TokenClaims,
     msg: Message,
     seq: &mut u64,
+    query_registry: &mut QueryRegistry,
 ) -> bool {
     let bytes = match msg {
         Message::Binary(b) => b,
@@ -386,6 +461,18 @@ async fn handle_client_message<S: WsState>(
                     send_error(socket, 500, "internal error").await;
                 }
             }
+        }
+
+        ClientMsg::SubscribeQuery { query_id, query } => {
+            debug!(ns, client_id, query_id, "live query subscribe");
+            // Register the query and immediately push a first result.
+            query_registry.insert(query_id.clone(), query.clone());
+            push_live_query_result(socket, state.store(), ns, &query_id, &query).await;
+        }
+
+        ClientMsg::UnsubscribeQuery { query_id } => {
+            debug!(ns, client_id, query_id, "live query unsubscribe");
+            query_registry.remove(&query_id);
         }
     }
 

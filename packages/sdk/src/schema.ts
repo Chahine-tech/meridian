@@ -82,6 +82,25 @@ export const ClientMsg = Schema.Union(
       data: Schema.Uint8ArrayFromSelf,
     }),
   }),
+  Schema.Struct({
+    SubscribeQuery: Schema.Struct({
+      query_id: Schema.String,
+      query: Schema.Struct({
+        from: Schema.String,
+        type: Schema.optional(Schema.String),
+        aggregate: Schema.String,
+        where: Schema.optional(
+          Schema.Struct({
+            contains: Schema.optional(Schema.Unknown),
+            updated_after: Schema.optional(Schema.Number),
+          }),
+        ),
+      }),
+    }),
+  }),
+  Schema.Struct({
+    UnsubscribeQuery: Schema.Struct({ query_id: Schema.String }),
+  }),
 );
 export type ClientMsg = typeof ClientMsg.Type;
 
@@ -101,6 +120,13 @@ export const ServerMsg = Schema.Union(
       client_id: ClientId,
       key: Schema.String,
       data: Schema.Uint8ArrayFromSelf,
+    }),
+  }),
+  Schema.Struct({
+    QueryResult: Schema.Struct({
+      query_id: Schema.String,
+      value: Schema.Unknown,
+      matched: Schema.Number,
     }),
   }),
 );
@@ -182,3 +208,10 @@ export const QueryResult = Schema.Struct({
   execution_ms: Schema.Number,
 });
 export type QueryResult = typeof QueryResult.Type;
+
+/** Result pushed by the server for a live query subscription (WebSocket only). */
+export const LiveQueryResult = Schema.Struct({
+  value: Schema.Unknown,
+  matched: Schema.Number,
+});
+export type LiveQueryResult = typeof LiveQueryResult.Type;

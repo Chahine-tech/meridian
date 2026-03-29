@@ -885,3 +885,303 @@ async fn post_query_empty_namespace_returns_null() {
     assert_eq!(json["matched"], 0);
     assert_eq!(json["value"], serde_json::Value::Null);
 }
+
+// ---------------------------------------------------------------------------
+// WebSocket live query tests
+// ---------------------------------------------------------------------------
+
+/// Bind a real TCP listener, spawn the axum server, return the bound address.
+async fn spawn_test_server(router: axum::Router) -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    addr
+}
+
+/// Open a WebSocket connection to the test server.
+async fn ws_connect(
+    addr: std::net::SocketAddr,
+    ns: &str,
+    token: &str,
+) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+    let url = format!("ws://{addr}/v1/namespaces/{ns}/connect?token={token}");
+    let (ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    ws
+}
+
+/// Encode a `ClientMsg` as a msgpack binary WS frame.
+fn ws_encode(msg: &meridian_core::protocol::ClientMsg) -> tokio_tungstenite::tungstenite::Message {
+    let bytes = msg.to_msgpack().unwrap();
+    tokio_tungstenite::tungstenite::Message::Binary(bytes.into())
+}
+
+/// Decode a binary WS frame as a `ServerMsg`.
+fn ws_decode(msg: tokio_tungstenite::tungstenite::Message) -> meridian_core::protocol::ServerMsg {
+    match msg {
+        tokio_tungstenite::tungstenite::Message::Binary(b) => {
+            meridian_core::protocol::ServerMsg::from_msgpack(&b).unwrap()
+        }
+        other => panic!("expected binary frame, got {other:?}"),
+    }
+}
+
+/// Drain frames from a WebSocket until a `QueryResult` matching `query_id`
+/// arrives, then return it. Fails the test if no such frame arrives within
+/// `timeout_ms` milliseconds.
+async fn expect_query_result(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    query_id: &str,
+    timeout_ms: u64,
+) -> meridian_core::protocol::ServerMsg {
+    use futures_util::StreamExt;
+    use meridian_core::protocol::ServerMsg;
+
+    let deadline = std::time::Duration::from_millis(timeout_ms);
+    let result = tokio::time::timeout(deadline, async {
+        loop {
+            let frame = ws.next().await
+                .expect("WebSocket closed before QueryResult arrived")
+                .expect("WebSocket error");
+            let msg = ws_decode(frame);
+            if matches!(&msg, ServerMsg::QueryResult { query_id: id, .. } if id == query_id) {
+                return msg;
+            }
+        }
+    })
+    .await;
+
+    result.unwrap_or_else(|_| {
+        panic!("timed out waiting for QueryResult(query_id={query_id}) after {timeout_ms}ms")
+    })
+}
+
+/// Assert that no `QueryResult` for `query_id` arrives within `timeout_ms` ms.
+async fn assert_no_query_result(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    query_id: &str,
+    timeout_ms: u64,
+) {
+    use futures_util::StreamExt;
+    use meridian_core::protocol::ServerMsg;
+
+    let deadline = std::time::Duration::from_millis(timeout_ms);
+    while let Ok(Some(Ok(frame))) =
+        tokio::time::timeout(deadline, ws.next()).await
+    {
+        if matches!(ws_decode(frame), ServerMsg::QueryResult { query_id: id, .. } if id == query_id)
+        {
+            panic!("unexpected QueryResult(query_id={query_id}) received");
+        }
+    }
+}
+
+/// Send a `SubscribeQuery` and receive the immediate first result.
+#[tokio::test]
+async fn ws_live_query_initial_result() {
+    use futures_util::{SinkExt, StreamExt};
+    use meridian_core::protocol::{ClientMsg, LiveQueryPayload, ServerMsg};
+
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "ns");
+
+    // Pre-populate two GCounters.
+    post_op_for_query(
+        app.clone(),
+        "ns",
+        "gc:hits-a",
+        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 10 }),
+        &token,
+    )
+    .await;
+    post_op_for_query(
+        app.clone(),
+        "ns",
+        "gc:hits-b",
+        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 20 }),
+        &token,
+    )
+    .await;
+
+    let addr = spawn_test_server(app).await;
+    let mut ws = ws_connect(addr, "ns", &token).await;
+
+    ws.send(ws_encode(&ClientMsg::SubscribeQuery {
+        query_id: "q1".into(),
+        query: LiveQueryPayload {
+            from: "gc:hits-*".into(),
+            crdt_type: None,
+            aggregate: "sum".into(),
+            filter: None,
+        },
+    }))
+    .await
+    .unwrap();
+
+    // The server pushes a QueryResult immediately on subscribe.
+    let frame = ws.next().await.unwrap().unwrap();
+    let msg = ws_decode(frame);
+    let ServerMsg::QueryResult { query_id, value, matched } = msg else {
+        panic!("expected QueryResult, got {msg:?}");
+    };
+    assert_eq!(query_id, "q1");
+    assert_eq!(matched, 2);
+    assert_eq!(value, serde_json::json!(30u64));
+}
+
+/// A live query is re-executed and the result pushed when a matching CRDT changes.
+#[tokio::test]
+async fn ws_live_query_pushed_on_delta() {
+    use futures_util::{SinkExt, StreamExt};
+    use meridian_core::protocol::{ClientMsg, LiveQueryPayload, ServerMsg};
+
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "ns");
+
+    let addr = spawn_test_server(app.clone()).await;
+    let mut ws = ws_connect(addr, "ns", &token).await;
+
+    // Subscribe to a live sum query (namespace empty — first result is null/0).
+    ws.send(ws_encode(&ClientMsg::SubscribeQuery {
+        query_id: "q2".into(),
+        query: LiveQueryPayload {
+            from: "gc:score-*".into(),
+            crdt_type: None,
+            aggregate: "sum".into(),
+            filter: None,
+        },
+    }))
+    .await
+    .unwrap();
+
+    // Consume the initial result (matched=0, value=null).
+    let _ = ws.next().await.unwrap().unwrap();
+
+    // Now apply an op via HTTP — this will broadcast a Delta over WS.
+    post_op_for_query(
+        app,
+        "ns",
+        "gc:score-1",
+        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 42 }),
+        &token,
+    )
+    .await;
+
+    // The server should push a Delta followed by a QueryResult.
+    let msg = expect_query_result(&mut ws, "q2", 2_000).await;
+    let ServerMsg::QueryResult { query_id, value, matched } = msg else { unreachable!() };
+    assert_eq!(query_id, "q2");
+    assert_eq!(matched, 1);
+    assert_eq!(value, serde_json::json!(42u64));
+}
+
+/// `UnsubscribeQuery` stops future pushes.
+#[tokio::test]
+async fn ws_live_query_unsubscribe_stops_pushes() {
+    use futures_util::{SinkExt, StreamExt};
+    use meridian_core::protocol::{ClientMsg, LiveQueryPayload, ServerMsg};
+
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "ns");
+
+    let addr = spawn_test_server(app.clone()).await;
+    let mut ws = ws_connect(addr, "ns", &token).await;
+
+    ws.send(ws_encode(&ClientMsg::SubscribeQuery {
+        query_id: "q3".into(),
+        query: LiveQueryPayload {
+            from: "gc:unsub-*".into(),
+            crdt_type: None,
+            aggregate: "count".into(),
+            filter: None,
+        },
+    }))
+    .await
+    .unwrap();
+
+    // Consume the initial result.
+    let _ = ws.next().await.unwrap().unwrap();
+
+    // Unsubscribe.
+    ws.send(ws_encode(&ClientMsg::UnsubscribeQuery { query_id: "q3".into() }))
+        .await
+        .unwrap();
+
+    // Apply an op — delta is broadcast but should NOT be followed by a QueryResult.
+    post_op_for_query(
+        app,
+        "ns",
+        "gc:unsub-1",
+        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 }),
+        &token,
+    )
+    .await;
+
+    assert_no_query_result(&mut ws, "q3", 300).await;
+}
+
+/// Type-filtered live query only fires for matching CRDT types.
+#[tokio::test]
+async fn ws_live_query_type_filter_skips_unrelated() {
+    use futures_util::{SinkExt, StreamExt};
+    use meridian_core::protocol::{ClientMsg, LiveQueryPayload, ServerMsg};
+
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "ns");
+
+    let addr = spawn_test_server(app.clone()).await;
+    let mut ws = ws_connect(addr, "ns", &token).await;
+
+    // Subscribe to a query that only targets GCounters under "gc:typed-*".
+    ws.send(ws_encode(&ClientMsg::SubscribeQuery {
+        query_id: "q4".into(),
+        query: LiveQueryPayload {
+            from: "gc:typed-*".into(),
+            crdt_type: Some("gcounter".into()),
+            aggregate: "sum".into(),
+            filter: None,
+        },
+    }))
+    .await
+    .unwrap();
+
+    // Consume the initial result.
+    let _ = ws.next().await.unwrap().unwrap();
+
+    // Apply an ORSet op under "or:typed-data" — different type, should NOT trigger.
+    post_op_for_query(
+        app.clone(),
+        "ns",
+        "or:typed-data",
+        CrdtOp::ORSet(ORSetOp::Add {
+            element: serde_json::json!("x"),
+            tag: uuid::Uuid::new_v4(),
+            node_id: 1,
+            seq: 1,
+        }),
+        &token,
+    )
+    .await;
+
+    assert_no_query_result(&mut ws, "q4", 300).await;
+
+    // Now apply a GCounter op — this one SHOULD trigger.
+    post_op_for_query(
+        app,
+        "ns",
+        "gc:typed-1",
+        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 7 }),
+        &token,
+    )
+    .await;
+
+    let msg = expect_query_result(&mut ws, "q4", 2_000).await;
+    let ServerMsg::QueryResult { query_id, matched, .. } = msg else { unreachable!() };
+    assert_eq!(query_id, "q4");
+    assert_eq!(matched, 1);
+}

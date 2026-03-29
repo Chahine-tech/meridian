@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Instant};
+use std::{collections::HashSet, str::FromStr, time::Instant};
 
 use axum::{
     extract::{Path, State},
@@ -14,7 +14,7 @@ use crate::{
     api::handlers::AppStateExt,
     auth::{glob_match, ClaimsExt},
     crdt::{registry::CrdtType, Crdt, CrdtValue},
-    storage::Store,
+    storage::CrdtStore,
 };
 
 // ---------------------------------------------------------------------------
@@ -79,6 +79,107 @@ pub struct QueryResponse {
     pub execution_ms: u64,
 }
 
+impl FromStr for AggregateOp {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "sum" => Ok(Self::Sum),
+            "max" => Ok(Self::Max),
+            "min" => Ok(Self::Min),
+            "count" => Ok(Self::Count),
+            "union" => Ok(Self::Union),
+            "intersection" => Ok(Self::Intersection),
+            "latest" => Ok(Self::Latest),
+            "collect" => Ok(Self::Collect),
+            "merge" => Ok(Self::Merge),
+            _ => Err(()),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Core execution logic (shared with live queries)
+// ---------------------------------------------------------------------------
+
+/// Result of a one-shot query execution.
+pub struct QueryOutcome {
+    pub value: JsonValue,
+    pub matched: usize,
+    pub scanned: usize,
+}
+
+/// Execute a query against the store without HTTP concerns.
+/// Used by both the HTTP handler and the WebSocket live-query path.
+pub async fn execute_query<S: CrdtStore>(
+    store: &S,
+    ns: &str,
+    from: &str,
+    crdt_type_str: Option<&str>,
+    aggregate_op: AggregateOp,
+    filter: Option<&WhereClause>,
+) -> Result<QueryOutcome, ExecuteQueryError> {
+    let type_filter: Option<CrdtType> = match crdt_type_str {
+        Some(s) => match s.parse::<CrdtType>() {
+            Ok(t) => Some(t),
+            Err(_) => return Err(ExecuteQueryError::UnknownCrdtType(s.to_owned())),
+        },
+        None => infer_crdt_type(from),
+    };
+
+    let pairs = store
+        .scan_prefix(&format!("{ns}/"))
+        .await
+        .map_err(|e| ExecuteQueryError::Storage(e.to_string()))?;
+
+    let scanned = pairs.len();
+
+    if aggregate_op == AggregateOp::Count && filter.is_none() {
+        let matched = pairs
+            .iter()
+            .filter(|(key, crdt)| {
+                let crdt_id = key.trim_start_matches(&format!("{ns}/"));
+                glob_match(from, crdt_id) && type_filter.is_none_or(|t| crdt.crdt_type() == t)
+            })
+            .count();
+        return Ok(QueryOutcome { value: json!(matched), matched, scanned });
+    }
+
+    let filtered: Vec<CrdtValue> = pairs
+        .into_iter()
+        .filter_map(|(key, crdt)| {
+            let crdt_id = key.trim_start_matches(&format!("{ns}/"));
+            if !glob_match(from, crdt_id) {
+                return None;
+            }
+            if type_filter.is_some_and(|t| crdt.crdt_type() != t) {
+                return None;
+            }
+            if filter.is_some_and(|clause| !apply_where(&crdt, clause)) {
+                return None;
+            }
+            Some(crdt)
+        })
+        .collect();
+
+    let matched = filtered.len();
+    let value = if matched == 0 {
+        JsonValue::Null
+    } else {
+        aggregate(filtered, aggregate_op).map_err(|QueryError::IncompatibleAggregate { aggregate, crdt_type }| {
+            ExecuteQueryError::IncompatibleAggregate { aggregate, crdt_type }
+        })?
+    };
+
+    Ok(QueryOutcome { value, matched, scanned })
+}
+
+pub enum ExecuteQueryError {
+    UnknownCrdtType(String),
+    IncompatibleAggregate { aggregate: String, crdt_type: String },
+    Storage(String),
+}
+
 // ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
@@ -94,104 +195,48 @@ pub async fn post_query<S: AppStateExt>(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    // Resolve explicit type filter, falling back to inference from the glob prefix.
-    let type_filter: Option<CrdtType> = match body.crdt_type.as_deref() {
-        Some(s) => match s.parse::<CrdtType>() {
-            Ok(t) => Some(t),
-            Err(_) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({ "error": "unknown_crdt_type", "detail": format!("unknown crdt type: {s}") })),
-                )
-                    .into_response();
-            }
-        },
-        None => infer_crdt_type(&body.from),
-    };
-
     let start = Instant::now();
 
-    // Scan the entire namespace.
-    let pairs = match state.store().scan_prefix(&format!("{ns}/")).await {
-        Ok(p) => p,
-        Err(e) => {
+    match execute_query(
+        state.store(),
+        &ns,
+        &body.from,
+        body.crdt_type.as_deref(),
+        body.aggregate,
+        body.filter.as_ref(),
+    )
+    .await
+    {
+        Ok(QueryOutcome { value, matched, scanned }) => {
+            let execution_ms = start.elapsed().as_millis() as u64;
+            Json(QueryResponse { value, matched, scanned, execution_ms }).into_response()
+        }
+        Err(ExecuteQueryError::UnknownCrdtType(s)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "unknown_crdt_type", "detail": format!("unknown crdt type: {s}") })),
+        )
+            .into_response(),
+        Err(ExecuteQueryError::IncompatibleAggregate { aggregate, crdt_type }) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "incompatible_aggregate",
+                "detail": format!("aggregate '{aggregate}' is not supported for crdt type '{crdt_type}'")
+            })),
+        )
+            .into_response(),
+        Err(ExecuteQueryError::Storage(e)) => {
             tracing::error!(error = %e, "store.scan_prefix failed");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
-    };
-
-    let scanned = pairs.len();
-
-    // Phase 2 short-circuit: for aggregate=count with no content filter we only
-    // need to count matching keys — no deserialization needed.
-    if body.aggregate == AggregateOp::Count && body.filter.is_none() {
-        let matched = pairs
-            .iter()
-            .filter(|(key, crdt)| {
-                let crdt_id = key.trim_start_matches(&format!("{ns}/"));
-                glob_match(&body.from, crdt_id)
-                    && type_filter.is_none_or(|t| crdt.crdt_type() == t)
-            })
-            .count();
-
-        let execution_ms = start.elapsed().as_millis() as u64;
-        return Json(QueryResponse {
-            value: json!(matched),
-            matched,
-            scanned,
-            execution_ms,
-        })
-        .into_response();
     }
-
-    // Full path: filter then aggregate.
-    let filtered: Vec<CrdtValue> = pairs
-        .into_iter()
-        .filter_map(|(key, crdt)| {
-            let crdt_id = key.trim_start_matches(&format!("{ns}/"));
-            if !glob_match(&body.from, crdt_id) {
-                return None;
-            }
-            if type_filter.is_some_and(|t| crdt.crdt_type() != t) {
-                return None;
-            }
-            if body.filter.as_ref().is_some_and(|clause| !apply_where(&crdt, clause)) {
-                return None;
-            }
-            Some(crdt)
-        })
-        .collect();
-
-    let matched = filtered.len();
-
-    let value = if matched == 0 {
-        JsonValue::Null
-    } else {
-        match aggregate(filtered, body.aggregate) {
-            Ok(v) => v,
-            Err(QueryError::IncompatibleAggregate { aggregate, crdt_type }) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "incompatible_aggregate",
-                        "detail": format!("aggregate '{aggregate}' is not supported for crdt type '{crdt_type}'")
-                    })),
-                )
-                    .into_response();
-            }
-        }
-    };
-
-    let execution_ms = start.elapsed().as_millis() as u64;
-    Json(QueryResponse { value, matched, scanned, execution_ms }).into_response()
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Infer the CRDT type from the glob pattern prefix, e.g. `"gc:*"` → `GCounter`.
-fn infer_crdt_type(from: &str) -> Option<CrdtType> {
+/// Infer the CRDT type from an ID or glob prefix, e.g. `"gc:views-1"` → `GCounter`.
+pub fn infer_crdt_type(from: &str) -> Option<CrdtType> {
     const PREFIXES: &[(&str, CrdtType)] = &[
         ("gc:", CrdtType::GCounter),
         ("pn:", CrdtType::PNCounter),

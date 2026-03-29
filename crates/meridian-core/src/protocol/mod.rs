@@ -1,6 +1,36 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 
+// ---------------------------------------------------------------------------
+// Live query payload types (shared between client and server protocol)
+// ---------------------------------------------------------------------------
+
+/// Content filter for a live query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveQueryFilter {
+    /// For ORSet: only include CRDTs whose element set contains this JSON value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contains: Option<serde_json::Value>,
+    /// For LwwRegister: only include registers updated after this timestamp (ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_after: Option<u64>,
+}
+
+/// A live query specification carried in `ClientMsg::SubscribeQuery`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveQueryPayload {
+    /// Glob pattern matched against CRDT IDs in the namespace.
+    pub from: String,
+    /// Optional explicit CRDT type filter.
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub crdt_type: Option<String>,
+    /// Aggregation function name (e.g. `"sum"`, `"union"`, `"latest"`).
+    pub aggregate: String,
+    /// Optional content filter applied before aggregation.
+    #[serde(rename = "where", default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<LiveQueryFilter>,
+}
+
 /// A single operation within a `BatchOp`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchItem {
@@ -60,6 +90,16 @@ pub enum ClientMsg {
     /// `key`  — logical channel name (e.g. `"cursors"`, `"selection:doc-1"`).
     /// `data` — msgpack-encoded payload; the server forwards it verbatim.
     AwarenessUpdate { key: String, data: ByteBuf },
+
+    /// Subscribe to a live cross-CRDT query. The server will execute the query
+    /// immediately and re-execute it whenever a matching CRDT changes, pushing
+    /// `ServerMsg::QueryResult` frames to this connection.
+    ///
+    /// `query_id` — client-assigned identifier; echoed back in each `QueryResult`.
+    SubscribeQuery { query_id: String, query: LiveQueryPayload },
+
+    /// Cancel a previously registered live query subscription.
+    UnsubscribeQuery { query_id: String },
 }
 
 /// Messages sent by the server over the WebSocket connection.
@@ -101,6 +141,13 @@ pub enum ServerMsg {
     /// `key`       — the awareness channel name forwarded verbatim.
     /// `data`      — the raw payload forwarded verbatim.
     AwarenessBroadcast { client_id: u64, key: String, data: ByteBuf },
+
+    /// Result of a live query execution, pushed whenever the underlying data changes.
+    ///
+    /// `query_id` — echoed from `ClientMsg::SubscribeQuery`.
+    /// `value`    — aggregated JSON result (same shape as the HTTP query endpoint).
+    /// `matched`  — number of CRDTs that contributed to this result.
+    QueryResult { query_id: String, value: serde_json::Value, matched: usize },
 }
 
 impl ServerMsg {

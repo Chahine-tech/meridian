@@ -1,5 +1,5 @@
 import { Effect, type Schema } from "effect";
-import type { QuerySpec, QueryResult } from "./schema.js";
+import type { QuerySpec, QueryResult, LiveQueryResult } from "./schema.js";
 import type { WsState } from "./transport/websocket.js";
 import { WsTransport } from "./transport/websocket.js";
 import type { CrdtMapValue } from "./crdt/crdtmap.js";
@@ -83,6 +83,17 @@ export type CRDTSnapshotEntry =
   | RGASnapshotEntry
   | TreeSnapshotEntry;
 
+/**
+ * A handle returned by `client.liveQuery()`. Receives pushed `LiveQueryResult`
+ * frames whenever matching CRDTs change.
+ */
+export interface LiveQueryHandle {
+  /** Register a listener for live query result pushes. Returns an unsubscribe fn. */
+  onResult(listener: (result: LiveQueryResult) => void): () => void;
+  /** Cancel the subscription and clean up. */
+  close(): void;
+}
+
 export interface DeltaEvent {
   crdtId: string;
   type: CRDTSnapshotEntry["type"];
@@ -153,6 +164,13 @@ export class MeridianClient {
   private readonly deltaListeners = new Set<(event: DeltaEvent) => void>();
   private readonly handleUnsubs: Array<() => void> = [];
 
+  // Live query subscriptions: query_id → { spec, listeners }
+  private readonly liveQueries = new Map<string, {
+    spec: QuerySpec;
+    listeners: Set<(result: LiveQueryResult) => void>;
+  }>();
+  private liveQueryCounter = 0;
+
   private constructor(config: MeridianClientConfig, claims: TokenClaims) {
     this.namespace = config.namespace;
     this.claims = claims;
@@ -177,6 +195,10 @@ export class MeridianClient {
     // Internal listener: routes transport state changes through onAnyChange
     // so devtools only needs one subscription (avoids WsTransport chaining issue).
     this.transport.onStateChange(() => { this.notifyAnyChange(); });
+
+    // Re-send all active SubscribeQuery frames after each reconnect so the
+    // server-side registry is restored and live queries keep firing.
+    this.transport.onReconnect(() => { this.resubscribeLiveQueries(); });
   }
 
   /**
@@ -552,6 +574,10 @@ export class MeridianClient {
     this.handleUnsubs.length = 0;
     this.anyListeners.clear();
     this.deltaListeners.clear();
+    for (const queryId of this.liveQueries.keys()) {
+      this.transport.send({ UnsubscribeQuery: { query_id: queryId } });
+    }
+    this.liveQueries.clear();
     this.transport.close();
   }
 
@@ -573,6 +599,61 @@ export class MeridianClient {
     return Effect.runPromise(this.http.query(this.namespace, spec));
   }
 
+  /**
+   * Subscribe to a live cross-CRDT query over WebSocket.
+   * The server re-executes the query and pushes a result whenever a matching CRDT changes.
+   *
+   * @example
+   * ```ts
+   * const handle = client.liveQuery({ from: "gc:views-*", aggregate: "sum" });
+   * handle.onResult(result => console.log("live total:", result.value));
+   * // later:
+   * handle.close();
+   * ```
+   */
+  liveQuery(spec: QuerySpec): LiveQueryHandle {
+    const queryId = `lq-${++this.liveQueryCounter}`;
+    const listeners = new Set<(result: LiveQueryResult) => void>();
+    this.liveQueries.set(queryId, { spec, listeners });
+    this.sendSubscribeQuery(queryId, spec);
+
+    return {
+      onResult: (listener) => {
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
+      },
+      close: () => {
+        this.transport.send({ UnsubscribeQuery: { query_id: queryId } });
+        this.liveQueries.delete(queryId);
+      },
+    };
+  }
+
+  private sendSubscribeQuery(queryId: string, spec: QuerySpec): void {
+    this.transport.send({
+      SubscribeQuery: {
+        query_id: queryId,
+        query: {
+          from: spec.from,
+          ...(spec.type !== undefined && { type: spec.type }),
+          aggregate: spec.aggregate,
+          ...(spec.where !== undefined && {
+            where: {
+              ...(spec.where.contains !== undefined && { contains: spec.where.contains }),
+              ...(spec.where.updatedAfter !== undefined && { updated_after: spec.where.updatedAfter }),
+            },
+          }),
+        },
+      },
+    });
+  }
+
+  private resubscribeLiveQueries(): void {
+    for (const [queryId, { spec }] of this.liveQueries) {
+      this.sendSubscribeQuery(queryId, spec);
+    }
+  }
+
   private notifyAnyChange(): void {
     for (const fn of this.anyListeners) fn();
   }
@@ -581,6 +662,15 @@ export class MeridianClient {
     if ("AwarenessBroadcast" in msg) {
       const { client_id, key, data } = msg.AwarenessBroadcast;
       this.awHandles.get(key)?.applyBroadcast(client_id, data);
+      return;
+    }
+
+    if ("QueryResult" in msg) {
+      const { query_id, value, matched } = msg.QueryResult;
+      const entry = this.liveQueries.get(query_id);
+      if (entry) {
+        for (const fn of entry.listeners) fn({ value, matched });
+      }
       return;
     }
 

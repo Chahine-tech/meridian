@@ -6,6 +6,8 @@ pub mod query;
 pub mod sse;
 pub mod tokens;
 
+pub use query::{ExecuteQueryError, infer_crdt_type};
+
 use std::sync::Arc;
 
 use crate::{auth::TokenSigner, storage::{CrdtStore, WalBackend}, api::ws::SubscriptionManager, webhooks::WebhookDispatcher};

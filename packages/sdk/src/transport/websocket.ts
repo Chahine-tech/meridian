@@ -49,6 +49,8 @@ export class WsTransport {
 
   // State change listeners (replacing fragile function-chain pattern)
   private readonly stateListeners = new Set<(state: WsState) => void>();
+  // Reconnect listeners — called each time a connection is (re-)established.
+  private readonly reconnectListeners = new Set<() => void>();
 
   private readonly subscriptions = new Map<string, VectorClock>();
 
@@ -176,6 +178,16 @@ export class WsTransport {
   onStateChange(listener: (state: WsState) => void): () => void {
     this.stateListeners.add(listener);
     return () => { this.stateListeners.delete(listener); };
+  }
+
+  /**
+   * Register a callback that fires each time a WebSocket connection is
+   * (re-)established. Used by the client to re-send `SubscribeQuery` frames
+   * after a reconnect. Returns an unsubscribe function.
+   */
+  onReconnect(listener: () => void): () => void {
+    this.reconnectListeners.add(listener);
+    return () => { this.reconnectListeners.delete(listener); };
   }
 
   get currentState(): WsState {
@@ -327,6 +339,9 @@ export class WsTransport {
       this.sendSubscribe(crdtId, vc);
     }
     this.flushPendingOps();
+    for (const listener of this.reconnectListeners) {
+      listener();
+    }
   }
 
   private flushPendingOps(): void {

@@ -11,3 +11,4 @@ export { useRGA } from "./hooks/useRGA.js";
 export { useTree } from "./hooks/useTree.js";
 export { useUndoRedo } from "./hooks/useUndoRedo.js";
 export { useQuery } from "./hooks/useQuery.js";
+export { useLiveQuery } from "./hooks/useLiveQuery.js";
