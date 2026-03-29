@@ -122,6 +122,57 @@ Non-CRDT ephemeral channel for high-frequency transient state (cursors, selectio
 
 `CRDTMap` lets you assign a different CRDT type to each key within a single document. Each key merges independently using its own conflict resolution semantics.
 
+## Query Engine
+
+Aggregate data across multiple CRDTs in a single request — no need to read them one by one.
+
+```ts
+// Sum all page view counters matching a glob pattern
+const result = await client.query({ from: "gc:views-*", aggregate: "sum" });
+console.log(result.value);  // total across all matched GCounters
+
+// Union all shopping carts
+const carts = await client.query({ from: "or:cart-*", aggregate: "union" });
+
+// Latest config value across regions
+const config = await client.query({ from: "lw:config-*", aggregate: "latest" });
+```
+
+Or reactively in React:
+
+```tsx
+const spec = useMemo(() => ({ from: "gc:views-*", aggregate: "sum" as const }), []);
+const { data, loading } = useQuery(spec);
+```
+
+See the [Query Engine docs](https://meridian.example.com/sdk/query) for the full aggregation table and `where` clause filters.
+
+## Live Queries
+
+Subscribe once — get a push every time matching CRDTs change. No polling, no manual re-fetch.
+
+```ts
+const handle = client.liveQuery({ from: "gc:views-*", aggregate: "sum" });
+handle.onResult(result => console.log("live total:", result.value));
+
+// Cancel
+handle.close();
+```
+
+Or in React — `useLiveQuery` connects on mount, updates on every delta, and disconnects on unmount:
+
+```tsx
+const spec = useMemo(() => ({ from: "gc:views-*", aggregate: "sum" as const }), []);
+const { data, loading } = useLiveQuery(spec);
+```
+
+The SDK re-sends subscriptions automatically after a WebSocket reconnect. Set `type` to avoid re-executing queries for unrelated CRDT deltas:
+
+```ts
+// Only re-executes when a GCounter changes — skips ORSet/LwwRegister deltas
+client.liveQuery({ from: "gc:views-*", type: "gcounter", aggregate: "sum" });
+```
+
 ## Edge deploy (Cloudflare Workers)
 
 Deploy Meridian to the edge in minutes — no server, no Docker, no ops.

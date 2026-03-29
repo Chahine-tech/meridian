@@ -6,7 +6,9 @@ import {
   CrdtOpResponse,
   TokenIssueResponse,
   ErrorResponse,
+  QueryResult,
   type VectorClock,
+  type QuerySpec,
 } from "../schema.js";
 import type { Permissions } from "../schema.js";
 
@@ -70,6 +72,10 @@ export class HttpClient {
     opts: { client_id: number; ttl_ms: number; permissions: Permissions },
   ): Effect.Effect<TokenIssueResponse, HttpError | NetworkError> {
     return this.requestJson(TokenIssueResponse, "POST", `/v1/namespaces/${ns}/tokens`, opts);
+  }
+
+  query(ns: string, spec: QuerySpec): Effect.Effect<QueryResult, HttpError | NetworkError> {
+    return this.requestJson(QueryResult, "POST", `/v1/namespaces/${ns}/query`, spec);
   }
 
   private requestJson<A, I>(

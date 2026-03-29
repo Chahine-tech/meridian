@@ -12,6 +12,7 @@ Sub-millisecond merge latency on a single node. Deltas are broadcast over WebSoc
 - **Server**: Rust binary. Embedded sled storage by default — PostgreSQL and Redis backends available as optional features.
 - **SDK**: TypeScript, Effect-based, msgpack wire protocol. Works in Node, Bun, and browsers.
 - **Auth**: Custom ed25519-signed tokens (smaller than JWT, constant-time verification).
+- **Query Engine**: Cross-CRDT queries — scan a namespace by glob pattern, filter, and aggregate (`sum`, `union`, `latest`, …) in a single HTTP request.
 
 ## Quickstart
 
@@ -57,3 +58,5 @@ views.onChange(v => console.log("views:", v));
 | `Presence` | Who's online, cursor positions, typing indicators |
 | `CRDTMap` | Structured document with independent typed fields |
 | `Awareness` | Ephemeral cursors, selections, "is typing" — not persisted |
+| `RGA` | Collaborative text, ordered lists |
+| `Tree` | Hierarchical structures, outlines, file trees |

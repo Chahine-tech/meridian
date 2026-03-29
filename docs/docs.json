@@ -51,6 +51,8 @@
               "sdk/client",
               "sdk/error-handling",
               "sdk/react",
+              "sdk/query",
+              "sdk/live-query",
               "sdk/ttl",
               "sdk/devtools",
               "sdk/cli",

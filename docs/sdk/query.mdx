@@ -1,0 +1,222 @@
+---
+title: Query Engine
+description: Cross-CRDT queries — scan, filter, and aggregate across multiple CRDTs in a single request.
+---
+
+The Query Engine lets you aggregate data across multiple CRDTs in a single HTTP request. Instead of reading CRDTs one by one, you can sum all page view counters, union all shopping carts, or find the latest config register — with a single query scoped to a namespace.
+
+## HTTP endpoint
+
+```
+POST /v1/namespaces/:ns/query
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+### Request
+
+```json
+{
+  "from": "gc:views-*",
+  "type": "gcounter",
+  "aggregate": "sum"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `from` | string | ✓ | Glob pattern matched against CRDT IDs. `*` matches any sequence of characters. |
+| `type` | string | — | Filter by CRDT type. When omitted, inferred from the `from` prefix (e.g. `gc:` → `gcounter`). |
+| `aggregate` | string | ✓ | Aggregation function. Must be compatible with the matched CRDT types. |
+| `where` | object | — | Optional content filter applied before aggregation. |
+
+### Response
+
+```json
+{
+  "value": 42,
+  "matched": 5,
+  "scanned": 5,
+  "execution_ms": 0.8
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `value` | Aggregated result. Shape depends on `aggregate`. `null` when nothing matched. |
+| `matched` | Number of CRDTs that passed glob + type + where filters. |
+| `scanned` | Total number of CRDTs scanned in the namespace. |
+| `execution_ms` | Server-side wall-clock execution time in milliseconds. |
+
+---
+
+## Aggregations by CRDT type
+
+| CRDT type | `type` value | Supported aggregations |
+|-----------|-------------|------------------------|
+| GCounter | `gcounter` | `sum`, `max`, `min`, `count` |
+| PNCounter | `pncounter` | `sum`, `max`, `min`, `count` |
+| ORSet | `orset` | `union`, `intersection`, `count` |
+| LwwRegister | `lwwregister` | `latest`, `collect` |
+| Presence | `presence` | `union`, `count` |
+| CRDTMap | `crdtmap` | `collect` |
+| RGA | `rga` | `collect` |
+| Tree | `tree` | `collect` |
+
+Mixing CRDT types in a single query (e.g. `from: "*"` without a type filter) and using a type-specific aggregation returns `400 incompatible_aggregate`.
+
+---
+
+## Examples
+
+### Sum all page view counters
+
+```json
+{
+  "from": "gc:views-*",
+  "aggregate": "sum"
+}
+```
+
+```json
+{ "value": 10420, "matched": 12, "scanned": 12, "execution_ms": 1.2 }
+```
+
+### Count how many carts contain a product
+
+```json
+{
+  "from": "or:cart-*",
+  "aggregate": "count",
+  "where": { "contains": { "id": "prod-42" } }
+}
+```
+
+```json
+{ "value": 3, "matched": 3, "scanned": 47, "execution_ms": 2.1 }
+```
+
+### Union all carts
+
+```json
+{
+  "from": "or:cart-*",
+  "aggregate": "union"
+}
+```
+
+```json
+{ "value": ["prod-1", "prod-2", "prod-42"], "matched": 47, "scanned": 47, "execution_ms": 3.4 }
+```
+
+### Latest config value across all regions
+
+```json
+{
+  "from": "lw:config-*",
+  "aggregate": "latest"
+}
+```
+
+```json
+{ "value": { "featureFlags": { "newUI": true } }, "matched": 3, "scanned": 3, "execution_ms": 0.5 }
+```
+
+### Config registers updated in the last minute
+
+```json
+{
+  "from": "lw:config-*",
+  "aggregate": "collect",
+  "where": { "updatedAfter": 1700000000000 }
+}
+```
+
+---
+
+## `where` clause
+
+| Field | Applicable to | Description |
+|-------|---------------|-------------|
+| `contains` | ORSet | Only include sets that contain this JSON value (exact match). |
+| `updatedAfter` | LwwRegister | Only include registers updated after this Unix timestamp in ms. |
+
+---
+
+## SDK — `client.query()`
+
+```ts
+const result = await client.query({
+  from: "gc:views-*",
+  aggregate: "sum",
+});
+
+console.log(result.value);       // number
+console.log(result.matched);     // number of CRDTs matched
+console.log(result.execution_ms); // server latency
+```
+
+### Fluent type inference
+
+The `aggregate` field is typed as a string literal union — TypeScript will catch invalid combinations at compile time when you use the `QuerySpec` type directly.
+
+```ts
+import type { QuerySpec } from "meridian-sdk";
+
+const spec: QuerySpec = {
+  from: "or:tags-*",
+  aggregate: "union", // TS error if you write "sum" here
+};
+```
+
+---
+
+## React — `useQuery()`
+
+```tsx
+import { useMemo } from "react";
+import { useQuery } from "meridian-react";
+
+function TotalViews() {
+  // Stabilize the spec with useMemo to avoid re-fetching on every render.
+  const spec = useMemo(
+    () => ({ from: "gc:views-*", aggregate: "sum" as const }),
+    []
+  );
+
+  const { data, loading, error } = useQuery(spec);
+
+  if (loading) return <span>Loading…</span>;
+  if (error) return <span>Error: {error.message}</span>;
+
+  return <span>Total views: {data?.value}</span>;
+}
+```
+
+`useQuery` re-runs the query when `spec` changes. Use `useMemo` to stabilize the spec object and avoid unnecessary requests on every render.
+
+---
+
+## Key IDs convention
+
+The query engine matches on the full CRDT ID as stored — whatever string you pass to `client.gcounter(id)`, `client.orset(id)`, etc. Using a prefix convention like `gc:views-homepage` makes glob patterns predictable and enables type inference from the pattern.
+
+```
+gc:views-homepage    →  matched by  gc:views-*
+gc:views-dashboard   →  matched by  gc:views-*
+pn:score-user-42     →  matched by  pn:score-*
+or:cart-user-42      →  matched by  or:cart-*
+```
+
+Type inference from prefix:
+
+| Prefix | Inferred type |
+|--------|---------------|
+| `gc:` | `gcounter` |
+| `pn:` | `pncounter` |
+| `or:` | `orset` |
+| `lw:` | `lwwregister` |
+| `pr:` | `presence` |
+| `cm:` | `crdtmap` |
+| `rga:` | `rga` |
+| `tree:` | `tree` |

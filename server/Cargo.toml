@@ -87,6 +87,8 @@ proptest = "1.10"
 criterion = { version = "0.8", features = ["html_reports"] }
 tokio-test = "0.4"
 http-body-util = "0.1"
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
 
 [[bench]]
 name = "crdt"

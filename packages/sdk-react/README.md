@@ -159,6 +159,48 @@ lwwSet("theme", "dark");
 incrementCounter("views");
 ```
 
+### `useQuery`
+
+One-shot cross-CRDT query over HTTP. Re-runs when `spec` changes.
+
+```tsx
+import { useMemo } from "react";
+import { useQuery } from "meridian-react";
+
+function TotalViews() {
+  const spec = useMemo(() => ({ from: "gc:views-*", aggregate: "sum" as const }), []);
+  const { data, loading, error } = useQuery(spec);
+
+  if (loading) return <span>Loading…</span>;
+  return <span>Total: {String(data?.value)}</span>;
+}
+```
+
+### `useLiveQuery`
+
+Reactive WebSocket subscription — the server pushes a new result on every matching CRDT delta. Subscribes on mount, unsubscribes on unmount.
+
+```tsx
+import { useMemo } from "react";
+import { useLiveQuery } from "meridian-react";
+
+function LiveTotal() {
+  const spec = useMemo(() => ({ from: "gc:views-*", aggregate: "sum" as const }), []);
+  const { data, loading, error } = useLiveQuery(spec);
+
+  if (loading) return <span>Connecting…</span>;
+  return <span>Live views: {String(data?.value)}</span>;
+}
+```
+
+Stabilize `spec` with `useMemo` — a new object reference re-subscribes. The SDK re-sends the subscription automatically after a WebSocket reconnect.
+
+| | `useQuery` | `useLiveQuery` |
+|---|---|---|
+| Transport | HTTP POST | WebSocket push |
+| Updates on | `spec` change | every matching delta |
+| Use case | one-shot reads | live dashboards, reactive aggregates |
+
 ### `usePendingOpCount`
 
 Returns the number of operations buffered locally, waiting to be sent on reconnect. Useful for building a "syncing" or "offline" indicator.

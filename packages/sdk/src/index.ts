@@ -5,6 +5,7 @@ export type {
   MeridianClientConfig,
   ClientSnapshot,
   DeltaEvent,
+  LiveQueryHandle,
   CRDTSnapshotEntry,
   GCounterSnapshotEntry,
   PNCounterSnapshotEntry,
@@ -68,6 +69,9 @@ export {
   CrdtGetResponse,
   CrdtOpResponse,
   ErrorResponse,
+  QuerySpec,
+  QueryResult,
+  LiveQueryResult,
 } from "./schema.js";
 export type { TimestampMs, ClientId } from "./schema.js";
 

@@ -1,0 +1,124 @@
+---
+title: Live Queries
+description: Reactive WebSocket subscriptions that push updated query results whenever matching CRDTs change.
+---
+
+Live Queries extend the [Query Engine](/sdk/query) with a WebSocket push model. Instead of polling `client.query()`, you subscribe once — the server re-executes the query and pushes a new result every time a matching CRDT changes.
+
+## How it works
+
+1. Client sends `SubscribeQuery` over the existing WebSocket connection with a query spec and a `query_id`.
+2. Server executes the query immediately and pushes a first `QueryResult` frame.
+3. Whenever a CRDT in the namespace changes, the server checks all active live query subscriptions. Queries whose `from` glob matches the changed CRDT (and whose optional `type` filter matches) are re-executed, and a new `QueryResult` is pushed.
+4. Client sends `UnsubscribeQuery` to cancel. The server also cleans up automatically on disconnect.
+
+The connection uses the same WebSocket established by the SDK — no additional socket is opened.
+
+---
+
+## SDK — `client.liveQuery()`
+
+```ts
+const handle = client.liveQuery({
+  from: "gc:views-*",
+  aggregate: "sum",
+});
+
+handle.onResult(result => {
+  console.log("live total:", result.value);   // updated on every matching delta
+  console.log("matched:", result.matched);    // number of CRDTs in the result
+});
+
+// Later — cancel the subscription
+handle.close();
+```
+
+### LiveQueryHandle
+
+| Method | Description |
+|--------|-------------|
+| `onResult(listener)` | Register a listener. Returns an unsubscribe function. Multiple listeners can be registered. |
+| `close()` | Cancel the subscription and notify the server. |
+
+### LiveQueryResult
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `value` | `unknown` | Aggregated result. Same shape as the HTTP Query Engine. `null` when nothing matched. |
+| `matched` | `number` | Number of CRDTs that contributed to the result. |
+
+---
+
+## React — `useLiveQuery()`
+
+```tsx
+import { useMemo } from "react";
+import { useLiveQuery } from "meridian-react";
+
+function LiveTotal() {
+  // Stabilize with useMemo — changing spec reference re-subscribes.
+  const spec = useMemo(
+    () => ({ from: "gc:views-*", aggregate: "sum" as const }),
+    []
+  );
+
+  const { data, loading, error } = useLiveQuery(spec);
+
+  if (loading) return <span>Connecting…</span>;
+  if (error) return <span>Error: {error.message}</span>;
+
+  return <span>Live views: {String(data?.value)}</span>;
+}
+```
+
+The hook subscribes on mount, updates `data` on every push, and unsubscribes on unmount. `loading` is `true` until the first result arrives.
+
+| State | Type | Description |
+|-------|------|-------------|
+| `data` | `LiveQueryResult \| null` | Most recent result. `null` until first push. |
+| `loading` | `boolean` | `true` until the first result arrives. |
+| `error` | `Error \| null` | Set if the subscription setup throws. |
+
+---
+
+## Supported query specs
+
+Live Queries accept the same spec as `client.query()`:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `from` | string | ✓ | Glob pattern matched against CRDT IDs. |
+| `type` | string | — | Filter by CRDT type. Prevents re-execution for unrelated types. |
+| `aggregate` | string | ✓ | Same aggregation functions as the HTTP endpoint. |
+| `where` | object | — | `contains` (ORSet) or `updatedAfter` (LwwRegister). |
+
+See the [aggregation table](/sdk/query#aggregations-by-crdt-type) for supported operations per CRDT type.
+
+---
+
+## Performance notes
+
+**Type filter skips unrelated deltas.** When you set `type: "gcounter"`, the server skips re-execution entirely when an ORSet or LwwRegister changes — even if the glob pattern would match the key. Always set `type` when your pattern is cross-type.
+
+```ts
+// Without type filter — re-executes on any delta matching "gc:views-*"
+client.liveQuery({ from: "gc:views-*", aggregate: "sum" });
+
+// With type filter — only re-executes on GCounter deltas
+client.liveQuery({ from: "gc:views-*", type: "gcounter", aggregate: "sum" });
+```
+
+**Reconnect resilience.** The SDK re-sends all active `SubscribeQuery` frames automatically after a WebSocket reconnect. No manual re-subscription is needed.
+
+**Multiple handles per spec.** Each `liveQuery()` call creates an independent subscription with its own `query_id`. If you need multiple listeners on the same query, use `handle.onResult()` multiple times on a single handle instead of calling `liveQuery()` twice.
+
+---
+
+## Difference from `useQuery`
+
+| | `useQuery` | `useLiveQuery` |
+|---|---|---|
+| Transport | HTTP POST | WebSocket push |
+| When it updates | On `spec` change (re-fetch) | On every matching CRDT delta |
+| `scanned` / `execution_ms` | Available | Not available (push model) |
+| Use case | One-shot reads, low-frequency data | Dashboards, live counters, reactive aggregates |
