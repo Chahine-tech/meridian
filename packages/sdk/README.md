@@ -214,6 +214,47 @@ const stats = client.getLatencyStats();
 
 Latency is measured from the moment an op is sent over the WebSocket to the moment the server `Ack` is received. The `meridian-devtools` panel displays this automatically.
 
+### Query Engine — `client.query()`
+
+Aggregate data across multiple CRDTs in a single HTTP request:
+
+```ts
+// Sum all page view counters matching a glob
+const result = await client.query({ from: "gc:views-*", aggregate: "sum" });
+console.log(result.value);        // total
+console.log(result.matched);      // number of CRDTs matched
+console.log(result.execution_ms); // server latency
+```
+
+Supported aggregations: `sum`, `max`, `min`, `count`, `union`, `intersection`, `latest`, `collect`, `merge`.
+
+### Live Queries — `client.liveQuery()`
+
+Subscribe once — get a push every time matching CRDTs change. Uses the existing WebSocket connection, no extra socket opened.
+
+```ts
+const handle = client.liveQuery({
+  from: "gc:views-*",
+  aggregate: "sum",
+});
+
+handle.onResult(result => {
+  console.log("live total:", result.value);  // pushed on every matching delta
+  console.log("matched:", result.matched);
+});
+
+// Cancel
+handle.close();
+```
+
+Set `type` to avoid re-execution for unrelated CRDT deltas:
+
+```ts
+client.liveQuery({ from: "gc:views-*", type: "gcounter", aggregate: "sum" });
+```
+
+The SDK automatically re-sends active subscriptions after a WebSocket reconnect.
+
 ### HTTP client (`client.http`)
 
 All methods return `Effect<T, HttpError | NetworkError>`:

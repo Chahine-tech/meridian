@@ -147,6 +147,32 @@ const { data, loading } = useQuery(spec);
 
 See the [Query Engine docs](https://meridian.example.com/sdk/query) for the full aggregation table and `where` clause filters.
 
+## Live Queries
+
+Subscribe once — get a push every time matching CRDTs change. No polling, no manual re-fetch.
+
+```ts
+const handle = client.liveQuery({ from: "gc:views-*", aggregate: "sum" });
+handle.onResult(result => console.log("live total:", result.value));
+
+// Cancel
+handle.close();
+```
+
+Or in React — `useLiveQuery` connects on mount, updates on every delta, and disconnects on unmount:
+
+```tsx
+const spec = useMemo(() => ({ from: "gc:views-*", aggregate: "sum" as const }), []);
+const { data, loading } = useLiveQuery(spec);
+```
+
+The SDK re-sends subscriptions automatically after a WebSocket reconnect. Set `type` to avoid re-executing queries for unrelated CRDT deltas:
+
+```ts
+// Only re-executes when a GCounter changes — skips ORSet/LwwRegister deltas
+client.liveQuery({ from: "gc:views-*", type: "gcounter", aggregate: "sum" });
+```
+
 ## Edge deploy (Cloudflare Workers)
 
 Deploy Meridian to the edge in minutes — no server, no Docker, no ops.
