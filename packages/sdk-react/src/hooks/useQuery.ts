@@ -5,8 +5,8 @@ import { useMeridianClient } from "../context.js";
 /**
  * Execute a one-shot cross-CRDT query against the namespace.
  *
- * The query re-runs whenever `spec.from`, `spec.type`, or `spec.aggregate` changes.
- * Stabilize `spec` with `useMemo` to avoid unnecessary re-fetches.
+ * The query re-runs whenever `spec` changes. Stabilize the spec object with
+ * `useMemo` to avoid unnecessary re-fetches on every render.
  *
  * @example
  * ```tsx
@@ -46,10 +46,7 @@ export const useQuery = (
     return () => {
       cancelled = true;
     };
-    // spec is not stable across renders — depend on its primitive fields explicitly.
-    // Callers should stabilize the spec object with useMemo.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, spec.from, spec.type, spec.aggregate]);
+  }, [client, spec]);
 
   return { data, loading, error };
 };

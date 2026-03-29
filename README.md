@@ -122,6 +122,31 @@ Non-CRDT ephemeral channel for high-frequency transient state (cursors, selectio
 
 `CRDTMap` lets you assign a different CRDT type to each key within a single document. Each key merges independently using its own conflict resolution semantics.
 
+## Query Engine
+
+Aggregate data across multiple CRDTs in a single request — no need to read them one by one.
+
+```ts
+// Sum all page view counters matching a glob pattern
+const result = await client.query({ from: "gc:views-*", aggregate: "sum" });
+console.log(result.value);  // total across all matched GCounters
+
+// Union all shopping carts
+const carts = await client.query({ from: "or:cart-*", aggregate: "union" });
+
+// Latest config value across regions
+const config = await client.query({ from: "lw:config-*", aggregate: "latest" });
+```
+
+Or reactively in React:
+
+```tsx
+const spec = useMemo(() => ({ from: "gc:views-*", aggregate: "sum" as const }), []);
+const { data, loading } = useQuery(spec);
+```
+
+See the [Query Engine docs](https://meridian.example.com/sdk/query) for the full aggregation table and `where` clause filters.
+
 ## Edge deploy (Cloudflare Workers)
 
 Deploy Meridian to the edge in minutes — no server, no Docker, no ops.
