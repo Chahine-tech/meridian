@@ -45,8 +45,6 @@ export const useLiveQuery = (
     return () => {
       handle?.close();
     };
-    // Re-subscribe when spec fields change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, spec]);
 
   return { data, loading, error };

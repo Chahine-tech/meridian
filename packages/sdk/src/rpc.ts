@@ -38,12 +38,11 @@
  * ```
  */
 
-import { Schema, Effect, ParseResult, pipe } from "effect";
+import { Schema, Effect, type ParseResult, pipe } from "effect";
 import { encode } from "./codec.js";
 import type { MeridianClient } from "./client.js";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnySchema = Schema.Schema<any, any, never>;
+type AnySchema = Schema.Schema<unknown, unknown, never>;
 type SchemaMap = Record<string, AnySchema>;
 type InferSchema<M extends SchemaMap, K extends keyof M> = Schema.Schema.Type<M[K]>;
 
@@ -52,8 +51,7 @@ export type Unsubscribe = () => void;
 
 interface RpcFrame {
   t: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  p: any;
+  p: unknown;
 }
 
 export interface MeridianRpcConfig<
@@ -114,7 +112,8 @@ export function createMeridianRpc<
     createClient(client: MeridianClient): MeridianRpcClient<Events, Responses> {
       const listeners = new Map<string, Set<(payload: unknown) => void>>();
 
-      client.onRpcFrame((frame: RpcFrame) => {
+      client.onRpcFrame((raw: unknown) => {
+        const frame = raw as RpcFrame;
         if (typeof frame?.t !== "string") return;
         const schema = config.responses[frame.t];
         if (!schema) return;
@@ -136,7 +135,7 @@ export function createMeridianRpc<
           const schema = config.events[type] as Events[K];
           return pipe(
             Schema.encode(schema)(payload),
-            Effect.map((validated) => {
+            Effect.andThen((validated) => {
               const frame: RpcFrame = { t: type, p: validated };
               client.sendRpcFrame(encode(frame));
             }),
@@ -148,7 +147,7 @@ export function createMeridianRpc<
           listener: (payload: InferSchema<Responses, K>) => void,
         ): Unsubscribe {
           if (!listeners.has(type)) listeners.set(type, new Set());
-          listeners.get(type)!.add(listener as (p: unknown) => void);
+          listeners.get(type)?.add(listener as (p: unknown) => void);
           return () => { listeners.get(type)?.delete(listener as (p: unknown) => void); };
         },
       };

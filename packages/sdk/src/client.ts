@@ -175,8 +175,7 @@ export class MeridianClient {
   private liveQueryCounter = 0;
 
   // RPC frame listeners — registered by createMeridianRpc
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly rpcListeners = new Set<(frame: any) => void>();
+  private readonly rpcListeners = new Set<(frame: unknown) => void>();
 
   private constructor(config: MeridianClientConfig, claims: TokenClaims) {
     this.namespace = config.namespace;
@@ -524,8 +523,7 @@ export class MeridianClient {
    * Returns an unsubscribe function.
    * @internal
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onRpcFrame(listener: (frame: any) => void): () => void {
+  onRpcFrame(listener: (frame: unknown) => void): () => void {
     this.rpcListeners.add(listener);
     return () => { this.rpcListeners.delete(listener); };
   }

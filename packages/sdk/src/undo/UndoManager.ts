@@ -97,8 +97,7 @@ export class UndoManager<H extends SupportedHandle> {
     const inverseEntries: UndoEntry[] = [];
 
     // Apply inverse ops in reverse entry order.
-    for (let i = batch.entries.length - 1; i >= 0; i--) {
-      const entry = batch.entries[i]!;
+    for (const entry of [...batch.entries].reverse()) {
       const inverse = this.applyInverse(entry);
       if (inverse !== null) inverseEntries.unshift(inverse);
     }
@@ -114,8 +113,7 @@ export class UndoManager<H extends SupportedHandle> {
     if (batch === undefined) return;
     const inverseEntries: UndoEntry[] = [];
 
-    for (let i = batch.entries.length - 1; i >= 0; i--) {
-      const entry = batch.entries[i]!;
+    for (const entry of [...batch.entries].reverse()) {
       const inverse = this.applyInverse(entry);
       if (inverse !== null) inverseEntries.unshift(inverse);
     }
@@ -140,12 +138,15 @@ export class UndoManager<H extends SupportedHandle> {
     const nodeIds = handle.insert(pos, text, ttlMs);
 
     for (let i = 0; i < nodeIds.length; i++) {
+      const nodeId = nodeIds[i];
+      const char = text[i];
+      if (nodeId === undefined || char === undefined) continue;
       const entry: RgaInsertEntry = {
         kind: "rga_insert",
         crdtId: handle.id,
-        nodeId: nodeIds[i]!,
+        nodeId,
         pos: pos + i,
-        content: text[i]!,
+        content: char,
       };
       this.recordWithDebounce(entry);
     }
