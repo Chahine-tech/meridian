@@ -40,6 +40,8 @@ export type { WsTransportConfig, WsState } from "./transport/websocket.js";
 
 // Auth
 export { parseToken, parseAndValidateToken, checkTokenExpiry, tokenTtlMs } from "./auth/token.js";
+export { canRead, canWrite, OpMasks } from "./auth/permissions.js";
+export type { OpMask } from "./auth/permissions.js";
 
 // Errors (all Data.TaggedError — matchable with Effect.catchTag)
 export {

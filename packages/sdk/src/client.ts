@@ -26,6 +26,8 @@ import {
 } from "./sync/delta.js";
 import type { TreeNodeValue } from "./sync/delta.js";
 import { parseAndValidateToken } from "./auth/token.js";
+import { canRead as evalCanRead, canWrite as evalCanWrite } from "./auth/permissions.js";
+import type { OpMask } from "./auth/permissions.js";
 import type { ServerMsg, TokenClaims } from "./schema.js";
 import type { TokenParseError, TokenExpiredError } from "./errors.js";
 
@@ -569,6 +571,40 @@ export class MeridianClient {
    * using `<MeridianProvider>` in React, the provider calls this automatically
    * on unmount.
    */
+
+  /**
+   * Returns `true` if the token's permissions allow reading `crdtId`.
+   *
+   * Evaluated locally against the parsed claims — no network round-trip.
+   * Useful for disabling UI elements before attempting an op that would fail.
+   *
+   * @example
+   * ```ts
+   * if (!client.canRead("or:cart-42")) showLockIcon();
+   * ```
+   */
+  canRead(crdtId: string): boolean {
+    return evalCanRead(this.claims.permissions, crdtId, this.clientId);
+  }
+
+  /**
+   * Returns `true` if the token's permissions allow writing `crdtId`.
+   *
+   * Pass an optional `opMask` to check op-level access (V2 tokens only).
+   * Without `opMask`, checks key-level write access.
+   *
+   * @example
+   * ```ts
+   * import { OpMasks } from "meridian-sdk";
+   *
+   * if (!client.canWrite("or:cart-42", OpMasks.OR_ADD)) disableAddButton();
+   * if (!client.canWrite("gc:views")) disableIncrementButton();
+   * ```
+   */
+  canWrite(crdtId: string, opMask?: OpMask): boolean {
+    return evalCanWrite(this.claims.permissions, crdtId, this.clientId, opMask);
+  }
+
   close(): void {
     for (const unsub of this.handleUnsubs) unsub();
     this.handleUnsubs.length = 0;

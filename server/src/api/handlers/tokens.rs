@@ -67,6 +67,35 @@ impl From<PermEntryDto> for PermEntry {
     }
 }
 
+// ---------------------------------------------------------------------------
+// GET /v1/namespaces/:ns/tokens/me
+// ---------------------------------------------------------------------------
+
+/// Return the decoded claims of the caller's token as JSON.
+///
+/// Useful for debugging — lets a client or operator verify exactly what
+/// permissions and TTL the current token carries without decoding msgpack
+/// manually.
+pub async fn token_me<S: AppStateExt>(
+    ClaimsExt(claims): ClaimsExt,
+    axum::extract::Path(ns): axum::extract::Path<String>,
+) -> Response {
+    if claims.namespace != ns {
+        return (
+            axum::http::StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "token namespace mismatch" })),
+        )
+            .into_response();
+    }
+    Json(serde_json::json!({
+        "namespace":  claims.namespace,
+        "client_id":  claims.client_id,
+        "expires_at": claims.expires_at,
+        "permissions": claims.permissions,
+    }))
+    .into_response()
+}
+
 /// Issue a new token for `client_id` in the caller's namespace.
 /// Requires `admin` permission on the issuing token.
 pub async fn issue_token<S: AppStateExt>(

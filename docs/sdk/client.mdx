@@ -63,7 +63,45 @@ client.http.getCrdt(ns, id)           // → Effect<CrdtGetResponse, HttpError |
 client.http.postOp(ns, id, op)        // → Effect<CrdtOpResponse, HttpError | NetworkError>
 client.http.syncCrdt(ns, id, sinceVc) // → Effect<CrdtGetResponse, HttpError | NetworkError>
 client.http.issueToken(ns, opts)      // → Effect<TokenIssueResponse, HttpError | NetworkError>
+client.http.tokenMe(ns)               // → Effect<TokenClaims, HttpError | NetworkError>
 ```
+
+### Issuing tokens
+
+`issueToken` accepts both V1 (glob lists) and V2 (fine-grained rules):
+
+```ts
+// V1
+client.http.issueToken("shop", {
+  client_id: 42,
+  ttl_ms: 3_600_000,
+  permissions: { read: ["*"], write: ["or:cart-42"], admin: false },
+});
+
+// V2 — op masks, per-rule TTLs, {clientId} template, rate limit
+client.http.issueToken("shop", {
+  client_id: 42,
+  ttl_ms: 3_600_000,
+  rules: {
+    r: [{ p: "*" }],
+    w: [{ p: "or:cart-{clientId}", o: 0x01 | 0x02 }],
+    rl: 200,
+  },
+});
+```
+
+### Inspecting the current token
+
+`tokenMe` decodes and returns the claims of the caller's own token — useful for debugging without msgpack tooling:
+
+```ts
+const claims = await Effect.runPromise(client.http.tokenMe("shop"));
+console.log(claims.client_id);    // 42
+console.log(claims.expires_at);   // Unix ms
+console.log(claims.permissions);  // V1 or V2 object
+```
+
+See [Tokens](/self-hosting/tokens) for the equivalent `curl` call and full field reference.
 
 ## Wait for connection
 

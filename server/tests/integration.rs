@@ -1197,3 +1197,119 @@ async fn ws_live_query_type_filter_skips_unrelated() {
     assert_eq!(query_id, "q4");
     assert_eq!(matched, 1);
 }
+
+// ---------------------------------------------------------------------------
+// GET /v1/namespaces/:ns/tokens/me
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn token_me_returns_decoded_claims_v1() {
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "ns");
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/v1/namespaces/ns/tokens/me")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body: serde_json::Value =
+        serde_json::from_slice(&body_bytes(resp.into_body()).await).unwrap();
+
+    assert_eq!(body["namespace"], "ns");
+    assert_eq!(body["client_id"], 1);
+    // expires_at should be a positive number in the future
+    assert!(body["expires_at"].as_u64().unwrap_or(0) > 0);
+    // V1 permissions: read/write/admin fields
+    assert!(body["permissions"]["read"].is_array());
+    assert!(body["permissions"]["write"].is_array());
+    assert_eq!(body["permissions"]["admin"], false);
+}
+
+#[tokio::test]
+async fn token_me_returns_decoded_claims_v2() {
+    let (app, signer) = build_test_app();
+    let token = make_v2_token(
+        &signer,
+        "ns",
+        42,
+        PermissionsV2 {
+            v: 2,
+            r: vec![PermEntry::new("*")],
+            w: vec![PermEntry::new("or:cart-{clientId}").with_mask(op_masks::OR_ADD | op_masks::OR_REMOVE)],
+            admin: false,
+            rl: Some(200),
+        },
+    );
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/v1/namespaces/ns/tokens/me")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body: serde_json::Value =
+        serde_json::from_slice(&body_bytes(resp.into_body()).await).unwrap();
+
+    assert_eq!(body["namespace"], "ns");
+    assert_eq!(body["client_id"], 42);
+    assert_eq!(body["permissions"]["v"], 2);
+    assert_eq!(body["permissions"]["r"][0]["p"], "*");
+    assert_eq!(body["permissions"]["w"][0]["p"], "or:cart-{clientId}");
+    assert_eq!(body["permissions"]["rl"], 200);
+}
+
+#[tokio::test]
+async fn token_me_wrong_namespace_returns_403() {
+    let (app, signer) = build_test_app();
+    // Token issued for "ns" but request hits "other-ns"
+    let token = read_write_token(&signer, "ns");
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/v1/namespaces/other-ns/tokens/me")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn token_me_without_token_returns_401() {
+    let (app, _signer) = build_test_app();
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/v1/namespaces/ns/tokens/me")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
