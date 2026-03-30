@@ -132,19 +132,36 @@ impl PermEntry {
 
     /// Returns true if this rule matches `crdt_id`, has not expired, and
     /// the operation is permitted by the op mask.
-    pub fn matches(&self, crdt_id: &str, op_mask: OpMask, now_ms: u64) -> bool {
+    ///
+    /// `client_id` is used to expand the `{clientId}` placeholder in the
+    /// pattern, enabling per-agent key scoping:
+    ///
+    /// ```text
+    /// pattern: "or:cart-user-{clientId}"  +  client_id: 42
+    ///       →  "or:cart-user-42"
+    /// ```
+    pub fn matches(&self, crdt_id: &str, op_mask: OpMask, now_ms: u64, client_id: u64) -> bool {
         // TTL gate
         if let Some(exp) = self.e
             && now_ms >= exp
         {
             return false;
         }
+        // Expand {clientId} placeholder if present, else use pattern as-is.
+        let expanded;
+        let pattern: &str = if self.p.contains("{clientId}") {
+            expanded = self.p.replace("{clientId}", &client_id.to_string());
+            &expanded
+        } else {
+            &self.p
+        };
         // Pattern gate
-        if !glob_match(&self.p, crdt_id) {
+        if !glob_match(pattern, crdt_id) {
             return false;
         }
-        // Op-mask gate (0 or 0xFFFF = allow everything)
-        if is_all_mask(&self.o) {
+        // Op-mask gate.
+        // If the rule allows all ops OR the caller doesn't specify an op, allow.
+        if is_all_mask(&self.o) || is_all_mask(&op_mask) {
             return true;
         }
         op_mask & self.o != 0
@@ -199,20 +216,20 @@ pub struct PermissionsV2 {
 }
 
 impl PermissionsV2 {
-    pub fn can_read_key(&self, crdt_id: &str) -> bool {
+    pub fn can_read_key(&self, crdt_id: &str, client_id: u64) -> bool {
         let now = now_ms();
-        self.r.iter().any(|rule| rule.matches(crdt_id, op_masks::ALL, now))
+        self.r.iter().any(|rule| rule.matches(crdt_id, op_masks::ALL, now, client_id))
     }
 
     /// Check write access with op-level granularity.
-    pub fn can_write_key_op(&self, crdt_id: &str, op_mask: OpMask) -> bool {
+    pub fn can_write_key_op(&self, crdt_id: &str, op_mask: OpMask, client_id: u64) -> bool {
         let now = now_ms();
-        self.w.iter().any(|rule| rule.matches(crdt_id, op_mask, now))
+        self.w.iter().any(|rule| rule.matches(crdt_id, op_mask, now, client_id))
     }
 
-    pub fn can_write_key(&self, crdt_id: &str) -> bool {
+    pub fn can_write_key(&self, crdt_id: &str, client_id: u64) -> bool {
         let now = now_ms();
-        self.w.iter().any(|rule| rule.matches(crdt_id, op_masks::ALL, now))
+        self.w.iter().any(|rule| rule.matches(crdt_id, op_masks::ALL, now, client_id))
     }
 
     pub fn rate_limit(&self) -> Option<u32> {
@@ -252,25 +269,25 @@ impl Permissions {
 
     // --- Capability checks ---
 
-    pub fn can_read_key(&self, crdt_id: &str) -> bool {
+    pub fn can_read_key(&self, crdt_id: &str, client_id: u64) -> bool {
         match self {
             Self::V1(p) => p.can_read_key(crdt_id),
-            Self::V2(p) => p.can_read_key(crdt_id),
+            Self::V2(p) => p.can_read_key(crdt_id, client_id),
         }
     }
 
-    pub fn can_write_key(&self, crdt_id: &str) -> bool {
+    pub fn can_write_key(&self, crdt_id: &str, client_id: u64) -> bool {
         match self {
             Self::V1(p) => p.can_write_key(crdt_id),
-            Self::V2(p) => p.can_write_key(crdt_id),
+            Self::V2(p) => p.can_write_key(crdt_id, client_id),
         }
     }
 
     /// Check write access with op-level granularity (V2 only; V1 falls back to key-level check).
-    pub fn can_write_key_op(&self, crdt_id: &str, op_mask: OpMask) -> bool {
+    pub fn can_write_key_op(&self, crdt_id: &str, op_mask: OpMask, client_id: u64) -> bool {
         match self {
             Self::V1(p) => p.can_write_key(crdt_id),
-            Self::V2(p) => p.can_write_key_op(crdt_id, op_mask),
+            Self::V2(p) => p.can_write_key_op(crdt_id, op_mask, client_id),
         }
     }
 
@@ -359,17 +376,17 @@ impl TokenClaims {
 
     /// Returns true if the token may read the specific CRDT key.
     pub fn can_read_key(&self, crdt_id: &str) -> bool {
-        self.permissions.can_read_key(crdt_id)
+        self.permissions.can_read_key(crdt_id, self.client_id)
     }
 
     /// Returns true if the token may write the specific CRDT key.
     pub fn can_write_key(&self, crdt_id: &str) -> bool {
-        self.permissions.can_write_key(crdt_id)
+        self.permissions.can_write_key(crdt_id, self.client_id)
     }
 
     /// Returns true if the token may apply the specific op to `crdt_id`.
     pub fn can_write_key_op(&self, crdt_id: &str, op_mask: OpMask) -> bool {
-        self.permissions.can_write_key_op(crdt_id, op_mask)
+        self.permissions.can_write_key_op(crdt_id, op_mask, self.client_id)
     }
 
     pub fn is_admin(&self) -> bool {
@@ -406,19 +423,19 @@ mod tests {
             write: vec!["or:cart-42".into()],
             admin: false,
         });
-        assert!(p.can_read_key("gc:views"));
-        assert!(p.can_read_key("lw:title"));
-        assert!(!p.can_read_key("or:tags"));
-        assert!(p.can_write_key("or:cart-42"));
-        assert!(!p.can_write_key("or:tags"));
-        assert!(!p.can_write_key("gc:views"));
+        assert!(p.can_read_key("gc:views", 0));
+        assert!(p.can_read_key("lw:title", 0));
+        assert!(!p.can_read_key("or:tags", 0));
+        assert!(p.can_write_key("or:cart-42", 0));
+        assert!(!p.can_write_key("or:tags", 0));
+        assert!(!p.can_write_key("gc:views", 0));
     }
 
     #[test]
     fn permissions_v1_wildcard_full_access() {
         let p = Permissions::read_write();
-        assert!(p.can_read_key("anything"));
-        assert!(p.can_write_key("anything"));
+        assert!(p.can_read_key("anything", 0));
+        assert!(p.can_write_key("anything", 0));
     }
 
     #[test]
@@ -491,9 +508,9 @@ mod tests {
             rl: None,
         });
         // Increment allowed
-        assert!(perms.can_write_key_op("gc:views", op_masks::GC_INCREMENT));
+        assert!(perms.can_write_key_op("gc:views", op_masks::GC_INCREMENT, 1));
         // No PN_DECREMENT bit on gc:* rule — denied
-        assert!(!perms.can_write_key_op("gc:views", op_masks::PN_DECREMENT));
+        assert!(!perms.can_write_key_op("gc:views", op_masks::PN_DECREMENT, 1));
     }
 
     #[test]
@@ -507,7 +524,35 @@ mod tests {
             rl: None,
         });
         // gc:* write rule is expired → denied
-        assert!(!perms.can_write_key("gc:views"));
+        assert!(!perms.can_write_key("gc:views", 1));
+    }
+
+    #[test]
+    fn v2_client_id_template_scoping() {
+        // An agent token with pattern "or:cart-user-{clientId}" may only write its own key.
+        let perms = Permissions::V2(PermissionsV2 {
+            v: 2,
+            r: vec![PermEntry::new("or:cart-user-{clientId}")],
+            w: vec![PermEntry::new("or:cart-user-{clientId}").with_mask(op_masks::OR_ADD | op_masks::OR_REMOVE)],
+            admin: false,
+            rl: None,
+        });
+        // client_id=42 can read/write its own key
+        assert!(perms.can_read_key("or:cart-user-42", 42));
+        assert!(perms.can_write_key("or:cart-user-42", 42));
+        // client_id=42 cannot access client_id=99's key
+        assert!(!perms.can_read_key("or:cart-user-99", 42));
+        assert!(!perms.can_write_key("or:cart-user-99", 42));
+        // glob wildcard combined with template: "or:cart-user-{clientId}-*"
+        let perms2 = Permissions::V2(PermissionsV2 {
+            v: 2,
+            r: vec![PermEntry::new("or:cart-user-{clientId}-*")],
+            w: vec![],
+            admin: false,
+            rl: None,
+        });
+        assert!(perms2.can_read_key("or:cart-user-7-items", 7));
+        assert!(!perms2.can_read_key("or:cart-user-8-items", 7));
     }
 
     #[test]

@@ -1,0 +1,98 @@
+---
+title: Permissions
+description: Check token permissions locally — no round-trip to the server.
+---
+
+The SDK evaluates permissions against the parsed token claims on the client side. This lets you gate UI actions (disable buttons, hide sections) without waiting for a server response.
+
+## `client.canRead(crdtId)`
+
+Returns `true` if the token allows reading `crdtId`.
+
+```ts
+if (!client.canRead("or:cart-42")) {
+  showLockedBadge();
+}
+```
+
+## `client.canWrite(crdtId, opMask?)`
+
+Returns `true` if the token allows writing `crdtId`. Pass an optional `opMask` to check op-level access (V2 tokens only).
+
+```ts
+import { OpMasks } from "meridian-sdk";
+
+// Key-level check (V1 and V2)
+if (!client.canWrite("or:cart-42")) {
+  disableCartButton();
+}
+
+// Op-level check — V2 only; falls back to key-level for V1
+if (!client.canWrite("or:cart-42", OpMasks.OR_ADD)) {
+  disableAddItemButton();
+}
+
+if (!client.canWrite("pn:balance", OpMasks.PN_DECREMENT)) {
+  disableWithdrawButton();
+}
+```
+
+## Standalone helpers
+
+`canRead` and `canWrite` are also exported as standalone functions — useful when you have the claims but not a client instance (e.g. in server-side rendering or middleware):
+
+```ts
+import { canRead, canWrite, OpMasks } from "meridian-sdk";
+import type { Permissions } from "meridian-sdk";
+
+function gatePage(permissions: Permissions, clientId: number) {
+  if (!canRead(permissions, "lw:dashboard", clientId)) {
+    redirect("/403");
+  }
+}
+```
+
+## `OpMasks` reference
+
+Op masks are combined with `|` to allow multiple operations.
+
+| Constant | Value | Applies to |
+|----------|-------|------------|
+| `OpMasks.ALL` | `0` | Any CRDT — allows all ops (no restriction) |
+| `OpMasks.GC_INCREMENT` | `0x01` | GCounter |
+| `OpMasks.PN_INCREMENT` | `0x01` | PNCounter |
+| `OpMasks.PN_DECREMENT` | `0x02` | PNCounter |
+| `OpMasks.OR_ADD` | `0x01` | ORSet |
+| `OpMasks.OR_REMOVE` | `0x02` | ORSet |
+| `OpMasks.LWW_SET` | `0x01` | LwwRegister |
+| `OpMasks.PRESENCE_UPDATE` | `0x01` | Presence |
+| `OpMasks.RGA_INSERT` | `0x01` | RGA |
+| `OpMasks.RGA_DELETE` | `0x02` | RGA |
+| `OpMasks.TREE_ADD` | `0x01` | Tree |
+| `OpMasks.TREE_MOVE` | `0x02` | Tree |
+| `OpMasks.TREE_UPDATE` | `0x04` | Tree |
+| `OpMasks.TREE_DELETE` | `0x08` | Tree |
+| `OpMasks.MAP_WRITE` | `0x01` | CRDTMap |
+
+## How it works
+
+The logic mirrors the server's `PermEntry::matches` exactly:
+
+- **V1 tokens** — glob-matched against the `read`/`write` lists. Op masks are ignored (no op granularity in V1).
+- **V2 tokens** — rules are evaluated first-match-wins. Each rule may have a glob pattern (`p`), an op mask (`o`), and a per-rule expiry (`e`). The `{clientId}` placeholder is expanded to the token's `client_id` before matching.
+
+Because this runs locally against the decoded claims, it is synchronous and requires no network access. The server still enforces permissions independently — client-side checks are for UX only.
+
+## Multi-agent pattern
+
+When using `{clientId}` in V2 permission patterns, each agent's token is automatically scoped to its own keys:
+
+```ts
+// Token issued with: { "w": [{ "p": "or:cart-{clientId}" }] }
+// client_id = 42
+
+client.canWrite("or:cart-42"); // true  — own key
+client.canWrite("or:cart-99"); // false — another agent's key
+```
+
+See [Tokens](/self-hosting/tokens) for how to issue V2 tokens with `{clientId}` patterns.

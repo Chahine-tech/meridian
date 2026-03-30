@@ -255,6 +255,33 @@ client.liveQuery({ from: "gc:views-*", type: "gcounter", aggregate: "sum" });
 
 The SDK automatically re-sends active subscriptions after a WebSocket reconnect.
 
+### Permission checks — `client.canRead()` / `client.canWrite()`
+
+Check token permissions locally — no network round-trip. Useful for gating UI actions before attempting an op that would fail with 403.
+
+```ts
+import { OpMasks } from "meridian-sdk";
+
+// Key-level check (V1 and V2)
+if (!client.canRead("or:cart-42")) showLockedBadge();
+if (!client.canWrite("or:cart-42")) disableCartButton();
+
+// Op-level check (V2 tokens only)
+if (!client.canWrite("or:cart-42", OpMasks.OR_ADD)) disableAddButton();
+if (!client.canWrite("pn:balance", OpMasks.PN_DECREMENT)) disableWithdrawButton();
+```
+
+`canRead` and `canWrite` are also exported as standalone functions for use outside a client instance:
+
+```ts
+import { canRead, canWrite, OpMasks } from "meridian-sdk";
+
+canRead(claims.permissions, "lw:dashboard", claims.client_id); // boolean
+canWrite(claims.permissions, "or:cart-42", claims.client_id, OpMasks.OR_ADD); // boolean
+```
+
+The check mirrors the server's logic exactly — V1 glob lists, V2 first-match-wins rules, per-rule TTLs, and `{clientId}` expansion are all handled. The server still enforces permissions independently; client checks are for UX only.
+
 ### HTTP client (`client.http`)
 
 All methods return `Effect<T, HttpError | NetworkError>`:
@@ -264,6 +291,37 @@ client.http.getCrdt(ns, id)              // → Effect<CrdtGetResponse, ...>
 client.http.postOp(ns, id, op)           // → Effect<CrdtOpResponse, ...>
 client.http.syncCrdt(ns, id, sinceVc?)   // → Effect<CrdtGetResponse, ...>
 client.http.issueToken(ns, opts)         // → Effect<TokenIssueResponse, ...>
+client.http.tokenMe(ns)                  // → Effect<TokenClaims, ...>
+```
+
+`issueToken` accepts both V1 (glob lists) and V2 (fine-grained rules):
+
+```ts
+// V1
+await Effect.runPromise(
+  client.http.issueToken("shop", {
+    client_id: 42,
+    ttl_ms: 3_600_000,
+    permissions: { read: ["*"], write: ["or:cart-42"], admin: false },
+  })
+);
+
+// V2 — op masks, per-rule TTLs, {clientId} template, rate limit
+await Effect.runPromise(
+  client.http.issueToken("shop", {
+    client_id: 42,
+    ttl_ms: 3_600_000,
+    rules: {
+      r: [{ p: "*" }],
+      w: [{ p: "or:cart-{clientId}", o: 0x01 | 0x02 }],
+      rl: 200,
+    },
+  })
+);
+
+// Inspect current token claims (useful for debugging)
+const claims = await Effect.runPromise(client.http.tokenMe("shop"));
+console.log(claims.client_id, claims.expires_at, claims.permissions);
 ```
 
 ## Wire protocol

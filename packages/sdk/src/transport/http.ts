@@ -10,7 +10,8 @@ import {
   type VectorClock,
   type QuerySpec,
 } from "../schema.js";
-import type { Permissions } from "../schema.js";
+import type { Permissions, PermissionsV2, TokenClaims } from "../schema.js";
+import { TokenClaims as TokenClaimsSchema } from "../schema.js";
 
 export interface HttpClientConfig {
   baseUrl: string;
@@ -67,11 +68,34 @@ export class HttpClient {
     return fetch(url, { headers: { Authorization: `Bearer ${this.token}` } }).then(r => r.json() as Promise<HistoryResponse>);
   }
 
+  /**
+   * Issue a new token. Requires admin permission.
+   *
+   * Pass `permissions` for V1 (glob lists) or `rules` for V2 (fine-grained).
+   * `rules` takes precedence if both are provided.
+   */
   issueToken(
     ns: string,
-    opts: { client_id: number; ttl_ms: number; permissions: Permissions },
+    opts: {
+      client_id: number;
+      ttl_ms?: number;
+      /** V1 glob-list permissions. Mutually exclusive with `rules`. */
+      permissions?: Permissions;
+      /** V2 fine-grained rules. Takes precedence over `permissions`. */
+      rules?: Pick<PermissionsV2, "r" | "w" | "admin" | "rl">;
+    },
   ): Effect.Effect<TokenIssueResponse, HttpError | NetworkError> {
     return this.requestJson(TokenIssueResponse, "POST", `/v1/namespaces/${ns}/tokens`, opts);
+  }
+
+  /**
+   * Decode the caller's own token and return its claims.
+   *
+   * Useful for debugging — verifies exactly what permissions and TTL the
+   * current token carries without decoding msgpack manually.
+   */
+  tokenMe(ns: string): Effect.Effect<TokenClaims, HttpError | NetworkError> {
+    return this.requestJson(TokenClaimsSchema, "GET", `/v1/namespaces/${ns}/tokens/me`);
   }
 
   query(ns: string, spec: QuerySpec): Effect.Effect<QueryResult, HttpError | NetworkError> {

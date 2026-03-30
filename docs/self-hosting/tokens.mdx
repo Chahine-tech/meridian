@@ -147,6 +147,38 @@ curl -X POST http://localhost:3000/v1/namespaces/shop/tokens \
   }'
 ```
 
+### `{clientId}` template — per-agent key scoping
+
+Pattern values in V2 rules may contain the literal placeholder `{clientId}`. The server expands it to the token's `client_id` before matching. This lets you issue a single token template that automatically scopes each agent to its own keys:
+
+```bash
+# Token issued to agent 42 — write access is restricted to "or:cart-42"
+curl -X POST http://localhost:3000/v1/namespaces/shop/tokens \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_id": 42,
+    "rules": {
+      "r": [{ "p": "*" }],
+      "w": [{ "p": "or:cart-{clientId}" }]
+    }
+  }'
+```
+
+Agent 42 can write `or:cart-42` but not `or:cart-99`. Agent 99, issued with the same rule template, can only write `or:cart-99`.
+
+This is especially useful for multi-agent systems where each agent must be isolated to its own slice of the namespace:
+
+```json
+{
+  "client_id": 7,
+  "rules": {
+    "r": [{ "p": "pr:agents-{clientId}" }],
+    "w": [{ "p": "pr:agents-{clientId}" }, { "p": "gc:work-{clientId}" }]
+  }
+}
+```
+
 ### Rate limit override
 
 The `rl` field (V2 only) sets a per-token rate limit in requests per second. This overrides the server default (100 req/s) for this specific token — useful to give trusted services higher throughput or restrict untrusted clients.
@@ -162,6 +194,30 @@ V1 and V2 tokens coexist without migration. Old V1 tokens continue to work uncha
 <Warning>
   A token with `write: ["*"]` (V1) or `w: [{ "p": "*" }]` (V2) can write to **any** key in the namespace. In multi-user namespaces, always scope write permissions to the keys the client actually owns.
 </Warning>
+
+## Inspect a token
+
+`GET /v1/namespaces/:ns/tokens/me` decodes the caller's token and returns its claims as JSON. Useful for debugging — no msgpack tooling needed.
+
+```bash
+curl http://localhost:3000/v1/namespaces/shop/tokens/me \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "namespace": "shop",
+  "client_id": 42,
+  "expires_at": 1743000000000,
+  "permissions": {
+    "v": 2,
+    "r": [{ "p": "*" }],
+    "w": [{ "p": "or:cart-{clientId}" }]
+  }
+}
+```
+
+V1 tokens return `permissions` with `read`, `write`, and `admin` fields instead.
 
 ## Verify a token (SDK)
 

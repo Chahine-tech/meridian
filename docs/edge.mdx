@@ -86,11 +86,24 @@ Your worker is live at `https://meridian-edge.<your-subdomain>.workers.dev`.
 **3. Issue tokens from your backend:**
 
 ```bash
+# V1 — glob lists
 curl -X POST https://meridian-edge.<your-subdomain>.workers.dev/v1/namespaces/my-room/tokens \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
-  -d '{"client_id": 1, "ttl_ms": 3600000, "permissions": {"read": ["*"], "write": ["*"], "admin": false}}'
+  -d '{"client_id": 1, "ttl_ms": 3600000, "permissions": {"read": ["*"], "write": ["*"]}}'
+
+# V2 — fine-grained rules with op masks and {clientId} scoping
+curl -X POST https://meridian-edge.<your-subdomain>.workers.dev/v1/namespaces/my-room/tokens \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"client_id": 42, "ttl_ms": 3600000, "rules": {"r": [{"p": "*"}], "w": [{"p": "or:cart-{clientId}"}]}}'
+
+# Inspect your token claims
+curl https://meridian-edge.<your-subdomain>.workers.dev/v1/namespaces/my-room/tokens/me \
+  -H "Authorization: Bearer <your-token>"
 ```
+
+See [Tokens](/self-hosting/tokens) for the full V2 field reference.
 
 ## Architecture
 
@@ -200,3 +213,7 @@ new_sqlite_classes = ["NsObject"]
 
 - **Single DO instance per namespace** — no cross-region replication at the application level. Cloudflare handles availability automatically; for strict data residency use [DO jurisdictions](https://developers.cloudflare.com/durable-objects/reference/data-location/).
 - **No Prometheus metrics** — Workers have no long-running process to scrape. Use Cloudflare Analytics or Workers Logpush instead.
+- **No Query Engine** — `POST /v1/namespaces/:ns/query` is not available. The DO KV has no glob index — a cross-CRDT scan would require iterating all keys in the namespace. Use the native server for aggregation queries.
+- **No Live Queries** — `SubscribeQuery`/`UnsubscribeQuery` WebSocket messages are not handled. The DO Hibernation API does not persist per-connection in-memory state between messages, so a per-connection query registry cannot be held without a KV write on every message. Use the native server for live query push.
+- **No Query Engine** — `POST /v1/namespaces/:ns/query` is not available on the edge worker. The DO KV has no glob index, so a cross-CRDT scan would require iterating all keys in the namespace. Use the native server if you need aggregation queries.
+- **No Live Queries** — `SubscribeQuery`/`UnsubscribeQuery` WebSocket messages are not supported. The DO Hibernation API does not maintain per-connection in-memory state between messages, so a per-connection query registry cannot be held without persisting it to KV on every message — prohibitively expensive. Use the native server for live query push.

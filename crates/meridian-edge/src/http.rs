@@ -1,5 +1,5 @@
 use meridian_core::{
-    auth::{Permissions, TokenClaims, TokenSigner},
+    auth::{Permissions, PermissionsV1, PermissionsV2, PermEntry, op_masks, TokenClaims, TokenSigner},
     crdt::registry::CrdtOp,
     namespace::NamespaceId,
 };
@@ -83,10 +83,43 @@ pub async fn post_op(mut req: Request, ctx: RouteContext<()>) -> worker::Result<
 }
 
 #[derive(Deserialize)]
+struct PermEntryDto {
+    p: String,
+    o: Option<u16>,
+    e: Option<u64>,
+}
+
+impl From<PermEntryDto> for PermEntry {
+    fn from(dto: PermEntryDto) -> Self {
+        Self { p: dto.p, o: dto.o.unwrap_or(op_masks::ALL), e: dto.e }
+    }
+}
+
+#[derive(Deserialize)]
+struct PermissionsV2Dto {
+    r: Vec<PermEntryDto>,
+    w: Vec<PermEntryDto>,
+    #[serde(default)]
+    admin: bool,
+    rl: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct PermissionsV1Dto {
+    read: Option<Vec<String>>,
+    write: Option<Vec<String>>,
+    #[serde(default)]
+    admin: bool,
+}
+
+#[derive(Deserialize)]
 struct IssueTokenBody {
     client_id: u64,
-    ttl_ms: u64,
-    permissions: Permissions,
+    ttl_ms: Option<u64>,
+    /// V1 glob-list permissions.
+    permissions: Option<PermissionsV1Dto>,
+    /// V2 fine-grained rules — takes precedence over `permissions`.
+    rules: Option<PermissionsV2Dto>,
 }
 
 pub async fn get_wal(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
@@ -200,6 +233,55 @@ pub async fn delete_webhook(req: Request, ctx: RouteContext<()>) -> worker::Resu
     do_stub.fetch_with_request(do_req).await
 }
 
+pub async fn get_history(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
+    let ns = ctx.param("ns").cloned().unwrap_or_default();
+    let id = ctx.param("id").cloned().unwrap_or_default();
+
+    let claims = match auth::validate(&req, &ctx.env) {
+        Ok(c) => c,
+        Err(e) => return Ok(auth::auth_error_response(&e)),
+    };
+
+    if claims.namespace != ns || !claims.can_read_key(&id) {
+        return Response::error("forbidden", 403);
+    }
+
+    let url = req.url()?;
+    let query = url.query().unwrap_or_default().to_owned();
+    // Percent-encode the crdt_id for use in the internal DO URL query param.
+    let encoded_id = id.replace('%', "%25").replace('&', "%26").replace('=', "%3D").replace('+', "%2B");
+    let do_url = format!("http://do/{ns}/history?crdt_id={encoded_id}&{query}");
+    let do_req = Request::new(&do_url, worker::Method::Get)?;
+
+    let do_stub = ctx
+        .env
+        .durable_object("NS_OBJECT")?
+        .id_from_name(&ns)?
+        .get_stub()?;
+
+    do_stub.fetch_with_request(do_req).await
+}
+
+pub async fn token_me(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
+    let ns = ctx.param("ns").cloned().unwrap_or_default();
+
+    let claims = match auth::validate(&req, &ctx.env) {
+        Ok(c) => c,
+        Err(e) => return Ok(auth::auth_error_response(&e)),
+    };
+
+    if claims.namespace != ns {
+        return Response::error("forbidden: namespace mismatch", 403);
+    }
+
+    Response::from_json(&serde_json::json!({
+        "namespace":  claims.namespace,
+        "client_id":  claims.client_id,
+        "expires_at": claims.expires_at,
+        "permissions": claims.permissions,
+    }))
+}
+
 pub async fn issue_token(mut req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
     let ns = ctx.param("ns").cloned().unwrap_or_default();
 
@@ -230,7 +312,25 @@ pub async fn issue_token(mut req: Request, ctx: RouteContext<()>) -> worker::Res
     let signer = TokenSigner::from_hex(&signing_key)
         .map_err(|e| worker::Error::RustError(e.to_string()))?;
 
-    let new_claims = TokenClaims::new(&ns, body.client_id, body.ttl_ms, body.permissions);
+    let perms: Permissions = if let Some(v2) = body.rules {
+        Permissions::V2(PermissionsV2 {
+            v: 2,
+            r: v2.r.into_iter().map(PermEntry::from).collect(),
+            w: v2.w.into_iter().map(PermEntry::from).collect(),
+            admin: v2.admin,
+            rl: v2.rl,
+        })
+    } else if let Some(v1) = body.permissions {
+        Permissions::V1(PermissionsV1 {
+            read: v1.read.unwrap_or_else(|| vec!["*".into()]),
+            write: v1.write.unwrap_or_else(|| vec!["*".into()]),
+            admin: v1.admin,
+        })
+    } else {
+        Permissions::read_write()
+    };
+
+    let new_claims = TokenClaims::new(&ns, body.client_id, body.ttl_ms.unwrap_or(3_600_000), perms);
     let token = signer
         .sign(&new_claims)
         .map_err(|e| worker::Error::RustError(e.to_string()))?;

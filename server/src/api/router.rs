@@ -16,7 +16,7 @@ use super::handlers::{
     metrics::get_metrics,
     query::post_query,
     sse::get_sse,
-    tokens::issue_token,
+    tokens::{issue_token, token_me},
     AppStateExt,
 };
 use super::ws::ws_upgrade_handler;
@@ -33,6 +33,7 @@ use crate::auth::auth_middleware;
 /// GET  /v1/namespaces/:ns/crdts/:id/events    -> get_sse (SSE stream)
 /// POST /v1/namespaces/:ns/query               -> post_query
 /// POST /v1/namespaces/:ns/tokens              -> issue_token
+/// GET  /v1/namespaces/:ns/tokens/me           -> token_me
 /// GET  /v1/namespaces/:ns/connect             -> ws_upgrade_handler
 /// GET  /metrics                               -> get_metrics (no auth)
 /// GET  /health/live                           -> health_live (no auth, always 200)
@@ -50,6 +51,7 @@ where
         .route("/v1/namespaces/{ns}/crdts/{id}/events", get(get_sse::<S>))
         .route("/v1/namespaces/{ns}/query", post(post_query::<S>))
         .route("/v1/namespaces/{ns}/tokens", post(issue_token::<S>))
+        .route("/v1/namespaces/{ns}/tokens/me", get(token_me::<S>))
         .route("/v1/namespaces/{ns}/connect", get(ws_upgrade_handler::<S>))
         .layer(middleware::from_fn_with_state(auth_state, auth_middleware))
         .with_state(state.clone());
