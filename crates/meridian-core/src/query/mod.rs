@@ -105,20 +105,20 @@ pub fn infer_crdt_type(from: &str) -> Option<CrdtType> {
 /// Apply the `where` clause to a single `CrdtValue`. Returns `false` when the
 /// value should be excluded.
 fn apply_where(value: &CrdtValue, clause: &WhereClause) -> bool {
-    if let Some(needle) = &clause.contains {
-        if let CrdtValue::ORSet(set) = value {
-            let needle_key = serde_json::to_string(needle).unwrap_or_default();
-            if !set.entries.contains_key(&needle_key) {
-                return false;
-            }
+    if let Some(needle) = &clause.contains
+        && let CrdtValue::ORSet(set) = value
+    {
+        let needle_key = serde_json::to_string(needle).unwrap_or_default();
+        if !set.entries.contains_key(&needle_key) {
+            return false;
         }
     }
-    if let Some(after_ms) = clause.updated_after {
-        if let CrdtValue::LwwRegister(reg) = value {
-            let updated_ms = reg.entry.as_ref().map(|e| e.hlc.wall_ms).unwrap_or(0);
-            if updated_ms <= after_ms {
-                return false;
-            }
+    if let Some(after_ms) = clause.updated_after
+        && let CrdtValue::LwwRegister(reg) = value
+    {
+        let updated_ms = reg.entry.as_ref().map(|e| e.hlc.wall_ms).unwrap_or(0);
+        if updated_ms <= after_ms {
+            return false;
         }
     }
     true
