@@ -4,12 +4,26 @@ use base64::Engine as _;
 use meridian_core::{
     crdt::{registry::{apply_op, validate_clock_drift, CrdtOp, CrdtValue}, VectorClock},
     protocol::{BatchItem, ClientMsg, ServerMsg},
+    query::{execute_query_on_values, AggregateOp, WhereClause},
 };
 use serde::{Deserialize, Serialize};
 use worker::{durable_object, Env, Request, Response, Result, State, WebSocket, WebSocketPair};
 use worker::durable::DurableObject;
 
 use crate::wal::WalEntry;
+
+/// Data attached to each WebSocket via the Hibernation API.
+///
+/// Persisted across hibernation cycles — stored as a msgpack blob in the WS
+/// attachment slot. Gives the DO access to `client_id` and a stable
+/// per-connection `conn_id` (UUID) without re-parsing the token on every message.
+#[derive(Clone, Serialize, Deserialize)]
+struct WsAttachment {
+    client_id: u64,
+    /// Stable UUID assigned at handshake — used as the KV key prefix for live
+    /// query subscriptions (`lq:{conn_id}:{query_id}`).
+    conn_id: String,
+}
 
 /// A registered webhook for a namespace.
 #[derive(Clone, Serialize, Deserialize)]
@@ -113,6 +127,8 @@ impl DurableObject for NsObject {
             self.handle_history(req).await
         } else if path.ends_with("/sync") {
             self.handle_sync(req).await
+        } else if path.ends_with("/query") {
+            self.handle_query(req).await
         } else if path.ends_with("/webhooks") {
             match req.method() {
                 worker::Method::Get => self.handle_list_webhooks().await,
@@ -238,6 +254,9 @@ impl DurableObject for NsObject {
                 let seq: u64 = self.state.storage().get("wal:seq").await.ok().flatten().unwrap_or(0);
                 let _ = self.fire_webhooks(&crdt_id, seq).await;
 
+                // Push live query results to all matching subscribers.
+                let _ = self.push_live_queries(&crdt_id).await;
+
                 // Acknowledge the op to the sender with the WAL seq and echoed client_seq.
                 let ack = ServerMsg::Ack { seq, client_seq };
                 if let Ok(b) = ack.to_msgpack() {
@@ -347,9 +366,15 @@ impl DurableObject for NsObject {
                 if let Ok(b) = ack.to_msgpack() {
                     let _ = ws.send_with_bytes(&b);
                 }
+
+                // Push live query results for each changed CRDT.
+                for item in &parsed {
+                    let _ = self.push_live_queries(&item.crdt_id).await;
+                }
             }
             ClientMsg::AwarenessUpdate { key, data } => {
-                let client_id: u64 = ws.deserialize_attachment().ok().flatten().unwrap_or(0);
+                let client_id: u64 = ws.deserialize_attachment::<WsAttachment>()
+                    .ok().flatten().map(|a| a.client_id).unwrap_or(0);
                 let broadcast = ServerMsg::AwarenessBroadcast { client_id, key, data };
                 if let Ok(b) = broadcast.to_msgpack() {
                     for other in self.state.get_websockets() {
@@ -357,6 +382,38 @@ impl DurableObject for NsObject {
                     }
                 }
             }
+            ClientMsg::SubscribeQuery { query_id, query } => {
+                let attachment: Option<WsAttachment> =
+                    ws.deserialize_attachment().ok().flatten();
+                let conn_id = attachment.map(|a| a.conn_id).unwrap_or_default();
+
+                // Persist subscription to KV.
+                let key = format!("lq:{conn_id}:{query_id}");
+                let payload_bytes = rmp_serde::encode::to_vec_named(&query)
+                    .unwrap_or_default();
+                let _ = self.state.storage().put(&key, Bytes(payload_bytes)).await;
+
+                // Push initial result immediately.
+                if let Ok(result) = self.run_live_query(&query).await {
+                    let msg = ServerMsg::QueryResult {
+                        query_id,
+                        value: result.value,
+                        matched: result.matched,
+                    };
+                    if let Ok(b) = msg.to_msgpack() {
+                        let _ = ws.send_with_bytes(&b);
+                    }
+                }
+            }
+
+            ClientMsg::UnsubscribeQuery { query_id } => {
+                let attachment: Option<WsAttachment> =
+                    ws.deserialize_attachment().ok().flatten();
+                let conn_id = attachment.map(|a| a.conn_id).unwrap_or_default();
+                let key = format!("lq:{conn_id}:{query_id}");
+                let _ = self.state.storage().delete(&key).await;
+            }
+
             _ => {}
         }
 
@@ -488,13 +545,17 @@ impl NsObject {
         let server = pair.server;
         let client = pair.client;
 
-        // Extract client_id from the token and store it as a WS attachment.
-        // Falls back to 0 if the token can't be parsed (shouldn't happen —
-        // the main worker already validated it before forwarding).
+        // Extract client_id from the token and assign a stable conn_id.
+        // Falls back to client_id=0 if the token can't be parsed (shouldn't
+        // happen — the main worker already validated it before forwarding).
         let client_id: u64 = crate::auth::validate(&req, &self.env)
             .map(|c| c.client_id)
             .unwrap_or(0);
-        let _ = server.serialize_attachment(client_id);
+        let attachment = WsAttachment {
+            client_id,
+            conn_id: uuid::Uuid::new_v4().to_string(),
+        };
+        let _ = server.serialize_attachment(&attachment);
 
         self.state.accept_web_socket(&server);
         self.touch_activity().await;
@@ -562,6 +623,9 @@ impl NsObject {
         // Fire webhooks (best-effort, non-blocking)
         let seq: u64 = self.state.storage().get("wal:seq").await.ok().flatten().unwrap_or(0);
         let _ = self.fire_webhooks(&crdt_id, seq).await;
+
+        // Push live query results to all matching subscribers.
+        let _ = self.push_live_queries(&crdt_id).await;
 
         match delta_bytes {
             Some(bytes) => {
@@ -1114,5 +1178,200 @@ impl NsObject {
             Some(value) => Response::from_json(&value.to_json_value()),
             None => Response::error("not found", 404),
         }
+    }
+
+    /// POST /query — execute a one-shot query against DO KV storage.
+    ///
+    /// Body is JSON: `{ "from": "gc:*", "aggregate": "sum", "where": { ... } }`
+    /// Returns JSON: `{ "value": ..., "matched": N, "scanned": N }`
+    async fn handle_query(&self, mut req: Request) -> Result<Response> {
+        let payload: meridian_core::protocol::LiveQueryPayload = req.json().await
+            .map_err(|_| worker::Error::RustError("invalid query body".into()))?;
+
+        match self.run_live_query(&payload).await {
+            Ok(outcome) => {
+                #[derive(serde::Serialize)]
+                struct QueryResponse {
+                    value: serde_json::Value,
+                    matched: usize,
+                    scanned: usize,
+                }
+                Response::from_json(&QueryResponse {
+                    value: outcome.value,
+                    matched: outcome.matched,
+                    scanned: outcome.scanned,
+                })
+            }
+            Err(e) => Response::error(e.to_string(), 400),
+        }
+    }
+
+    /// Execute a live query by scanning all CRDT snapshots in DO KV.
+    ///
+    /// Loads all `crdt:*` keys (excluding `:exp` metadata), deserializes them,
+    /// then delegates to the pure `execute_query_on_values` core function.
+    async fn run_live_query(
+        &self,
+        payload: &meridian_core::protocol::LiveQueryPayload,
+    ) -> std::result::Result<meridian_core::query::QueryOutcome, String> {
+        use std::str::FromStr as _;
+
+        let aggregate_op = AggregateOp::from_str(&payload.aggregate)
+            .map_err(|_| format!("unknown aggregate: {}", payload.aggregate))?;
+
+        // Convert LiveQueryFilter → WhereClause (same semantics, different type
+        // because LiveQueryPayload lives in the protocol layer, WhereClause in query).
+        let where_clause: Option<WhereClause> = payload.filter.as_ref().map(|f| WhereClause {
+            contains: f.contains.clone(),
+            updated_after: f.updated_after,
+        });
+
+        let opts = worker::durable::ListOptions::new().prefix("crdt:");
+        let map = self
+            .state
+            .storage()
+            .list_with_options(opts)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let iter = match js_sys::try_iter(&map).ok().flatten() {
+            Some(i) => i,
+            None => {
+                return execute_query_on_values(
+                    vec![],
+                    &payload.from,
+                    payload.crdt_type.as_deref(),
+                    aggregate_op,
+                    where_clause.as_ref(),
+                )
+                .map_err(map_query_error);
+            }
+        };
+
+        let mut pairs: Vec<(String, meridian_core::crdt::registry::CrdtValue)> = Vec::new();
+
+        for item in iter {
+            let item = item.map_err(|e| format!("{e:?}"))?;
+            let pair = js_sys::Array::from(&item);
+            let key = pair.get(0).as_string().unwrap_or_default();
+
+            // Skip TTL expiry keys.
+            if key.ends_with(":exp") {
+                continue;
+            }
+
+            let crdt_id = key.trim_start_matches("crdt:").to_owned();
+            let raw_val = pair.get(1);
+            let val_str = raw_val.as_string().unwrap_or_else(|| {
+                js_sys::JSON::stringify(&raw_val)
+                    .ok()
+                    .and_then(|s| s.as_string())
+                    .unwrap_or_default()
+            });
+            let stored: Bytes = match serde_json::from_str(&val_str) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let crdt_value = match meridian_core::crdt::registry::CrdtValue::from_msgpack(&stored.0) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            pairs.push((crdt_id, crdt_value));
+        }
+
+        execute_query_on_values(
+            pairs,
+            &payload.from,
+            payload.crdt_type.as_deref(),
+            aggregate_op,
+            where_clause.as_ref(),
+        )
+        .map_err(map_query_error)
+    }
+
+    /// After every op, re-evaluate all live queries whose glob matches `changed_crdt_id`
+    /// and push updated `ServerMsg::QueryResult` to the relevant WebSocket connections.
+    ///
+    /// Live query subscriptions are stored as `lq:{conn_id}:{query_id}` → msgpack
+    /// `LiveQueryPayload` in DO KV. Each active WS connection tagged with the same
+    /// `conn_id` receives the refreshed result.
+    async fn push_live_queries(&self, changed_crdt_id: &str) -> Result<()> {
+        let opts = worker::durable::ListOptions::new().prefix("lq:");
+        let map = self.state.storage().list_with_options(opts).await?;
+
+        let iter = match js_sys::try_iter(&map).ok().flatten() {
+            Some(i) => i,
+            None => return Ok(()),
+        };
+
+        // Build a map from conn_id → WebSocket for fast lookup.
+        let all_sockets = self.state.get_websockets();
+        let mut conn_to_ws: std::collections::HashMap<String, &WebSocket> = std::collections::HashMap::new();
+        for ws in &all_sockets {
+            if let Ok(Some(attachment)) = ws.deserialize_attachment::<WsAttachment>() {
+                conn_to_ws.insert(attachment.conn_id, ws);
+            }
+        }
+
+        for item in iter {
+            let item = item.map_err(|e| worker::Error::RustError(format!("{e:?}")))?;
+            let pair = js_sys::Array::from(&item);
+            let key = pair.get(0).as_string().unwrap_or_default();
+
+            // Key format: lq:{conn_id}:{query_id}
+            // Strip the "lq:" prefix, then split at the first ':' to get conn_id.
+            let rest = key.trim_start_matches("lq:");
+            let (conn_id, query_id) = match rest.find(':') {
+                Some(pos) => (&rest[..pos], &rest[pos + 1..]),
+                None => continue,
+            };
+
+            let raw_val = pair.get(1);
+            let val_str = raw_val.as_string().unwrap_or_else(|| {
+                js_sys::JSON::stringify(&raw_val)
+                    .ok()
+                    .and_then(|s| s.as_string())
+                    .unwrap_or_default()
+            });
+            let stored: Bytes = match serde_json::from_str(&val_str) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let payload: meridian_core::protocol::LiveQueryPayload =
+                match rmp_serde::decode::from_slice(&stored.0) {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+
+            // Only re-evaluate queries that could be affected by this change.
+            if !meridian_core::auth::glob_match(&payload.from, changed_crdt_id) {
+                continue;
+            }
+
+            // Run the query and send the result to the matching WebSocket.
+            if let Some(ws) = conn_to_ws.get(conn_id)
+                && let Ok(outcome) = self.run_live_query(&payload).await
+            {
+                let msg = ServerMsg::QueryResult {
+                    query_id: query_id.to_string(),
+                    value: outcome.value,
+                    matched: outcome.matched,
+                };
+                if let Ok(b) = msg.to_msgpack() {
+                    let _ = ws.send_with_bytes(&b);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn map_query_error(e: meridian_core::query::QueryError) -> String {
+    match e {
+        meridian_core::query::QueryError::UnknownCrdtType(s) =>
+            format!("unknown crdt type: {s}"),
+        meridian_core::query::QueryError::IncompatibleAggregate { aggregate, crdt_type } =>
+            format!("aggregate '{aggregate}' is not supported for crdt type '{crdt_type}'"),
     }
 }

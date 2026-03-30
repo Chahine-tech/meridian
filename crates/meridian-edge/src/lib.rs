@@ -18,6 +18,8 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> worker::Result<Response
         .get_async("/v1/namespaces/:ns/crdts/:id/sync", http::get_sync)
         .get_async("/v1/namespaces/:ns/crdts/:id/history", http::get_history)
         .post_async("/v1/namespaces/:ns/crdts/:id/ops", http::post_op)
+        // Query engine — cross-CRDT scan + aggregation
+        .post_async("/v1/namespaces/:ns/query", http::post_query)
         // Token issuance + introspection (admin only for issue)
         .post_async("/v1/namespaces/:ns/tokens", http::issue_token)
         .get_async("/v1/namespaces/:ns/tokens/me", http::token_me)
