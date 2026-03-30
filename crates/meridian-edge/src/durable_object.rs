@@ -1349,16 +1349,16 @@ impl NsObject {
             }
 
             // Run the query and send the result to the matching WebSocket.
-            if let Some(ws) = conn_to_ws.get(conn_id) {
-                if let Ok(outcome) = self.run_live_query(&payload).await {
-                    let msg = ServerMsg::QueryResult {
-                        query_id: query_id.to_string(),
-                        value: outcome.value,
-                        matched: outcome.matched,
-                    };
-                    if let Ok(b) = msg.to_msgpack() {
-                        let _ = ws.send_with_bytes(&b);
-                    }
+            if let Some(ws) = conn_to_ws.get(conn_id)
+                && let Ok(outcome) = self.run_live_query(&payload).await
+            {
+                let msg = ServerMsg::QueryResult {
+                    query_id: query_id.to_string(),
+                    value: outcome.value,
+                    matched: outcome.matched,
+                };
+                if let Ok(b) = msg.to_msgpack() {
+                    let _ = ws.send_with_bytes(&b);
                 }
             }
         }
