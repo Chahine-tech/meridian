@@ -6,7 +6,8 @@ pub mod query;
 pub mod sse;
 pub mod tokens;
 
-pub use query::{ExecuteQueryError, infer_crdt_type};
+pub use query::ExecuteQueryError;
+pub use meridian_core::query::infer_crdt_type;
 
 use std::sync::Arc;
 

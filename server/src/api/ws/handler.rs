@@ -12,8 +12,10 @@ use tracing::{debug, info, warn};
 
 use meridian_core::protocol::BatchItem;
 
+use meridian_core::query::{infer_crdt_type, AggregateOp, WhereClause};
+
 use crate::{
-    api::handlers::{ExecuteQueryError, infer_crdt_type, query::{execute_query, AggregateOp, WhereClause}},
+    api::handlers::{ExecuteQueryError, query::execute_query},
     auth::ClaimsExt,
     crdt::{
         clock::now_ms,

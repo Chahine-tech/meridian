@@ -282,6 +282,36 @@ pub async fn token_me(req: Request, ctx: RouteContext<()>) -> worker::Result<Res
     }))
 }
 
+pub async fn post_query(mut req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
+    let ns = ctx.param("ns").cloned().unwrap_or_default();
+
+    let claims = match auth::validate(&req, &ctx.env) {
+        Ok(c) => c,
+        Err(e) => return Ok(auth::auth_error_response(&e)),
+    };
+
+    if claims.namespace != ns {
+        return Response::error("forbidden", 403);
+    }
+
+    let body = req.bytes().await?;
+
+    let do_stub = ctx
+        .env
+        .durable_object("NS_OBJECT")?
+        .id_from_name(&ns)?
+        .get_stub()?;
+
+    let do_req = Request::new_with_init(
+        &format!("http://do/{ns}/query"),
+        worker::RequestInit::new()
+            .with_method(worker::Method::Post)
+            .with_body(Some(body.into())),
+    )?;
+
+    do_stub.fetch_with_request(do_req).await
+}
+
 pub async fn issue_token(mut req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
     let ns = ctx.param("ns").cloned().unwrap_or_default();
 
