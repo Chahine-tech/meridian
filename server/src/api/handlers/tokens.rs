@@ -9,9 +9,7 @@ use crate::auth::{ClaimsExt, Permissions, PermissionsV1, PermissionsV2, PermEntr
 
 use super::AppStateExt;
 
-// ---------------------------------------------------------------------------
 // POST /v1/namespaces/:ns/tokens
-// ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 pub struct IssueTokenRequest {
@@ -67,9 +65,7 @@ impl From<PermEntryDto> for PermEntry {
     }
 }
 
-// ---------------------------------------------------------------------------
 // GET /v1/namespaces/:ns/tokens/me
-// ---------------------------------------------------------------------------
 
 /// Return the decoded claims of the caller's token as JSON.
 ///

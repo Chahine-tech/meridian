@@ -9,9 +9,7 @@ import { describe, it, expect } from "bun:test";
 import { canRead, canWrite, OpMasks } from "../src/auth/permissions.js";
 import type { Permissions } from "../src/schema.js";
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 const v1 = (read: string[], write: string[]): Permissions => ({
   read,
@@ -24,9 +22,7 @@ const v2 = (
   w: Array<{ p: string; o?: number; e?: number }>,
 ): Permissions => ({ v: 2, r, w, admin: false });
 
-// ---------------------------------------------------------------------------
 // glob matching
-// ---------------------------------------------------------------------------
 
 describe("canRead — V1 glob matching", () => {
   it("wildcard * grants access to everything", () => {
@@ -90,9 +86,7 @@ describe("canWrite — V1", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // V2 — key-level (no op mask)
-// ---------------------------------------------------------------------------
 
 describe("canRead — V2 key-level", () => {
   it("first-match-wins: read granted by first rule", () => {
@@ -111,9 +105,7 @@ describe("canRead — V2 key-level", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // V2 — op masks
-// ---------------------------------------------------------------------------
 
 describe("canWrite — V2 op masks", () => {
   it("no mask on rule (ALL) — any op allowed", () => {
@@ -150,9 +142,7 @@ describe("canWrite — V2 op masks", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // V2 — per-rule TTL
-// ---------------------------------------------------------------------------
 
 describe("V2 — per-rule expiry", () => {
   it("expired rule is skipped", () => {
@@ -177,9 +167,7 @@ describe("V2 — per-rule expiry", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // V2 — {clientId} template
-// ---------------------------------------------------------------------------
 
 describe("V2 — {clientId} template", () => {
   it("expands to the token's client_id", () => {
@@ -216,9 +204,7 @@ describe("V2 — {clientId} template", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // V2 — first-match-wins ordering
-// ---------------------------------------------------------------------------
 
 describe("V2 — first-match-wins", () => {
   it("deny-all first rule blocks even if later rule would match", () => {

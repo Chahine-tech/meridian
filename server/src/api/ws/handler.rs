@@ -33,9 +33,7 @@ use super::{
     subscription::SubscriptionManager,
 };
 
-// ---------------------------------------------------------------------------
 // AppState subset (injected via State — avoids circular dependency on AppState)
-// ---------------------------------------------------------------------------
 
 /// Minimal state needed by the WS handler.
 /// The concrete `AppState` implements this interface.
@@ -53,9 +51,7 @@ pub trait WsState: Clone + Send + Sync + 'static {
 
 use crate::auth::TokenClaims;
 
-// ---------------------------------------------------------------------------
 // WebSocket upgrade handler
-// ---------------------------------------------------------------------------
 
 /// Upgrades an HTTP request to a WebSocket connection.
 ///
@@ -84,9 +80,7 @@ where
     ws.on_upgrade(move |socket| handle_socket(socket, ns, client_id, claims, state))
 }
 
-// ---------------------------------------------------------------------------
 // Per-connection loop
-// ---------------------------------------------------------------------------
 
 async fn handle_socket<S: WsState>(mut socket: WebSocket, ns: String, client_id: u64, claims: TokenClaims, state: S) {
     // Subscribe to namespace broadcast channel.
@@ -480,7 +474,6 @@ async fn handle_client_message<S: WsState>(
 
     true
 }
-
 
 async fn send_error(socket: &mut WebSocket, code: u16, message: &str) {
     let err = ServerMsg::Error { code, message: message.to_owned() };

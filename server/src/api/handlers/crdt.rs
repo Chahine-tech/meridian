@@ -22,9 +22,7 @@ use crate::{
 
 use super::AppStateExt;
 
-// ---------------------------------------------------------------------------
 // GET /v1/namespaces/:ns/crdts/:id
-// ---------------------------------------------------------------------------
 
 /// Returns the current JSON value of a CRDT.
 #[instrument(skip(state, claims))]
@@ -47,9 +45,7 @@ pub async fn get_crdt<S: AppStateExt>(
     }
 }
 
-// ---------------------------------------------------------------------------
 // POST /v1/namespaces/:ns/crdts/:id/ops
-// ---------------------------------------------------------------------------
 
 /// Applies a msgpack-encoded `CrdtOp` to a CRDT.
 /// Returns the resulting delta as msgpack bytes (Content-Type: application/msgpack).
@@ -153,9 +149,7 @@ pub async fn post_op<S: AppStateExt>(
     }
 }
 
-// ---------------------------------------------------------------------------
 // GET /v1/namespaces/:ns/crdts/:id/sync?since=<vc_base64>
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
 pub struct SyncQuery {

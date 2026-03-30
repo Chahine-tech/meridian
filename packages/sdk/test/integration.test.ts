@@ -76,8 +76,6 @@ describe("Meridian integration", () => {
     });
   }
 
-  // ---- HTTP REST ----
-
   skip("GET non-existent CRDT returns 404", async () => {
     const result = await Effect.runPromise(
       Effect.either(http.getCrdt(NAMESPACE, "__nonexistent__")),
@@ -177,8 +175,6 @@ describe("Meridian integration", () => {
     const v2 = r2 as { elements?: unknown[] };
     expect((v2.elements ?? []).includes("apple")).toBe(false);
   });
-
-  // ---- MeridianClient (WebSocket) ----
 
   skip("MeridianClient: connect and use gcounter handle", async () => {
     const client = await Effect.runPromise(

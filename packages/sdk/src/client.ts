@@ -27,6 +27,7 @@ import {
 import type { TreeNodeValue } from "./sync/delta.js";
 import { parseAndValidateToken } from "./auth/token.js";
 import { canRead as evalCanRead, canWrite as evalCanWrite } from "./auth/permissions.js";
+import { decode as msgpackDecode } from "./codec.js";
 import type { OpMask } from "./auth/permissions.js";
 import type { ServerMsg, TokenClaims } from "./schema.js";
 import type { TokenParseError, TokenExpiredError } from "./errors.js";
@@ -172,6 +173,10 @@ export class MeridianClient {
     listeners: Set<(result: LiveQueryResult) => void>;
   }>();
   private liveQueryCounter = 0;
+
+  // RPC frame listeners — registered by createMeridianRpc
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly rpcListeners = new Set<(frame: any) => void>();
 
   private constructor(config: MeridianClientConfig, claims: TokenClaims) {
     this.namespace = config.namespace;
@@ -421,7 +426,7 @@ export class MeridianClient {
   rga(crdtId: string, opts?: { validator?: CrdtValidator }): RGAHandle {
     let handle = this.rgaHandles.get(crdtId);
     if (!handle) {
-      handle = new RGAHandle({ crdtId, clientId: this.clientId, transport: this.transport, ...(opts?.validator !== undefined && { validator: opts.validator }) });
+      handle = new RGAHandle({ crdtId, clientId: this.clientId, transport: this.transport, ...(opts?.validator !== undefined ? { validator: opts.validator } : {}) });
       this.rgaHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
@@ -451,7 +456,7 @@ export class MeridianClient {
   tree(crdtId: string, opts?: { validator?: CrdtValidator }): TreeHandle {
     let handle = this.treeHandles.get(crdtId);
     if (!handle) {
-      handle = new TreeHandle({ crdtId, clientId: this.clientId, transport: this.transport, ...(opts?.validator !== undefined && { validator: opts.validator }) });
+      handle = new TreeHandle({ crdtId, clientId: this.clientId, transport: this.transport, ...(opts?.validator !== undefined ? { validator: opts.validator } : {}) });
       this.treeHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
@@ -511,6 +516,27 @@ export class MeridianClient {
    */
   onStateChange(listener: (state: WsState) => void): () => void {
     return this.transport.onStateChange(listener);
+  }
+
+  /**
+   * Register a listener for incoming RPC frames (used by `createMeridianRpc`).
+   * Frames arrive as `AwarenessBroadcast` messages with key `"__rpc__"`.
+   * Returns an unsubscribe function.
+   * @internal
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onRpcFrame(listener: (frame: any) => void): () => void {
+    this.rpcListeners.add(listener);
+    return () => { this.rpcListeners.delete(listener); };
+  }
+
+  /**
+   * Send a raw msgpack-encoded `ClientMsg` over the WebSocket transport.
+   * Used by `createMeridianRpc` to send typed RPC frames.
+   * @internal
+   */
+  sendRpcFrame(data: Uint8Array): void {
+    this.transport.send({ AwarenessUpdate: { key: "__rpc__", data } });
   }
 
   /**
@@ -697,6 +723,14 @@ export class MeridianClient {
   private handleServerMsg(msg: ServerMsg): void {
     if ("AwarenessBroadcast" in msg) {
       const { client_id, key, data } = msg.AwarenessBroadcast;
+      // Dispatch RPC frames — these are AwarenessUpdates with a "__rpc__" key.
+      if (key === "__rpc__" && this.rpcListeners.size > 0) {
+        try {
+          const frame = msgpackDecode(data);
+          for (const fn of this.rpcListeners) fn(frame);
+        } catch { /* malformed frame — drop silently */ }
+        return;
+      }
       this.awHandles.get(key)?.applyBroadcast(client_id, data);
       return;
     }

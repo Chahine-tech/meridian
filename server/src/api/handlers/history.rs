@@ -14,9 +14,7 @@ use crate::{
 
 use super::AppStateExt;
 
-// ---------------------------------------------------------------------------
 // Response types
-// ---------------------------------------------------------------------------
 
 #[derive(Serialize)]
 pub struct HistoryEntry {
@@ -37,9 +35,7 @@ pub struct HistoryResponse {
     pub next_seq: Option<u64>,
 }
 
-// ---------------------------------------------------------------------------
 // Query params
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
 pub struct HistoryQuery {
@@ -49,9 +45,7 @@ pub struct HistoryQuery {
     pub limit: Option<usize>,
 }
 
-// ---------------------------------------------------------------------------
 // GET /v1/namespaces/:ns/crdts/:id/history
-// ---------------------------------------------------------------------------
 
 /// Returns the operation history for a CRDT from the WAL.
 ///

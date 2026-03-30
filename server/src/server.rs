@@ -18,9 +18,7 @@ use crate::{
     AppState,
 };
 
-// ---------------------------------------------------------------------------
 // Config
-// ---------------------------------------------------------------------------
 
 pub struct Config {
     pub bind: String,
@@ -55,9 +53,7 @@ impl Config {
     }
 }
 
-// ---------------------------------------------------------------------------
 // run — wire all services and start the HTTP server
-// ---------------------------------------------------------------------------
 
 pub async fn run<S, W>(
     config: Config,
@@ -69,7 +65,6 @@ where
     S: CrdtStore + Store<CrdtValue>,
     W: WalBackend,
 {
-    // ----- Auth -----
     let signer = match config.signing_key_hex {
         Some(ref hex) => {
             info!("using signing key from MERIDIAN_SIGNING_KEY");
@@ -86,10 +81,8 @@ where
         rate_limiter: Arc::new(RateLimiter::new()),
     });
 
-    // ----- Graceful shutdown token -----
     let cancel = CancellationToken::new();
 
-    // ----- Webhooks (optional) -----
     let webhooks = WebhookConfig::from_env().map(|webhook_config| {
         info!(url = webhook_config.url, "webhooks enabled");
         WebhookDispatcher::new(webhook_config, cancel.clone())
@@ -99,11 +92,9 @@ where
         info!("MERIDIAN_WEBHOOK_URL not set — webhooks disabled");
     }
 
-    // ----- Shared state -----
     let subscriptions = Arc::new(SubscriptionManager::new());
 
-    // ----- Cluster (optional) -----
-    // Two mutually-exclusive modes:
+    // Two mutually-exclusive cluster modes:
     //   `--features cluster`      → Redis Pub/Sub (recommended, low latency)
     //   `--features cluster-http` → HTTP push (PostgreSQL-only deployments)
     #[cfg(any(feature = "cluster", feature = "cluster-http"))]
@@ -199,7 +190,6 @@ where
         cluster,
     };
 
-    // ----- Background tasks -----
     let gc_handle = tokio::spawn(run_presence_gc(
         Arc::clone(&store),
         Arc::clone(&subscriptions),
@@ -214,7 +204,6 @@ where
         cancel.clone(),
     ));
 
-    // ----- HTTP server -----
     let router = build_router(state, auth_state).layer(Extension(prometheus_handle));
 
     let listener = TcpListener::bind(&config.bind).await?;

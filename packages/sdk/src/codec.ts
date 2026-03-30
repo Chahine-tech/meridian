@@ -39,6 +39,10 @@ export const uuidToBytes = (uuid: string): Uint8Array => {
 
 export const encodeVectorClock = (vc: VectorClock): Uint8Array => encode({ entries: vc });
 
+const VectorClockWire = Schema.Struct({
+  entries: Schema.Record({ key: Schema.String, value: Schema.Number }),
+});
+
 export const decodeVectorClock = (bytes: Uint8Array): Effect.Effect<VectorClock, CodecError> => {
   let raw: unknown;
   try {
@@ -47,12 +51,8 @@ export const decodeVectorClock = (bytes: Uint8Array): Effect.Effect<VectorClock,
     return Effect.fail(new CodecError({ message: "VectorClock msgpack decode failed", raw: bytes }));
   }
 
-  const entries = raw !== null && typeof raw === "object" && "entries" in raw
-    ? (raw as { entries: unknown }).entries
-    : {};
-  return Schema.decodeUnknown(Schema.Record({ key: Schema.String, value: Schema.Number }))(
-    entries ?? {},
-  ).pipe(
+  return Schema.decodeUnknown(VectorClockWire)(raw).pipe(
+    Effect.map((w) => w.entries),
     Effect.mapError((e) =>
       new CodecError({ message: `VectorClock schema validation failed: ${e.message}`, raw: bytes }),
     ),

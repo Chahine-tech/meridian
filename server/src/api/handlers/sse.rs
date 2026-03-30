@@ -19,9 +19,7 @@ use crate::{
 
 use super::AppStateExt;
 
-// ---------------------------------------------------------------------------
 // GET /v1/namespaces/:ns/crdts/:id/events
-// ---------------------------------------------------------------------------
 
 /// Server-Sent Events stream — delivers base64-encoded msgpack deltas for a
 /// single CRDT to stateless clients (serverless agents, Lambda, CF Workers).

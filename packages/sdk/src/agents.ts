@@ -51,9 +51,6 @@ export interface Tool {
   };
 }
 
-// ---------------------------------------------------------------------------
-// OpenAI adapter
-// ---------------------------------------------------------------------------
 
 /** OpenAI-compatible tool definition (Chat Completions `tools` array entry). */
 export interface OpenAITool {
@@ -92,9 +89,6 @@ export function toOpenAITools(tools: Tool[]): OpenAITool[] {
   }));
 }
 
-// ---------------------------------------------------------------------------
-// Gemini adapter
-// ---------------------------------------------------------------------------
 
 /** Gemini FunctionDeclaration (single entry inside a `Tool.functionDeclarations` array). */
 export interface GeminiFunctionDeclaration {
@@ -134,9 +128,7 @@ export function toGeminiTools(tools: Tool[]): GeminiTool {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Provider-specific input types (structural matches — no provider SDK deps)
-// ---------------------------------------------------------------------------
+
 
 /** Anthropic tool_use block — matches `ContentBlock` from `@anthropic-ai/sdk`. */
 export interface ToolUseBlock {
@@ -248,10 +240,6 @@ export function getMeridianTools(
   return tools;
 }
 
-// ---------------------------------------------------------------------------
-// Shared dispatcher (private)
-// ---------------------------------------------------------------------------
-
 /**
  * Core dispatch logic — routes a (name, input) pair to the right HTTP operation.
  * All provider-specific executors delegate here.
@@ -301,10 +289,6 @@ async function dispatchTool(
 
   return JSON.stringify({ error: `Unknown tool: ${name}` });
 }
-
-// ---------------------------------------------------------------------------
-// Provider executors
-// ---------------------------------------------------------------------------
 
 /**
  * Execute a Meridian tool call returned by **Anthropic Claude**.

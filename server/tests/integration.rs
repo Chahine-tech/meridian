@@ -19,9 +19,7 @@ use meridian_server::{
 };
 use tower::ServiceExt;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 static PROMETHEUS_HANDLE: std::sync::OnceLock<metrics_exporter_prometheus::PrometheusHandle> =
     std::sync::OnceLock::new();
@@ -75,9 +73,7 @@ async fn body_bytes(body: Body) -> Vec<u8> {
     body.collect().await.unwrap().to_bytes().to_vec()
 }
 
-// ---------------------------------------------------------------------------
 // GET /v1/namespaces/:ns/crdts/:id
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn get_crdt_not_found_returns_404() {
@@ -137,9 +133,7 @@ async fn get_crdt_wrong_namespace_returns_403() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-// ---------------------------------------------------------------------------
 // POST /v1/namespaces/:ns/crdts/:id/ops
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn post_op_gcounter_returns_ok() {
@@ -298,9 +292,7 @@ async fn post_op_scoped_permission_allows_matching_key() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-// ---------------------------------------------------------------------------
 // GET /metrics (no auth)
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn metrics_endpoint_is_unauthenticated() {
@@ -325,9 +317,7 @@ async fn metrics_endpoint_is_unauthenticated() {
 
 // Rate limiting is tested at the unit level in src/rate_limit.rs.
 
-// ---------------------------------------------------------------------------
 // GET /v1/namespaces/:ns/crdts/:id/history
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn history_returns_empty_for_new_crdt() {
@@ -370,9 +360,7 @@ async fn history_returns_empty_for_new_crdt() {
     assert!(json["entries"].is_array());
 }
 
-// ---------------------------------------------------------------------------
 // ORSet integration
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn orset_add_and_get_returns_element() {
@@ -422,9 +410,7 @@ async fn orset_add_and_get_returns_element() {
     assert_eq!(json["elements"].as_array().unwrap().len(), 1);
 }
 
-// ---------------------------------------------------------------------------
 // Permissions V2 — op-mask enforcement
-// ---------------------------------------------------------------------------
 
 use meridian_server::auth::{op_masks, PermEntry, PermissionsV2};
 
@@ -578,9 +564,7 @@ async fn v2_no_write_rules_blocks_all_writes() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-// ---------------------------------------------------------------------------
 // POST /v1/namespaces/:ns/query
-// ---------------------------------------------------------------------------
 
 async fn post_op_for_query(
     app: axum::Router,
@@ -886,9 +870,7 @@ async fn post_query_empty_namespace_returns_null() {
     assert_eq!(json["value"], serde_json::Value::Null);
 }
 
-// ---------------------------------------------------------------------------
 // WebSocket live query tests
-// ---------------------------------------------------------------------------
 
 /// Bind a real TCP listener, spawn the axum server, return the bound address.
 async fn spawn_test_server(router: axum::Router) -> std::net::SocketAddr {
@@ -1198,9 +1180,7 @@ async fn ws_live_query_type_filter_skips_unrelated() {
     assert_eq!(matched, 1);
 }
 
-// ---------------------------------------------------------------------------
 // GET /v1/namespaces/:ns/tokens/me
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn token_me_returns_decoded_claims_v1() {

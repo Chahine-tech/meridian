@@ -6,9 +6,7 @@ use crate::{
     storage::{CrdtStore, StorageError},
 };
 
-// ---------------------------------------------------------------------------
 // ApplyError
-// ---------------------------------------------------------------------------
 
 /// Error returned by [`apply_op_atomic`].
 ///
@@ -25,9 +23,7 @@ pub enum ApplyError {
     Storage(#[from] StorageError),
 }
 
-// ---------------------------------------------------------------------------
 // apply_op_atomic
-// ---------------------------------------------------------------------------
 
 /// Load a CRDT, apply `op`, and persist the result atomically.
 ///
