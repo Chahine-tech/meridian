@@ -109,6 +109,8 @@ impl DurableObject for NsObject {
             self.handle_get(req).await
         } else if path.ends_with("/wal") {
             self.handle_wal(req).await
+        } else if path.ends_with("/history") {
+            self.handle_history(req).await
         } else if path.ends_with("/sync") {
             self.handle_sync(req).await
         } else if path.ends_with("/webhooks") {
@@ -347,7 +349,8 @@ impl DurableObject for NsObject {
                 }
             }
             ClientMsg::AwarenessUpdate { key, data } => {
-                let broadcast = ServerMsg::AwarenessBroadcast { client_id: 0, key, data };
+                let client_id: u64 = ws.deserialize_attachment().ok().flatten().unwrap_or(0);
+                let broadcast = ServerMsg::AwarenessBroadcast { client_id, key, data };
                 if let Ok(b) = broadcast.to_msgpack() {
                     for other in self.state.get_websockets() {
                         let _ = other.send_with_bytes(&b);
@@ -476,10 +479,22 @@ impl NsObject {
     }
 
     /// WebSocket upgrade — attach client to DO via Hibernation API.
-    async fn handle_websocket(&self, _req: Request) -> Result<Response> {
+    ///
+    /// Stores the token's `client_id` as a WS attachment so that
+    /// `websocket_message` can inject it into `AwarenessUpdate` broadcasts
+    /// without re-parsing the token on every message.
+    async fn handle_websocket(&self, req: Request) -> Result<Response> {
         let pair = WebSocketPair::new()?;
         let server = pair.server;
         let client = pair.client;
+
+        // Extract client_id from the token and store it as a WS attachment.
+        // Falls back to 0 if the token can't be parsed (shouldn't happen —
+        // the main worker already validated it before forwarding).
+        let client_id: u64 = crate::auth::validate(&req, &self.env)
+            .map(|c| c.client_id)
+            .unwrap_or(0);
+        let _ = server.serialize_attachment(client_id);
 
         self.state.accept_web_socket(&server);
         self.touch_activity().await;
@@ -1008,6 +1023,54 @@ impl NsObject {
         }
 
         Response::from_json(&WalResponse { checkpoint_seq, entries })
+    }
+
+    /// GET /history?crdt_id=<id>[&since_seq=<n>][&limit=<n>]
+    /// Returns op history for a specific CRDT, paginated by seq.
+    async fn handle_history(&self, req: Request) -> Result<Response> {
+        let url = req.url()?;
+        let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
+        let crdt_id = params.get("crdt_id").cloned().unwrap_or_default();
+        let since_seq: u64 = params.get("since_seq").and_then(|v| v.parse().ok()).unwrap_or(0);
+        let limit: usize = params.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50).min(500);
+
+        let all_entries = self.replay_wal(since_seq, None).await?;
+
+        let filtered: Vec<_> = all_entries
+            .into_iter()
+            .filter(|e| e.crdt_id == crdt_id)
+            .collect();
+
+        let has_more = filtered.len() > limit;
+        let page: Vec<_> = filtered.into_iter().take(limit).collect();
+        let next_seq = if has_more { page.last().map(|e| e.seq + 1) } else { None };
+
+        #[derive(Serialize)]
+        struct HistoryEntry {
+            seq: u64,
+            timestamp_ms: u64,
+            op: serde_json::Value,
+        }
+
+        #[derive(Serialize)]
+        struct HistoryResponse {
+            crdt_id: String,
+            entries: Vec<HistoryEntry>,
+            next_seq: Option<u64>,
+        }
+
+        let entries: Vec<HistoryEntry> = page
+            .into_iter()
+            .map(|e| {
+                let op = rmp_serde::decode::from_slice::<meridian_core::crdt::registry::CrdtOp>(&e.op_bytes)
+                    .ok()
+                    .and_then(|op| serde_json::to_value(op).ok())
+                    .unwrap_or(serde_json::Value::Null);
+                HistoryEntry { seq: e.seq, timestamp_ms: e.timestamp_ms, op }
+            })
+            .collect();
+
+        Response::from_json(&HistoryResponse { crdt_id, entries, next_seq })
     }
 
     /// GET /sync?crdt_id=<id>[&since=<base64url-msgpack-vc>]
