@@ -12,9 +12,7 @@ use serde_json::{json, Value as JsonValue};
 use crate::auth::glob_match;
 use crate::crdt::{Crdt, registry::{CrdtType, CrdtValue}};
 
-// ---------------------------------------------------------------------------
 // Public types
-// ---------------------------------------------------------------------------
 
 /// Supported aggregation operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,9 +73,7 @@ pub enum QueryError {
     IncompatibleAggregate { aggregate: String, crdt_type: String },
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /// Infer the CRDT type from an ID or glob prefix.
 ///
@@ -124,10 +120,7 @@ fn apply_where(value: &CrdtValue, clause: &WhereClause) -> bool {
     true
 }
 
-
-// ---------------------------------------------------------------------------
 // Core execution — pure, synchronous, no I/O
-// ---------------------------------------------------------------------------
 
 /// Execute a query against a pre-fetched list of `(crdt_id, CrdtValue)` pairs.
 ///
@@ -189,9 +182,7 @@ pub fn execute_query_on_values(
     Ok(QueryOutcome { value, matched, scanned })
 }
 
-// ---------------------------------------------------------------------------
 // Aggregation
-// ---------------------------------------------------------------------------
 
 fn aggregate(values: Vec<CrdtValue>, op: AggregateOp) -> Result<JsonValue, QueryError> {
     let first_type = values.first().map(|v| v.crdt_type());

@@ -6,9 +6,7 @@ use tracing::debug;
 
 use super::protocol::ServerMsg;
 
-// ---------------------------------------------------------------------------
 // SubscriptionManager
-// ---------------------------------------------------------------------------
 
 /// Fan-out hub: maps namespace → broadcast channel.
 ///
@@ -90,9 +88,7 @@ impl meridian_cluster::LocalBroadcast for SubscriptionManager {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

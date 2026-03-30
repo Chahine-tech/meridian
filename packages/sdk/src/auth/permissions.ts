@@ -8,10 +8,6 @@
 
 import type { Permissions, PermEntry } from "../schema.js";
 
-// ---------------------------------------------------------------------------
-// Op mask constants — must stay in sync with server `op_masks` module
-// ---------------------------------------------------------------------------
-
 export const OpMasks = {
   /** Allow all ops (sentinel — 0 means no restriction). */
   ALL: 0,
@@ -47,10 +43,6 @@ export const OpMasks = {
 
 export type OpMask = number;
 
-// ---------------------------------------------------------------------------
-// Glob matching — mirrors Rust `glob_match`
-// ---------------------------------------------------------------------------
-
 function globMatch(pattern: string, value: string): boolean {
   if (pattern === "*") return true;
   const starPos = pattern.indexOf("*");
@@ -66,10 +58,6 @@ function globMatch(pattern: string, value: string): boolean {
   }
   return false;
 }
-
-// ---------------------------------------------------------------------------
-// PermEntry evaluation — mirrors Rust `PermEntry::matches`
-// ---------------------------------------------------------------------------
 
 function isAllMask(mask: number): boolean {
   return mask === 0 || mask === 0xffff;
@@ -96,10 +84,6 @@ function entryMatches(
   if (isAllMask(ruleOp) || isAllMask(opMask)) return true;
   return (opMask & ruleOp) !== 0;
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /**
  * Check whether the token's permissions allow reading `crdtId`.

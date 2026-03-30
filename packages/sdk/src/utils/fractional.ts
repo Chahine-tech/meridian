@@ -60,7 +60,7 @@ function decrement(s: string): string {
   // Trim trailing zeros beyond length 1
   while (result.length > 1 && result.endsWith("0")) result = result.slice(0, -1);
   // If underflow, prepend a zero digit
-  if (n < 0n) return "0" + result;
+  if (n < 0n) return `0${result}`;
   return result;
 }
 
@@ -143,9 +143,9 @@ export function spread(a: string, b: string, n: number): string[] {
     const remaining = n - i;
     // Approximate: compute a position 1/(remaining+1) through [lo, b]
     // We do this iteratively by bisecting
-    let hi = b;
+    let _hi = b;
     for (let step = 0; step < Math.ceil(Math.log2(remaining + 1)); step++) {
-      hi = between(lo, b);
+      _hi = between(lo, b);
     }
     const pos = between(lo, b);
     positions.push(pos);

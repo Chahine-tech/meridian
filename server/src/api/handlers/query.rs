@@ -19,9 +19,7 @@ use crate::{
     storage::CrdtStore,
 };
 
-// ---------------------------------------------------------------------------
 // Request / response types (HTTP layer only)
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
 pub struct QueryRequest {
@@ -41,9 +39,7 @@ pub struct QueryResponse {
     pub execution_ms: u64,
 }
 
-// ---------------------------------------------------------------------------
 // Storage-aware execute_query (wraps the pure core fn)
-// ---------------------------------------------------------------------------
 
 pub use meridian_core::query::QueryOutcome;
 
@@ -81,9 +77,7 @@ pub async fn execute_query<S: CrdtStore>(
         })
 }
 
-// ---------------------------------------------------------------------------
 // HTTP handler
-// ---------------------------------------------------------------------------
 
 #[instrument(skip(state, claims, body))]
 pub async fn post_query<S: AppStateExt>(

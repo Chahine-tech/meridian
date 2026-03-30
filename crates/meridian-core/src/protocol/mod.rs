@@ -1,10 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 
-// ---------------------------------------------------------------------------
-// Live query payload types (shared between client and server protocol)
-// ---------------------------------------------------------------------------
-
 /// Content filter for a live query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LiveQueryFilter {

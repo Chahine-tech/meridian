@@ -42,9 +42,7 @@ pub fn glob_match(pattern: &str, value: &str) -> bool {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Op-level permission masks (V2)
-// ---------------------------------------------------------------------------
 
 /// Bitmask of allowed operations on a specific CRDT key.
 ///
@@ -90,9 +88,7 @@ pub mod op_masks {
     pub const ALL: OpMask = 0;
 }
 
-// ---------------------------------------------------------------------------
 // V2 permission rule
-// ---------------------------------------------------------------------------
 
 /// A single permission rule in a V2 token.
 ///
@@ -168,9 +164,7 @@ impl PermEntry {
     }
 }
 
-// ---------------------------------------------------------------------------
 // V1 permissions (backward compat)
-// ---------------------------------------------------------------------------
 
 /// V1 key-scoped permissions (glob lists).
 ///
@@ -193,9 +187,7 @@ impl PermissionsV1 {
     }
 }
 
-// ---------------------------------------------------------------------------
 // V2 permissions
-// ---------------------------------------------------------------------------
 
 /// V2 fine-grained permissions with per-rule op masks and TTLs.
 ///
@@ -237,9 +229,7 @@ impl PermissionsV2 {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Untagged enum — backward-compatible union
-// ---------------------------------------------------------------------------
 
 /// Token permissions — either V1 (legacy) or V2 (fine-grained).
 ///

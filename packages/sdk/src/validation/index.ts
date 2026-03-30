@@ -58,7 +58,7 @@ export interface CrdtValidator {
    * Validate `value`. Throw, or return `{ ok: false, error }` to reject.
    * Return `{ ok: true }` or `undefined` to accept.
    */
-  validate(value: string): { ok: false; error: string } | { ok: true } | undefined | void;
+  validate(value: string): { ok: false; error: string } | { ok: true } | undefined;
 }
 
 /**

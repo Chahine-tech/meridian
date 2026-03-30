@@ -14,9 +14,7 @@ pub use meridian_storage::{PgStore, PgWal};
 #[cfg(feature = "storage-redis")]
 pub use meridian_storage::{RedisStore, RedisWal};
 
-// ---------------------------------------------------------------------------
 // CrdtStore — Store<CrdtValue> convenience bound
-// ---------------------------------------------------------------------------
 // Blanket-implemented for any `T: Store<CrdtValue>`.
 // Files that call Store methods must also import `crate::storage::Store`
 // to bring the trait methods into scope (standard Rust trait import rules).

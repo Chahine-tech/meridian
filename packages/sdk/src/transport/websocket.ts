@@ -212,9 +212,6 @@ export class WsTransport {
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // Effect lifecycle
-  // ---------------------------------------------------------------------------
 
   private makeWs(): {
     ws: WebSocket;
@@ -318,10 +315,6 @@ export class WsTransport {
       Effect.catchAll(() => Effect.void),
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Internals
-  // ---------------------------------------------------------------------------
 
   private transitionTo(next: WsState): void {
     if (this.state === next) return;

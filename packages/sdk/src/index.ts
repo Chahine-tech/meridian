@@ -112,6 +112,10 @@ export type {
   MeridianAgentConfig,
 } from "./agents.js";
 
+// RPC — type-safe WS events + responses (à la partyRPC)
+export { createMeridianRpc } from "./rpc.js";
+export type { MeridianRpc, MeridianRpcClient, MeridianRpcConfig, Unsubscribe } from "./rpc.js";
+
 // Effect Layer — dependency injection
 export { MeridianService, MeridianLive } from "./layer.js";
 

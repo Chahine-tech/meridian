@@ -638,10 +638,6 @@ impl NsObject {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Webhook management
-    // -----------------------------------------------------------------------
-
     /// Load all registered webhooks from KV.
     async fn load_webhooks(&self) -> Result<Vec<Webhook>> {
         let opts = worker::durable::ListOptions::new().prefix("webhook:");
