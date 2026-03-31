@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
 
 jobs:
   release:
@@ -24,9 +26,9 @@ jobs:
         run: bun install
 
       # Build SDK first (sdk-react and devtools depend on it)
-      - name: build sdk
+      - name: lint sdk
         working-directory: packages/sdk
-        run: bun run build
+        run: bun run lint
 
       - name: typecheck sdk
         working-directory: packages/sdk
@@ -36,31 +38,48 @@ jobs:
         working-directory: packages/sdk
         run: bun test
 
+      - name: build sdk
+        working-directory: packages/sdk
+        run: bun run build
+
+      - name: lint sdk-react
+        working-directory: packages/sdk-react
+        run: bun run lint
+
+      - name: typecheck sdk-react
+        working-directory: packages/sdk-react
+        run: bun run typecheck
+
       - name: build sdk-react
         working-directory: packages/sdk-react
         run: bun run build
 
-      - name: typecheck sdk-react
-        working-directory: packages/sdk-react
+      - name: lint devtools
+        working-directory: packages/devtools
+        run: bun run lint
+
+      - name: typecheck devtools
+        working-directory: packages/devtools
         run: bun run typecheck
 
       - name: build devtools
         working-directory: packages/devtools
         run: bun run build
 
-      - name: typecheck devtools
-        working-directory: packages/devtools
+      - name: lint cli
+        working-directory: packages/cli
+        run: bun run lint
+
+      - name: typecheck cli
+        working-directory: packages/cli
         run: bun run typecheck
 
       - name: build cli
         working-directory: packages/cli
         run: bun run build
 
-      - name: typecheck cli
-        working-directory: packages/cli
-        run: bun run typecheck
-
       - name: Create Release PR or publish
+        if: github.ref == 'refs/heads/main'
         uses: changesets/action@v1
         with:
           publish: bun run release

@@ -55,6 +55,8 @@ pub async fn post_op(mut req: Request, ctx: RouteContext<()>) -> worker::Result<
     let body = req.bytes().await?;
 
     // Op-level permission check (V2 tokens).
+    // If decoding fails the body is a V1 op — skip the check and let the DO
+    // handle it. V1 clients don't carry per-key permission masks.
     if let Ok(op) = rmp_serde::decode::from_slice::<CrdtOp>(&body)
         && !claims.can_write_key_op(&id, op.op_mask())
     {

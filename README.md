@@ -122,6 +122,63 @@ Non-CRDT ephemeral channel for high-frequency transient state (cursors, selectio
 
 `CRDTMap` lets you assign a different CRDT type to each key within a single document. Each key merges independently using its own conflict resolution semantics.
 
+## Collaborative text editing (RGA)
+
+`RGA` (Replicated Growable Array) is Meridian's ordered-sequence CRDT — the same algorithm behind collaborative editors like Google Docs. Every character has a stable, unique identity across all peers, so concurrent insertions and deletions converge without conflict.
+
+```ts
+const doc = client.rga("rg:document");
+
+// Insert text at position 5 (0-indexed character offset)
+doc.insert(5, "Hello");
+
+// Delete 3 characters starting at position 2
+doc.delete(2, 3);
+
+// Read the current text
+const { text } = doc.value();
+
+// React to remote changes
+doc.onChange(({ text }) => editor.setValue(text));
+```
+
+```tsx
+// React
+const { text, insert, delete: del } = useRga("rg:document");
+```
+
+Concurrent edits from multiple clients are merged automatically — the final text is identical on every peer regardless of arrival order.
+
+## Hierarchical trees (TreeCRDT)
+
+`TreeCRDT` implements the [Kleppmann et al. 2021 move-operation algorithm](https://martin.kleppmann.com/papers/move-op.pdf) — the only known CRDT that handles concurrent *move* operations correctly. This makes it suitable for outlines, task hierarchies, document trees, and mind maps where nodes are frequently reorganized.
+
+```ts
+const tree = client.tree("tr:outline");
+
+// Create nodes
+const root = tree.addNode(null, { title: "Project" });
+const task1 = tree.addNode(root, { title: "Research" });
+const task2 = tree.addNode(root, { title: "Implementation" });
+
+// Move a node to a different parent — safe under concurrent moves
+tree.move(task2, task1);
+
+// Read the current tree
+const { roots } = tree.value();
+// roots = [{ id, data, children: [...] }]
+
+// React to remote changes
+tree.onChange(({ roots }) => renderTree(roots));
+```
+
+```tsx
+// React
+const { roots, addNode, move } = useTree("tr:outline");
+```
+
+Concurrent moves (e.g. two peers moving the same node to different parents at the same time) are resolved deterministically — no cycles, no lost nodes.
+
 ## Query Engine
 
 Aggregate data across multiple CRDTs in a single request — no need to read them one by one.
