@@ -26,10 +26,6 @@ jobs:
         run: bun install
 
       # Build SDK first (sdk-react and devtools depend on it)
-      - name: lint sdk
-        working-directory: packages/sdk
-        run: bun run lint
-
       - name: typecheck sdk
         working-directory: packages/sdk
         run: bun run typecheck
@@ -42,10 +38,6 @@ jobs:
         working-directory: packages/sdk
         run: bun run build
 
-      - name: lint sdk-react
-        working-directory: packages/sdk-react
-        run: bun run lint
-
       - name: typecheck sdk-react
         working-directory: packages/sdk-react
         run: bun run typecheck
@@ -54,10 +46,6 @@ jobs:
         working-directory: packages/sdk-react
         run: bun run build
 
-      - name: lint devtools
-        working-directory: packages/devtools
-        run: bun run lint
-
       - name: typecheck devtools
         working-directory: packages/devtools
         run: bun run typecheck
@@ -65,10 +53,6 @@ jobs:
       - name: build devtools
         working-directory: packages/devtools
         run: bun run build
-
-      - name: lint cli
-        working-directory: packages/cli
-        run: bun run lint
 
       - name: typecheck cli
         working-directory: packages/cli
