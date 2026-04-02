@@ -3,6 +3,7 @@ import { encode, uuidToBytes } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { ORSetDelta } from "../sync/delta.js";
 import { toHex } from "../utils/to-hex.js";
+import type { ORSetSnapshot } from "../persistence/snapshot.js";
 
 /**
  * Low-level handle for an Observed-Remove Set (OR-Set) CRDT.
@@ -107,6 +108,22 @@ export class ORSetHandle<T> {
         ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
       },
     });
+  }
+
+  /** Returns the raw tag map for snapshot serialization. */
+  rawTags(): ReadonlyMap<string, ReadonlySet<string>> {
+    return this.tags;
+  }
+
+  /** Restores snapshot state directly (bypasses applyDelta which expects Uint8Array tags). */
+  restoreSnapshot(data: ORSetSnapshot): void {
+    this.tags.clear();
+    for (const [key, tagArr] of Object.entries(data.adds)) {
+      if (tagArr.length > 0) {
+        this.tags.set(key, new Set(tagArr));
+      }
+    }
+    this.emit();
   }
 
   applyDelta(delta: ORSetDelta): void {

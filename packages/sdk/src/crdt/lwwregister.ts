@@ -32,6 +32,11 @@ export class LwwRegisterHandle<T> {
     this.entry = opts.initial ?? null;
   }
 
+  /** Returns the raw LwwEntry for snapshot serialization. */
+  rawEntry(): Readonly<LwwEntry> | null {
+    return this.entry;
+  }
+
   /** Returns the current register value, or `null` if no value has been written yet. */
   value(): T | null {
     if (this.entry === null) return null;

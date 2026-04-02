@@ -55,6 +55,7 @@
               "sdk/live-query",
               "sdk/permissions",
               "sdk/ttl",
+              "sdk/offline",
               "sdk/devtools",
               "sdk/cli",
               "sdk/agents"

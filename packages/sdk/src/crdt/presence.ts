@@ -2,6 +2,7 @@ import { Chunk, Effect, Schema, Stream } from "effect";
 import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { PresenceDelta, PresenceEntryDelta } from "../sync/delta.js";
+import type { PresenceSnapshot } from "../persistence/snapshot.js";
 
 export interface PresenceEntry<T> {
   clientId: number;
@@ -35,6 +36,28 @@ export class PresenceHandle<T> {
     this.clientId = opts.clientId;
     this.transport = opts.transport;
     this.schema = opts.schema ?? null;
+  }
+
+  /** Returns the raw entries map for snapshot serialization. */
+  rawEntries(): ReadonlyMap<string, PresenceEntry<T>> {
+    return this.entries;
+  }
+
+  /** Restores snapshot state, filtering out already-expired entries. */
+  restoreSnapshot(data: PresenceSnapshot): void {
+    const now = Date.now();
+    this.entries.clear();
+    for (const [key, e] of Object.entries(data.entries)) {
+      const expiresAtMs = e.wall_ms;
+      if (expiresAtMs > now) {
+        this.entries.set(key, {
+          clientId: Number(key),
+          data: e.data as T,
+          expiresAtMs,
+        });
+      }
+    }
+    this.emit();
   }
 
   /**

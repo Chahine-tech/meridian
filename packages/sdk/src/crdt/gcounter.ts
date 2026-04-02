@@ -46,6 +46,11 @@ export class GCounterHandle {
     return this.state.counts;
   }
 
+  /** Returns the raw counter map for snapshot serialization. */
+  rawCounters(): Record<string, number> {
+    return { ...this.state.counts };
+  }
+
   /**
    * Registers a listener that is called whenever the counter value changes.
    *
