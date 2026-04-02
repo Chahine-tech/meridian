@@ -1,0 +1,180 @@
+---
+title: Postgres integration
+description: Turn any Postgres table column into a collaborative CRDT with live sync to all WebSocket clients.
+---
+
+`meridian-pg` is a Postgres extension that exposes Meridian CRDT types directly in SQL. A trigger fires `pg_notify` on every write, and the Meridian server broadcasts the delta to all connected clients in real time.
+
+**Pitch**: "Postgres as the source of truth, real-time sync on every client, zero conflicts."
+
+## Install the extension
+
+```sql
+CREATE EXTENSION meridian;
+```
+
+> Requires pgrx 0.12 and Postgres 14–16. See [Building](#building) below.
+
+## Add CRDT columns to a table
+
+CRDT state is stored as `BYTEA` (msgpack-encoded). Add columns with standard `ALTER TABLE`:
+
+```sql
+ALTER TABLE articles
+  ADD COLUMN views    BYTEA,   -- gcounter
+  ADD COLUMN likes    BYTEA,   -- pncounter
+  ADD COLUMN tags     BYTEA,   -- orset
+  ADD COLUMN headline BYTEA;   -- lwwregister
+```
+
+## Attach the sync trigger
+
+```sql
+-- One trigger per CRDT column.
+-- Arguments: namespace, crdt_id prefix, pk column, crdt column.
+
+CREATE TRIGGER sync_views
+AFTER INSERT OR UPDATE OF views ON articles
+FOR EACH ROW
+EXECUTE FUNCTION meridian.notify_trigger('my-app', 'gc', 'id', 'views');
+
+-- crdt_id sent to Meridian = "gc:<row_id>"
+```
+
+## Write from SQL
+
+```sql
+-- GCounter: increment
+UPDATE articles
+SET views = meridian.gcounter_increment(views, 1, 42)
+WHERE id = 'article-1';
+
+-- PNCounter: increment / decrement
+UPDATE articles
+SET likes = meridian.pncounter_increment(likes, 1, 42)
+WHERE id = 'article-1';
+
+-- ORSet: add / remove
+UPDATE articles
+SET tags = meridian.orset_add(tags, '"rust"', 42, 1)
+WHERE id = 'article-1';
+
+UPDATE articles
+SET tags = meridian.orset_remove(tags, '"rust"')
+WHERE id = 'article-1';
+
+-- LwwRegister: set value (wall_ms = epoch milliseconds)
+UPDATE articles
+SET headline = meridian.lww_set(
+  headline,
+  '"Hello world"',
+  EXTRACT(EPOCH FROM now())::bigint * 1000,
+  42
+)
+WHERE id = 'article-1';
+```
+
+## Read from SQL
+
+```sql
+SELECT
+  meridian.gcounter_value(views)   AS view_count,
+  meridian.pncounter_value(likes)  AS like_count,
+  meridian.orset_elements(tags)    AS tags_json,
+  meridian.lww_value(headline)     AS headline,
+  meridian.rga_text(body)          AS body_text,
+  meridian.tree_json(outline)      AS outline_json
+FROM articles
+WHERE id = 'article-1';
+```
+
+## Aggregate: sum across rows
+
+```sql
+-- Total views across all articles — returns BIGINT directly
+SELECT meridian.gcounter_total(views) AS total_views
+FROM articles;
+
+-- If you need the merged BYTEA state (e.g. for further merging):
+SELECT meridian.gcounter_merge_agg(views) AS merged_state
+FROM articles;
+```
+
+## Connect from the SDK
+
+Use `pgCrdtKey` to build the `crdt_id` that matches the trigger prefix:
+
+```ts
+import { MeridianClient, pgCrdtKey, pgCrdtKeys } from "meridian-sdk";
+
+const client = await MeridianClient.create({ url, namespace: "my-app", token });
+
+// Single column
+const views = client.gcounter(pgCrdtKey("gc", articleId));
+// → subscribed to crdt_id "gc:<articleId>"
+
+// Multiple columns in one call
+const keys = pgCrdtKeys(articleId, { views: "gc", likes: "pn", tags: "or" });
+const likes = client.pncounter(keys.likes);
+const tags  = client.orset<string>(keys.tags);
+```
+
+## Function reference
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `gcounter_increment(col, amount, client_id)` | `BYTEA` | Increment a GCounter |
+| `gcounter_value(col)` | `BIGINT` | Current total |
+| `gcounter_merge(a, b)` | `BYTEA` | Lattice join of two GCounters |
+| `gcounter_total(col)` | `BIGINT` | Aggregate total across rows |
+| `gcounter_merge_agg(col)` | `BYTEA` | Aggregate merged state across rows |
+| `pncounter_increment(col, amount, client_id)` | `BYTEA` | Increment |
+| `pncounter_decrement(col, amount, client_id)` | `BYTEA` | Decrement |
+| `pncounter_value(col)` | `BIGINT` | Signed value |
+| `orset_add(col, json, node_id, seq)` | `BYTEA` | Add element |
+| `orset_remove(col, json)` | `BYTEA` | Remove element (add-wins) |
+| `orset_elements(col)` | `TEXT` | JSON array of live elements |
+| `lww_set(col, json, wall_ms, author)` | `BYTEA` | Set value (LWW) |
+| `lww_value(col)` | `TEXT` | Current value as JSON |
+| `lww_updated_at_ms(col)` | `BIGINT` | Last-write timestamp (ms) |
+| `rga_text(col)` | `TEXT` | Current text (read-only) |
+| `rga_len(col)` | `BIGINT` | Visible character count |
+| `tree_json(col)` | `TEXT` | Tree as JSON (read-only) |
+| `tree_node_count(col)` | `BIGINT` | Live node count |
+| `crdt_json(col)` | `TEXT` | Generic JSON dump |
+| `meridian_version()` | `TEXT` | Extension version |
+
+## Server setup (pg-sync feature)
+
+Start the server with the `pg-sync` feature and set `DATABASE_URL` (or `PG_SYNC_DATABASE_URL`):
+
+```bash
+cargo build --features pg-sync
+DATABASE_URL=postgres://... MERIDIAN_NODE_ID=1 ./meridian
+```
+
+The server LISTENs on `meridian_ops` and feeds incoming `pg_notify` payloads
+into `apply_op_atomic` + WebSocket broadcast — the same pipeline as any other op.
+
+```
+Postgres UPDATE → trigger → pg_notify('meridian_ops') → Meridian server → WebSocket clients
+```
+
+## Building
+
+```bash
+cargo install cargo-pgrx --version "~0.12"
+cargo pgrx init           # downloads Postgres 14-16 locally
+
+cd crates/meridian-pg
+cargo pgrx test           # unit tests
+cargo pgrx run            # interactive psql session
+```
+
+## Caveats
+
+- **pg_notify limit** — 8 000 bytes. Deltas > ~5.8 KB raw (large RGA documents, deep Tree edits) are silently dropped. Use `RedisTransport` for those.
+- **RGA / Tree writes** — require HLC timestamps; write exclusively via WebSocket clients or the HTTP API. SQL read functions are provided for observability.
+- **Clock drift** — always pass `EXTRACT(EPOCH FROM now())::bigint * 1000` as `wall_ms` to `lww_set`. The server validates HLC drift within ±30 s.
+- **Trusted ops** — ops from `pg_notify` bypass token auth. Treat DB write access as equivalent to Meridian admin access.
+- **Postgres 17** — pgrx 0.12 does not yet support PG 17. Use PG 14–16.

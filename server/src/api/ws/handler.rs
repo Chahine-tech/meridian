@@ -43,7 +43,7 @@ pub trait WsState: Clone + Send + Sync + 'static {
     fn subscriptions(&self) -> &Arc<SubscriptionManager>;
     fn webhooks(&self) -> Option<&WebhookDispatcher>;
 
-    #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+    #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
     fn cluster(&self) -> Option<&Arc<meridian_cluster::ClusterHandle>> {
         None
     }

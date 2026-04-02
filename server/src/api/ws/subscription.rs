@@ -76,7 +76,7 @@ impl Default for SubscriptionManager {
     }
 }
 
-#[cfg(any(feature = "cluster", feature = "cluster-http"))]
+#[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
 impl meridian_cluster::LocalBroadcast for SubscriptionManager {
     fn publish_delta(&self, namespace: &str, crdt_id: &str, delta_bytes: bytes::Bytes) {
         use serde_bytes::ByteBuf;

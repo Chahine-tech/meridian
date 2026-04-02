@@ -1,8 +1,12 @@
+/// PostgreSQL NOTIFY/LISTEN cluster transport.
+#[cfg(feature = "pg-sync")]
+pub mod pg_transport;
+
 /// Server-side implementation of `AntiEntropyApplier` for `meridian-cluster`.
 ///
 /// Bridges the cluster crate (which knows only raw bytes) with the server's
 /// CRDT registry (`apply_op`, `CrdtOp`, `CrdtValue`).
-#[cfg(any(feature = "cluster", feature = "cluster-http"))]
+#[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
 pub mod anti_entropy {
     use std::sync::Arc;
 

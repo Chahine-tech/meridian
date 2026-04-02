@@ -1,6 +1,6 @@
 pub mod api;
 pub mod auth;
-#[cfg(any(feature = "cluster", feature = "cluster-http"))]
+#[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
 pub mod cluster;
 pub mod crdt;
 pub mod metrics;
@@ -29,7 +29,7 @@ pub struct AppState<S: CrdtStore, W: WalBackend> {
     /// `None` when `MERIDIAN_WEBHOOK_URL` is not set.
     pub webhooks: Option<WebhookDispatcher>,
     /// `None` when clustering is not enabled or no cluster config found.
-    #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+    #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
     pub cluster: Option<Arc<meridian_cluster::ClusterHandle>>,
 }
 
@@ -42,7 +42,7 @@ impl<S: CrdtStore, W: WalBackend> Clone for AppState<S, W> {
             subscriptions: Arc::clone(&self.subscriptions),
             signer: Arc::clone(&self.signer),
             webhooks: self.webhooks.clone(),
-            #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+            #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
             cluster: self.cluster.clone(),
         }
     }
@@ -72,7 +72,7 @@ impl<S: CrdtStore, W: WalBackend> AppStateExt for AppState<S, W> {
         self.webhooks.as_ref()
     }
 
-    #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+    #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
     fn cluster(&self) -> Option<&Arc<meridian_cluster::ClusterHandle>> {
         self.cluster.as_ref()
     }
@@ -93,7 +93,7 @@ impl<S: CrdtStore, W: WalBackend> WsState for AppState<S, W> {
         self.webhooks.as_ref()
     }
 
-    #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+    #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
     fn cluster(&self) -> Option<&Arc<meridian_cluster::ClusterHandle>> {
         self.cluster.as_ref()
     }

@@ -19,6 +19,7 @@ storage-postgres = ["meridian-storage/storage-postgres", "dep:sqlx"]
 storage-redis = ["meridian-storage/storage-redis"]
 cluster = ["dep:meridian-cluster", "meridian-cluster/transport-redis"]
 cluster-http = ["dep:meridian-cluster", "meridian-cluster/transport-http"]
+pg-sync = ["dep:meridian-cluster", "storage-postgres", "dep:async-trait", "dep:futures"]
 wal-archive-s3 = ["meridian-storage/wal-archive-s3"]
 
 [dependencies]
@@ -28,6 +29,10 @@ meridian-core = { path = "../crates/meridian-core" }
 meridian-storage = { path = "../crates/meridian-storage", default-features = false }
 # Cluster support (optional)
 meridian-cluster = { path = "../crates/meridian-cluster", optional = true }
+
+# Required by pg-sync transport (also used by meridian-cluster internally)
+async-trait = { version = "0.1", optional = true }
+futures = { version = "0.3", optional = true }
 
 # PostgreSQL client — only needed when storage-postgres feature is enabled
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"], optional = true }
