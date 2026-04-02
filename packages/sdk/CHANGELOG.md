@@ -1,5 +1,11 @@
 # meridian-sdk
 
+## 1.4.1
+
+### Patch Changes
+
+- 886cbf7: feat: type-safe RPC layer (createMeridianRpc), live queries, devtools panel, edge query engine
+
 ## 1.4.0
 
 ### Minor Changes
