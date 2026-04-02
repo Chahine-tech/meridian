@@ -1,0 +1,101 @@
+---
+title: Offline-first
+description: Persist CRDT state locally so your app works instantly on load and survives network interruptions.
+---
+
+By default the SDK holds all CRDT state in memory — a page refresh clears everything and the client re-syncs from the server. Enabling persistence changes this: CRDT values are cached in IndexedDB and restored instantly on the next load, before the WebSocket connects.
+
+## Setup
+
+```ts
+import { Effect } from "effect";
+import {
+  MeridianClient,
+  indexedDbStateStorage,
+  localStorageSyncOpsAdapter,
+} from "meridian-sdk";
+
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "http://localhost:3000",
+    namespace: "my-room",
+    token,
+    persistence: {
+      state: indexedDbStateStorage(),    // CRDT snapshots → IndexedDB
+      ops:   localStorageSyncOpsAdapter(), // pending op queue → localStorage
+    },
+  })
+);
+
+// Declare all handles first, then wait for the cache to load
+const views = client.gcounter("gc:views");
+const cart  = client.orset("or:cart");
+await client.waitForRestore();
+
+// values are now populated from cache — no network round-trip needed
+console.log(views.value()); // e.g. 42
+```
+
+`waitForRestore()` resolves once all IndexedDB reads triggered by handle creation have completed. Call it **after** declaring every handle you need, not before.
+
+## How it works
+
+| What | Storage | When saved | When loaded |
+|------|---------|------------|-------------|
+| CRDT snapshots | IndexedDB | After every server delta | On handle creation (lazy, async) |
+| Pending op queue | localStorage | On `close()` and `beforeunload` | On `MeridianClient.create()` |
+| Vector clocks | localStorage (opt-in) | On every observed op | On `VectorClockTracker` construction |
+
+On reconnect the server sends a `Sync` delta that merges authoritatively on top of the cached state — the cache is never stale for long.
+
+## Offline mode
+
+Pass `offline: true` to never auto-connect. The client operates entirely from the local cache. Call `client.connect()` explicitly when you want to go online.
+
+```ts
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "http://localhost:3000",
+    namespace: "my-room",
+    token,
+    offline: true,
+    persistence: { state: indexedDbStateStorage() },
+  })
+);
+
+const views = client.gcounter("gc:views");
+await client.waitForRestore();
+
+views.value(); // from cache
+
+// later, when network is available:
+client.connect();
+```
+
+## Custom storage adapter
+
+Both `StateStorage` (async) and `SyncStateStorage` (sync) are plain interfaces — implement them to use any backend:
+
+```ts
+import type { StateStorage } from "meridian-sdk";
+
+const myStorage: StateStorage = {
+  load:   async (key) => { /* return Uint8Array | null */ },
+  save:   async (key, data) => { /* persist Uint8Array */ },
+  delete: async (key) => { /* remove key */ },
+};
+```
+
+## Storage adapters
+
+| Adapter | Interface | Use for |
+|---------|-----------|---------|
+| `indexedDbStateStorage(dbName?)` | `StateStorage` (async) | CRDT snapshots — large data, no quota issues |
+| `localStorageSyncOpsAdapter(prefix?)` | `SyncStateStorage` (sync) | Pending op queue — must be sync for `beforeunload` safety |
+| `memoryStateStorage` | `StateStorage` (async) | Testing — in-memory, not persisted |
+
+## Caveats
+
+- **Awareness** — ephemeral by design. Offline updates are dropped silently since awareness data is time-sensitive and not persisted.
+- **SSR / Node** — `indexedDbStateStorage` rejects gracefully if `indexedDB` is not available. `localStorageSyncOpsAdapter` is a no-op if `localStorage` is unavailable.
+- **Token rotation** — snapshot keys include the `client_id` from the token. If you issue a new token with a different `client_id`, the previous cache is ignored (not deleted automatically).

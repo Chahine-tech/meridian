@@ -28,6 +28,8 @@ const client = await Effect.runPromise(
 | `namespace` | `string` | — | Namespace to connect to |
 | `token` | `string` | — | Meridian token |
 | `autoConnect` | `boolean` | `true` | Open WebSocket immediately |
+| `offline` | `boolean` | `false` | Never auto-connect — work from local cache, call `connect()` manually |
+| `persistence` | `PersistenceConfig` | — | Opt-in local persistence — see [Offline-first](/sdk/offline) |
 
 ## Properties
 
