@@ -1,5 +1,13 @@
 # meridian-cli
 
+## 1.1.5
+
+### Patch Changes
+
+- 886cbf7: feat: type-safe RPC layer (createMeridianRpc), live queries, devtools panel, edge query engine
+- Updated dependencies [886cbf7]
+  - meridian-sdk@1.4.1
+
 ## 1.1.4
 
 ### Patch Changes
