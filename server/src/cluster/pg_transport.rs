@@ -162,7 +162,7 @@ impl<S: CrdtStore> PgStateApplier for StorePgApplier<S> {
             .flatten();
 
         if let Some(ref bytes) = delta {
-            self.broadcast.publish_delta(&namespace, &crdt_id, Bytes::from(bytes.clone()));
+            self.broadcast.publish_delta(&namespace, &crdt_id, Bytes::copy_from_slice(bytes));
         }
 
         delta
@@ -260,6 +260,9 @@ async fn run_listener<A: PgStateApplier>(
     listener.listen(NOTIFY_CHANNEL).await
         .map_err(|e| ClusterError::Transport(e.to_string()))?;
 
+    // Pre-compute once — avoids a String allocation on every received notification.
+    let own_origin = node_id.to_string();
+
     loop {
         let notif = listener.recv().await
             .map_err(|e| ClusterError::Transport(e.to_string()))?;
@@ -275,7 +278,7 @@ async fn run_listener<A: PgStateApplier>(
         match parsed {
             // Node-to-node delta — filter self, forward to local subscribers.
             PgPayloadOwned::Delta { origin, ns, crdt_id, d } => {
-                if origin == node_id.to_string() {
+                if origin == own_origin {
                     debug!(node_id = %node_id, "dropping self-originating delta");
                     continue;
                 }
