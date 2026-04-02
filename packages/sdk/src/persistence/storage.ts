@@ -54,6 +54,9 @@ export const indexedDbStateStorage = (dbName = "meridian"): StateStorage => {
 
   const openDb = (): Promise<IDBDb> => {
     if (dbPromise !== null) return dbPromise;
+    if (typeof indexedDB === "undefined") {
+      return Promise.reject(new Error("indexedDB is not available in this environment"));
+    }
     dbPromise = new Promise<IDBDb>((resolve, reject) => {
       const req = indexedDB.open(dbName, 1);
       req.onupgradeneeded = (ev) => {
@@ -100,6 +103,7 @@ export const localStorageSyncOpsAdapter = (
 ): SyncStateStorage => ({
   load: (key) => {
     try {
+      if (typeof localStorage === "undefined") return null;
       const raw = localStorage.getItem(`${prefix}${key}`);
       if (raw === null) return null;
       const arr = JSON.parse(raw) as number[];
@@ -110,13 +114,15 @@ export const localStorageSyncOpsAdapter = (
   },
   save: (key, data) => {
     try {
+      if (typeof localStorage === "undefined") return;
       localStorage.setItem(`${prefix}${key}`, JSON.stringify(Array.from(data)));
     } catch {
-      // quota exceeded — skip silently
+      // quota exceeded or unavailable — skip silently
     }
   },
   delete: (key) => {
     try {
+      if (typeof localStorage === "undefined") return;
       localStorage.removeItem(`${prefix}${key}`);
     } catch {
       // ignore

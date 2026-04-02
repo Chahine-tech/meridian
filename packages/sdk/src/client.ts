@@ -253,8 +253,19 @@ export class MeridianClient {
   }
 
   /**
-   * Resolves when all in-flight snapshot restores (IDB reads triggered on handle creation)
-   * have completed. Await this before the first render if you need instant cache values.
+   * Resolves when all in-flight snapshot restores have completed.
+   *
+   * **Important**: call this *after* creating all handles you need (via `gcounter()`,
+   * `orset()`, etc.) — each handle creation triggers an async IDB read. If called
+   * before any handles are created it resolves immediately with no effect.
+   *
+   * @example
+   * ```ts
+   * const views = client.gcounter("gc:views");
+   * const cart  = client.orset("or:cart");
+   * await client.waitForRestore(); // both IDB reads complete here
+   * // views.value() and cart.elements() now reflect the persisted cache
+   * ```
    */
   waitForRestore(): Promise<void> {
     return Promise.all([...this.restorePromises]).then(() => undefined);
@@ -339,7 +350,7 @@ export class MeridianClient {
       this.gcHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
-      this.scheduleSnapRestore(`snap:gc:${this.namespace}:${crdtId}`, handle);
+      this.scheduleSnapRestore(`snap:gc:${this.namespace}:${this.clientId}:${crdtId}`, handle);
     }
     return handle;
   }
@@ -367,7 +378,7 @@ export class MeridianClient {
       this.pnHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
-      this.scheduleSnapRestore(`snap:pn:${this.namespace}:${crdtId}`, handle);
+      this.scheduleSnapRestore(`snap:pn:${this.namespace}:${this.clientId}:${crdtId}`, handle);
     }
     return handle;
   }
@@ -398,7 +409,7 @@ export class MeridianClient {
       this.orHandles.set(crdtId, handle as ORSetHandle<unknown>);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
-      this.scheduleSnapRestore(`snap:or:${this.namespace}:${crdtId}`, handle as ORSetHandle<unknown>);
+      this.scheduleSnapRestore(`snap:or:${this.namespace}:${this.clientId}:${crdtId}`, handle as ORSetHandle<unknown>);
     }
     return handle;
   }
@@ -429,7 +440,7 @@ export class MeridianClient {
       this.lwHandles.set(crdtId, handle as LwwRegisterHandle<unknown>);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
-      this.scheduleSnapRestore(`snap:lw:${this.namespace}:${crdtId}`, handle as LwwRegisterHandle<unknown>);
+      this.scheduleSnapRestore(`snap:lw:${this.namespace}:${this.clientId}:${crdtId}`, handle as LwwRegisterHandle<unknown>);
     }
     return handle;
   }
@@ -461,7 +472,7 @@ export class MeridianClient {
       this.prHandles.set(crdtId, handle as PresenceHandle<unknown>);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
-      this.scheduleSnapRestore(`snap:pr:${this.namespace}:${crdtId}`, handle as PresenceHandle<unknown>);
+      this.scheduleSnapRestore(`snap:pr:${this.namespace}:${this.clientId}:${crdtId}`, handle as PresenceHandle<unknown>);
     }
     return handle;
   }
@@ -489,7 +500,7 @@ export class MeridianClient {
       this.cmHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
-      this.scheduleSnapRestore(`snap:cm:${this.namespace}:${crdtId}`, handle);
+      this.scheduleSnapRestore(`snap:cm:${this.namespace}:${this.clientId}:${crdtId}`, handle);
     }
     return handle;
   }
@@ -516,7 +527,7 @@ export class MeridianClient {
       this.rgaHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
-      this.scheduleSnapRestore(`snap:rg:${this.namespace}:${crdtId}`, handle);
+      this.scheduleSnapRestore(`snap:rg:${this.namespace}:${this.clientId}:${crdtId}`, handle);
     }
     return handle;
   }
@@ -547,7 +558,7 @@ export class MeridianClient {
       this.treeHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
-      this.scheduleSnapRestore(`snap:tr:${this.namespace}:${crdtId}`, handle);
+      this.scheduleSnapRestore(`snap:tr:${this.namespace}:${this.clientId}:${crdtId}`, handle);
     }
     return handle;
   }
@@ -841,56 +852,56 @@ export class MeridianClient {
     const gcHandle = this.gcHandles.get(crdt_id);
     if (gcHandle) {
       try { gcHandle.applyDelta(decodeGCounterDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:gc:${this.namespace}:${crdt_id}`, gcHandle);
+      this.saveSnap(`snap:gc:${this.namespace}:${this.clientId}:${crdt_id}`, gcHandle);
       this.notifyDelta(crdt_id, "gcounter");
       return;
     }
     const pnHandle = this.pnHandles.get(crdt_id);
     if (pnHandle) {
       try { pnHandle.applyDelta(decodePNCounterDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:pn:${this.namespace}:${crdt_id}`, pnHandle);
+      this.saveSnap(`snap:pn:${this.namespace}:${this.clientId}:${crdt_id}`, pnHandle);
       this.notifyDelta(crdt_id, "pncounter");
       return;
     }
     const orHandle = this.orHandles.get(crdt_id);
     if (orHandle) {
       try { orHandle.applyDelta(decodeORSetDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:or:${this.namespace}:${crdt_id}`, orHandle);
+      this.saveSnap(`snap:or:${this.namespace}:${this.clientId}:${crdt_id}`, orHandle);
       this.notifyDelta(crdt_id, "orset");
       return;
     }
     const lwHandle = this.lwHandles.get(crdt_id);
     if (lwHandle) {
       try { lwHandle.applyDelta(decodeLwwDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:lw:${this.namespace}:${crdt_id}`, lwHandle);
+      this.saveSnap(`snap:lw:${this.namespace}:${this.clientId}:${crdt_id}`, lwHandle);
       this.notifyDelta(crdt_id, "lwwregister");
       return;
     }
     const prHandle = this.prHandles.get(crdt_id);
     if (prHandle) {
       try { prHandle.applyDelta(decodePresenceDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:pr:${this.namespace}:${crdt_id}`, prHandle);
+      this.saveSnap(`snap:pr:${this.namespace}:${this.clientId}:${crdt_id}`, prHandle);
       this.notifyDelta(crdt_id, "presence");
       return;
     }
     const cmHandle = this.cmHandles.get(crdt_id);
     if (cmHandle) {
       try { cmHandle.applyDelta(decodeCRDTMapDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:cm:${this.namespace}:${crdt_id}`, cmHandle);
+      this.saveSnap(`snap:cm:${this.namespace}:${this.clientId}:${crdt_id}`, cmHandle);
       this.notifyDelta(crdt_id, "crdtmap");
       return;
     }
     const rgaHandle = this.rgaHandles.get(crdt_id);
     if (rgaHandle) {
       try { rgaHandle.applyDelta(decodeRGADelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:rg:${this.namespace}:${crdt_id}`, rgaHandle);
+      this.saveSnap(`snap:rg:${this.namespace}:${this.clientId}:${crdt_id}`, rgaHandle);
       this.notifyDelta(crdt_id, "rga");
       return;
     }
     const treeHandle = this.treeHandles.get(crdt_id);
     if (treeHandle) {
       try { treeHandle.applyDelta(decodeTreeDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:tr:${this.namespace}:${crdt_id}`, treeHandle);
+      this.saveSnap(`snap:tr:${this.namespace}:${this.clientId}:${crdt_id}`, treeHandle);
       this.notifyDelta(crdt_id, "tree");
     }
   }
