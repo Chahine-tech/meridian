@@ -171,6 +171,21 @@ export class WsTransport {
     }
   }
 
+  /** Drains all buffered messages from the pending queue and returns them. */
+  drainQueue(): ClientMsg[] {
+    try {
+      return Array.from(Effect.runSync(Queue.takeAll(this.pendingQueue)));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Prepends messages to the pending queue (safe to call when queue is empty at startup). */
+  prependQueue(msgs: ClientMsg[]): void {
+    if (msgs.length === 0) return;
+    this.runtime.runFork(Queue.offerAll(this.pendingQueue, msgs));
+  }
+
   /**
    * Subscribe to connection state changes. Returns an unsubscribe function.
    * Compatible with React's `useSyncExternalStore` subscribe parameter.

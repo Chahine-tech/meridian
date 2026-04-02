@@ -42,6 +42,12 @@ export class CRDTMapHandle {
     return this.state;
   }
 
+  /** Restores state directly from a persisted snapshot. */
+  restoreSnapshot(state: CrdtMapValue): void {
+    this.state = { ...state };
+    this.emit();
+  }
+
   /** Returns the value at a specific key, or `undefined` if absent. */
   get(key: string): unknown {
     return this.state[key];

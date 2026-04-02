@@ -2,6 +2,14 @@ import { Effect, type Schema } from "effect";
 import type { QuerySpec, QueryResult, LiveQueryResult } from "./schema.js";
 import type { WsState } from "./transport/websocket.js";
 import { WsTransport } from "./transport/websocket.js";
+import type { StateStorage, SyncStateStorage } from "./persistence/storage.js";
+import {
+  snapshotFromHandle,
+  snapshotToBytes,
+  bytesToSnapshot,
+  restoreSnapshotToHandle,
+} from "./persistence/snapshot.js";
+import { encode, decode } from "./codec.js";
 import type { CrdtMapValue } from "./crdt/crdtmap.js";
 import { HttpClient } from "./transport/http.js";
 import { GCounterHandle } from "./crdt/gcounter.js";
@@ -27,7 +35,6 @@ import {
 import type { TreeNodeValue } from "./sync/delta.js";
 import { parseAndValidateToken } from "./auth/token.js";
 import { canRead as evalCanRead, canWrite as evalCanWrite } from "./auth/permissions.js";
-import { decode as msgpackDecode } from "./codec.js";
 import type { OpMask } from "./auth/permissions.js";
 import type { ServerMsg, TokenClaims } from "./schema.js";
 import type { TokenParseError, TokenExpiredError } from "./errors.js";
@@ -111,11 +118,22 @@ export interface ClientSnapshot {
   crdts: CRDTSnapshotEntry[];
 }
 
+export interface PersistenceConfig {
+  /** Async storage for CRDT state snapshots (e.g. `indexedDbStateStorage()`). */
+  state?: StateStorage;
+  /** Sync storage for the pending op queue — must be sync to survive `beforeunload` (e.g. `localStorageSyncOpsAdapter()`). */
+  ops?: SyncStateStorage;
+}
+
 export interface MeridianClientConfig {
   url: string;
   namespace: string;
   token: string;
   autoConnect?: boolean;
+  /** If `true`, never auto-connect. Work purely from cache; call `client.connect()` to go online. */
+  offline?: boolean;
+  /** Persistence configuration for offline-first support. */
+  persistence?: PersistenceConfig;
 }
 
 /**
@@ -177,10 +195,17 @@ export class MeridianClient {
   // RPC frame listeners — registered by createMeridianRpc
   private readonly rpcListeners = new Set<(frame: unknown) => void>();
 
+  private readonly snapStore: StateStorage | null;
+  private readonly opsStore: SyncStateStorage | null;
+  private readonly restorePromises = new Set<Promise<void>>();
+
   private constructor(config: MeridianClientConfig, claims: TokenClaims) {
     this.namespace = config.namespace;
     this.claims = claims;
     this.clientId = claims.client_id;
+
+    this.snapStore = config.persistence?.state ?? null;
+    this.opsStore = config.persistence?.ops ?? null;
 
     const httpBase = config.url
       .replace(/^wss:\/\//, "https://")
@@ -194,7 +219,22 @@ export class MeridianClient {
       onMessage: (msg) => { this.handleServerMsg(msg); },
     });
 
-    if (config.autoConnect !== false) {
+    // Restore persisted op queue before connecting.
+    if (this.opsStore !== null) {
+      const bytes = this.opsStore.load(`ops:${this.namespace}`);
+      if (bytes !== null) {
+        try {
+          const msgs = decode(bytes);
+          if (Array.isArray(msgs)) {
+            this.transport.prependQueue(msgs as Parameters<typeof this.transport.send>[0][]);
+          }
+        } catch { /* corrupted — ignore */ }
+        this.opsStore.delete(`ops:${this.namespace}`);
+      }
+      globalThis.addEventListener("beforeunload", this.flushOpsToStorage);
+    }
+
+    if (config.autoConnect !== false && config.offline !== true) {
       this.transport.connect();
     }
 
@@ -206,6 +246,47 @@ export class MeridianClient {
     // server-side registry is restored and live queries keep firing.
     this.transport.onReconnect(() => { this.resubscribeLiveQueries(); });
   }
+
+  /** Explicitly connect to the server. Use when `autoConnect: false` or `offline: true`. */
+  connect(): void {
+    this.transport.connect();
+  }
+
+  /**
+   * Resolves when all in-flight snapshot restores (IDB reads triggered on handle creation)
+   * have completed. Await this before the first render if you need instant cache values.
+   */
+  waitForRestore(): Promise<void> {
+    return Promise.all([...this.restorePromises]).then(() => undefined);
+  }
+
+  private scheduleSnapRestore(key: string, handle: Parameters<typeof restoreSnapshotToHandle>[1]): void {
+    if (this.snapStore === null) return;
+    const p = this.snapStore.load(key)
+      .then((bytes) => {
+        if (bytes === null) return;
+        const snap = bytesToSnapshot(bytes);
+        if (snap !== null) restoreSnapshotToHandle(snap, handle);
+      })
+      .finally(() => { this.restorePromises.delete(p); });
+    this.restorePromises.add(p);
+  }
+
+  private saveSnap(key: string, handle: Parameters<typeof snapshotFromHandle>[0]): void {
+    if (this.snapStore === null) return;
+    void this.snapStore.save(key, snapshotToBytes(snapshotFromHandle(handle)));
+  }
+
+  private readonly flushOpsToStorage = (): void => {
+    if (this.opsStore === null) return;
+    const msgs = this.transport.drainQueue();
+    const key = `ops:${this.namespace}`;
+    if (msgs.length === 0) {
+      this.opsStore.delete(key);
+      return;
+    }
+    this.opsStore.save(key, encode(msgs));
+  };
 
   /**
    * Creates and validates a new `MeridianClient` from the supplied configuration.
@@ -258,6 +339,7 @@ export class MeridianClient {
       this.gcHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
+      this.scheduleSnapRestore(`snap:gc:${this.namespace}:${crdtId}`, handle);
     }
     return handle;
   }
@@ -285,6 +367,7 @@ export class MeridianClient {
       this.pnHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
+      this.scheduleSnapRestore(`snap:pn:${this.namespace}:${crdtId}`, handle);
     }
     return handle;
   }
@@ -315,6 +398,7 @@ export class MeridianClient {
       this.orHandles.set(crdtId, handle as ORSetHandle<unknown>);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
+      this.scheduleSnapRestore(`snap:or:${this.namespace}:${crdtId}`, handle as ORSetHandle<unknown>);
     }
     return handle;
   }
@@ -345,6 +429,7 @@ export class MeridianClient {
       this.lwHandles.set(crdtId, handle as LwwRegisterHandle<unknown>);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
+      this.scheduleSnapRestore(`snap:lw:${this.namespace}:${crdtId}`, handle as LwwRegisterHandle<unknown>);
     }
     return handle;
   }
@@ -376,6 +461,7 @@ export class MeridianClient {
       this.prHandles.set(crdtId, handle as PresenceHandle<unknown>);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
+      this.scheduleSnapRestore(`snap:pr:${this.namespace}:${crdtId}`, handle as PresenceHandle<unknown>);
     }
     return handle;
   }
@@ -403,6 +489,7 @@ export class MeridianClient {
       this.cmHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
+      this.scheduleSnapRestore(`snap:cm:${this.namespace}:${crdtId}`, handle);
     }
     return handle;
   }
@@ -429,6 +516,7 @@ export class MeridianClient {
       this.rgaHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
+      this.scheduleSnapRestore(`snap:rg:${this.namespace}:${crdtId}`, handle);
     }
     return handle;
   }
@@ -459,6 +547,7 @@ export class MeridianClient {
       this.treeHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
+      this.scheduleSnapRestore(`snap:tr:${this.namespace}:${crdtId}`, handle);
     }
     return handle;
   }
@@ -630,6 +719,10 @@ export class MeridianClient {
   }
 
   close(): void {
+    this.flushOpsToStorage();
+    if (this.opsStore !== null) {
+      globalThis.removeEventListener("beforeunload", this.flushOpsToStorage);
+    }
     for (const unsub of this.handleUnsubs) unsub();
     this.handleUnsubs.length = 0;
     this.anyListeners.clear();
@@ -724,7 +817,7 @@ export class MeridianClient {
       // Dispatch RPC frames — these are AwarenessUpdates with a "__rpc__" key.
       if (key === "__rpc__" && this.rpcListeners.size > 0) {
         try {
-          const frame = msgpackDecode(data);
+          const frame = decode(data);
           for (const fn of this.rpcListeners) fn(frame);
         } catch { /* malformed frame — drop silently */ }
         return;
@@ -748,48 +841,56 @@ export class MeridianClient {
     const gcHandle = this.gcHandles.get(crdt_id);
     if (gcHandle) {
       try { gcHandle.applyDelta(decodeGCounterDelta(delta_bytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:gc:${this.namespace}:${crdt_id}`, gcHandle);
       this.notifyDelta(crdt_id, "gcounter");
       return;
     }
     const pnHandle = this.pnHandles.get(crdt_id);
     if (pnHandle) {
       try { pnHandle.applyDelta(decodePNCounterDelta(delta_bytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:pn:${this.namespace}:${crdt_id}`, pnHandle);
       this.notifyDelta(crdt_id, "pncounter");
       return;
     }
     const orHandle = this.orHandles.get(crdt_id);
     if (orHandle) {
       try { orHandle.applyDelta(decodeORSetDelta(delta_bytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:or:${this.namespace}:${crdt_id}`, orHandle);
       this.notifyDelta(crdt_id, "orset");
       return;
     }
     const lwHandle = this.lwHandles.get(crdt_id);
     if (lwHandle) {
       try { lwHandle.applyDelta(decodeLwwDelta(delta_bytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:lw:${this.namespace}:${crdt_id}`, lwHandle);
       this.notifyDelta(crdt_id, "lwwregister");
       return;
     }
     const prHandle = this.prHandles.get(crdt_id);
     if (prHandle) {
       try { prHandle.applyDelta(decodePresenceDelta(delta_bytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:pr:${this.namespace}:${crdt_id}`, prHandle);
       this.notifyDelta(crdt_id, "presence");
       return;
     }
     const cmHandle = this.cmHandles.get(crdt_id);
     if (cmHandle) {
       try { cmHandle.applyDelta(decodeCRDTMapDelta(delta_bytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:cm:${this.namespace}:${crdt_id}`, cmHandle);
       this.notifyDelta(crdt_id, "crdtmap");
       return;
     }
     const rgaHandle = this.rgaHandles.get(crdt_id);
     if (rgaHandle) {
       try { rgaHandle.applyDelta(decodeRGADelta(delta_bytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:rg:${this.namespace}:${crdt_id}`, rgaHandle);
       this.notifyDelta(crdt_id, "rga");
       return;
     }
     const treeHandle = this.treeHandles.get(crdt_id);
     if (treeHandle) {
       try { treeHandle.applyDelta(decodeTreeDelta(delta_bytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:tr:${this.namespace}:${crdt_id}`, treeHandle);
       this.notifyDelta(crdt_id, "tree");
     }
   }

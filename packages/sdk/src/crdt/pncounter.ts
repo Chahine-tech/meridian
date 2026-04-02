@@ -34,6 +34,11 @@ export class PNCounterHandle {
     this.state = opts.initial ?? { p: {}, n: {} };
   }
 
+  /** Returns the raw internal state for snapshot serialization. */
+  rawState(): Readonly<{ p: Record<string, number>; n: Record<string, number> }> {
+    return { p: { ...this.state.p }, n: { ...this.state.n } };
+  }
+
   /** Returns the current net counter value (sum of increments minus sum of decrements). */
   value(): number {
     const pos = Object.values(this.state.p).reduce((a, b) => a + b, 0);

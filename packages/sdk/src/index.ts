@@ -3,6 +3,7 @@
 export { MeridianClient } from "./client.js";
 export type {
   MeridianClientConfig,
+  PersistenceConfig,
   ClientSnapshot,
   DeltaEvent,
   LiveQueryHandle,
@@ -16,6 +17,10 @@ export type {
   RGASnapshotEntry,
   TreeSnapshotEntry,
 } from "./client.js";
+
+// Persistence — offline-first storage adapters
+export type { StateStorage, SyncStateStorage } from "./persistence/storage.js";
+export { memoryStateStorage, indexedDbStateStorage, localStorageSyncOpsAdapter } from "./persistence/storage.js";
 
 // CRDT handles
 export { GCounterHandle } from "./crdt/gcounter.js";
