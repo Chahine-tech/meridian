@@ -47,7 +47,12 @@ async fn init_storage_and_run(
         PgStore::migrate(&pool).await?;
         PgWal::migrate(&pool).await?;
         let store = Arc::new(PgStore::new(pool.clone()));
-        let inner_wal = PgWal::new(pool).await?;
+        let inner_wal = PgWal::new(pool.clone()).await?;
+
+        // Pass the pool to the pg-sync transport so it reuses this connection
+        // pool instead of opening a second one.
+        #[cfg(feature = "pg-sync")]
+        let config = Config { pg_pool: Some(pool), ..config };
 
         #[cfg(feature = "wal-archive-s3")]
         if let Some(s3_cfg) = meridian_storage::S3ArchiveConfig::from_env() {

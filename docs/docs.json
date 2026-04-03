@@ -56,6 +56,7 @@
               "sdk/permissions",
               "sdk/ttl",
               "sdk/offline",
+              "sdk/postgres",
               "sdk/devtools",
               "sdk/cli",
               "sdk/agents"

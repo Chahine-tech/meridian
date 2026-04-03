@@ -25,7 +25,7 @@ pub trait AppStateExt: Clone + Send + Sync + 'static {
     fn webhooks(&self) -> Option<&WebhookDispatcher>;
 
     /// Returns the cluster handle if clustering is enabled.
-    #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+    #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
     fn cluster(&self) -> Option<&Arc<meridian_cluster::ClusterHandle>> {
         None
     }

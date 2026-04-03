@@ -27,6 +27,9 @@ jobs:
       - name: clippy (cluster-http features)
         run: cargo clippy --all-targets --features cluster-http -- -D warnings
 
+      - name: clippy (pg-sync features)
+        run: cargo clippy --all-targets --features pg-sync -- -D warnings
+
       - name: test
         run: cargo test
 
@@ -156,3 +159,4 @@ jobs:
       - name: build
         working-directory: packages/cli
         run: bun run build
+

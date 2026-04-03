@@ -124,6 +124,9 @@ export type { MeridianRpc, MeridianRpcClient, MeridianRpcConfig, Unsubscribe } f
 // Effect Layer — dependency injection
 export { MeridianService, MeridianLive } from "./layer.js";
 
+// Postgres integration — crdt_id helpers for meridian-pg extension
+export { pgCrdtKey, pgCrdtKeys } from "./pg.js";
+
 // Codec (for advanced use / testing)
 export {
   encode,

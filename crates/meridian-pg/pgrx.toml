@@ -1,0 +1,4 @@
+[configs]
+# Run `cargo pgrx init` to download and configure Postgres 14-16 locally.
+# pgrx will populate this file automatically with the pg_config paths.
+# Do not hardcode version URLs here — they become stale and differ per platform.

@@ -1,3 +1,6 @@
 [workspace]
 members = ["server", "crates/meridian-storage", "crates/meridian-cluster", "crates/meridian-core", "crates/meridian-edge"]
+# meridian-pg is a pgrx extension (cdylib) — it requires `cargo pgrx init` to
+# compile and cannot be included in the normal workspace build.
+# Build it separately: cd crates/meridian-pg && cargo pgrx test
 resolver = "2"
