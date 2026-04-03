@@ -91,12 +91,24 @@ WHERE id = 'article-1';
 ## Aggregate: sum across rows
 
 ```sql
--- Total views across all articles — returns BIGINT directly
+-- GCounter: total views — returns BIGINT directly
 SELECT meridian.gcounter_total(views) AS total_views
 FROM articles;
 
--- If you need the merged BYTEA state (e.g. for further merging):
-SELECT meridian.gcounter_merge_agg(views) AS merged_state
+-- PNCounter: signed sum across rows
+SELECT meridian.pncounter_total(likes) AS total_likes
+FROM articles;
+
+-- ORSet: union of all tag sets across rows
+SELECT meridian.orset_elements(
+  meridian.orset_merge_agg(tags)
+) AS all_tags
+FROM articles;
+
+-- Intermediate BYTEA state (for further merging or storage):
+SELECT meridian.gcounter_merge_agg(views)  AS merged_gcounter,
+       meridian.pncounter_merge_agg(likes) AS merged_pncounter,
+       meridian.orset_merge_agg(tags)      AS merged_orset
 FROM articles;
 ```
 
@@ -131,9 +143,14 @@ const tags  = client.orset<string>(keys.tags);
 | `pncounter_increment(col, amount, client_id)` | `BYTEA` | Increment |
 | `pncounter_decrement(col, amount, client_id)` | `BYTEA` | Decrement |
 | `pncounter_value(col)` | `BIGINT` | Signed value |
+| `pncounter_merge(a, b)` | `BYTEA` | Lattice join of two PNCounters |
+| `pncounter_total(col)` | `BIGINT` | Aggregate signed total across rows |
+| `pncounter_merge_agg(col)` | `BYTEA` | Aggregate merged state across rows |
 | `orset_add(col, json, node_id, seq)` | `BYTEA` | Add element |
 | `orset_remove(col, json)` | `BYTEA` | Remove element (add-wins) |
 | `orset_elements(col)` | `TEXT` | JSON array of live elements |
+| `orset_merge(a, b)` | `BYTEA` | Lattice join of two ORSets |
+| `orset_merge_agg(col)` | `BYTEA` | Aggregate union across rows |
 | `lww_set(col, json, wall_ms, author)` | `BYTEA` | Set value (LWW) |
 | `lww_value(col)` | `TEXT` | Current value as JSON |
 | `lww_updated_at_ms(col)` | `BIGINT` | Last-write timestamp (ms) |
@@ -159,6 +176,33 @@ into `apply_op_atomic` + WebSocket broadcast — the same pipeline as any other 
 ```
 Postgres UPDATE → trigger → pg_notify('meridian_ops') → Meridian server → WebSocket clients
 ```
+
+### Anti-entropy resync
+
+`pg_notify` does not buffer missed notifications across listener disconnections.
+To recover state lost during a server outage, register an optional resync function
+and the namespace(s) it covers:
+
+```sql
+-- Implement meridian.resync_fn — return all CRDT states for a given namespace.
+CREATE OR REPLACE FUNCTION meridian.resync_fn(ns TEXT)
+RETURNS TABLE(crdt_id TEXT, state BYTEA) AS $$
+  SELECT 'gc:' || id::TEXT, views
+  FROM   articles
+  WHERE  views IS NOT NULL
+    AND  ns = 'my-app';   -- filter by namespace if you use multiple
+$$ LANGUAGE sql STABLE;
+```
+
+```rust
+// Register namespace(s) before spawn_listener — in server startup code.
+pg_transport.register_resync_namespace("my-app").await;
+pg_transport.spawn_listener(applier);
+```
+
+After every reconnection the server calls `meridian.resync_fn(namespace)` for
+each registered namespace and merges all returned states. If the function is
+absent, the behaviour is unchanged (best-effort delivery only).
 
 ## Building
 
