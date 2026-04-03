@@ -15,6 +15,27 @@
 //
 // Large payloads (> ~7 800 bytes) are silently dropped — use logical
 // replication (Phase 4) for large RGA / Tree documents.
+//
+// Anti-entropy (reconnect resync):
+//
+// pg_notify does NOT buffer missed notifications across disconnections.
+// To recover state lost during a listener outage, the transport calls an
+// optional SQL function registered by the user:
+//
+//   meridian.resync_fn(namespace TEXT) → TABLE(crdt_id TEXT, state BYTEA)
+//
+// If that function exists in the database, the transport calls it once per
+// namespace after every reconnection, merging all returned states via the
+// normal PgStateApplier path.  This is opt-in: if the function is absent,
+// the behaviour is unchanged (best-effort delivery only).
+//
+// Example registration:
+//   CREATE OR REPLACE FUNCTION meridian.resync_fn(ns TEXT)
+//   RETURNS TABLE(crdt_id TEXT, state BYTEA) AS $$
+//     SELECT 'gc:' || id::TEXT, views
+//     FROM   articles
+//     WHERE  views IS NOT NULL;
+//   $$ LANGUAGE sql STABLE;
 
 use std::sync::Arc;
 
@@ -207,13 +228,33 @@ struct Inner {
     pool: PgPool,
     node_id: NodeId,
     tx: broadcast::Sender<DeltaEnvelope>,
+    /// Namespaces to resync after every listener reconnection.
+    /// Populated via `register_resync_namespace`.
+    resync_namespaces: tokio::sync::RwLock<Vec<String>>,
 }
 
 impl PostgresNotifyTransport {
     pub async fn new(pool: PgPool, node_id: NodeId) -> Result<Self> {
         let (tx, _) = broadcast::channel(1024);
-        let transport = Self { inner: Arc::new(Inner { pool, node_id, tx }) };
+        let transport = Self {
+            inner: Arc::new(Inner {
+                pool,
+                node_id,
+                tx,
+                resync_namespaces: tokio::sync::RwLock::new(Vec::new()),
+            }),
+        };
         Ok(transport)
+    }
+
+    /// Register a namespace for anti-entropy resync after listener reconnections.
+    ///
+    /// For each registered namespace, the transport will call
+    /// `meridian.resync_fn(namespace)` after every reconnection (if that
+    /// function exists) and merge all returned states.  Call this once per
+    /// namespace during server startup, before `spawn_listener`.
+    pub async fn register_resync_namespace(&self, namespace: impl Into<String>) {
+        self.inner.resync_namespaces.write().await.push(namespace.into());
     }
 
     /// Start the background LISTEN loop.
@@ -225,26 +266,98 @@ impl PostgresNotifyTransport {
         let pool    = self.inner.pool.clone();
         let node_id = self.inner.node_id;
         let tx      = self.inner.tx.clone();
+        let inner   = Arc::clone(&self.inner);
 
         tokio::spawn(async move {
             let mut backoff = std::time::Duration::from_secs(1);
             const MAX_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
+            let mut attempt: u32 = 0;
 
             loop {
                 match run_listener(&pool, node_id, &tx, &*applier).await {
                     Ok(()) => break,
                     Err(e) => {
-                        warn!(
-                            error = %e,
-                            backoff_secs = backoff.as_secs(),
-                            "pg_notify listener disconnected, reconnecting"
-                        );
+                        if attempt == 0 {
+                            // First failure is a hard startup error — log at ERROR.
+                            error!(error = %e, "pg_notify listener failed to start");
+                        } else {
+                            warn!(
+                                error = %e,
+                                backoff_secs = backoff.as_secs(),
+                                "pg_notify listener disconnected, reconnecting"
+                            );
+                        }
+                        attempt += 1;
                         tokio::time::sleep(backoff).await;
                         backoff = (backoff * 2).min(MAX_BACKOFF);
+
+                        // Resync missed state after reconnection.
+                        let namespaces = inner.resync_namespaces.read().await.clone();
+                        if !namespaces.is_empty() {
+                            resync_namespaces(&pool, &namespaces, &*applier).await;
+                        }
                     }
                 }
             }
         });
+    }
+}
+
+/// After a listener reconnection, call `meridian.resync_fn(namespace)` for
+/// each registered namespace (if the function exists) and merge all returned
+/// states via the normal applier path.
+async fn resync_namespaces<A: PgStateApplier>(
+    pool: &PgPool,
+    namespaces: &[String],
+    applier: &A,
+) {
+    // Check once whether the resync function exists.
+    let fn_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'meridian' AND p.proname = 'resync_fn'
+         )",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(false);
+
+    if !fn_exists {
+        return;
+    }
+
+    for namespace in namespaces {
+        match sqlx::query_as::<_, (String, Vec<u8>)>(
+            "SELECT crdt_id, state FROM meridian.resync_fn($1)",
+        )
+        .bind(namespace)
+        .fetch_all(pool)
+        .await
+        {
+            Ok(rows) => {
+                let count = rows.len();
+                for (crdt_id, state_bytes) in rows {
+                    applier
+                        .merge_pg_state(namespace.clone(), crdt_id, state_bytes)
+                        .await;
+                }
+                if count > 0 {
+                    tracing::info!(
+                        namespace = %namespace,
+                        rows = count,
+                        "pg anti-entropy resync complete"
+                    );
+                }
+            }
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    namespace = %namespace,
+                    "pg anti-entropy resync failed"
+                );
+            }
+        }
     }
 }
 
@@ -292,6 +405,7 @@ async fn run_listener<A: PgStateApplier>(
                     .map(NodeId)
                     .unwrap_or(node_id);
 
+                // Ignore send error — no subscribers yet is fine.
                 let _ = tx.send(DeltaEnvelope {
                     origin_node_id: origin_id,
                     namespace: ns,

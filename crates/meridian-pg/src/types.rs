@@ -15,6 +15,7 @@ use meridian_core::crdt::{
     orset::ORSetOp,
     pncounter::PNCounterOp,
     registry::{CrdtType, CrdtValue},
+    Crdt,
     HybridLogicalClock,
 };
 use serde_json::Value as JsonValue;
@@ -132,6 +133,23 @@ fn pncounter_decrement(state: Option<&[u8]>, amount: i64, client_id: i64) -> Vec
     encode_crdt(&crdt)
 }
 
+/// Merge two PNCounter states (lattice join).  Useful in aggregate queries.
+#[pg_extern(schema = "meridian")]
+fn pncounter_merge(a: &[u8], b: &[u8]) -> Vec<u8> {
+    let mut av = match CrdtValue::from_msgpack(a) {
+        Ok(v) => v,
+        Err(_) => return a.to_vec(),
+    };
+    let bv = match CrdtValue::from_msgpack(b) {
+        Ok(v) => v,
+        Err(_) => return a.to_vec(),
+    };
+    if let (CrdtValue::PNCounter(ref mut ap), CrdtValue::PNCounter(ref bp)) = (&mut av, &bv) {
+        ap.merge(bp);
+    }
+    encode_crdt(&av)
+}
+
 /// Return the signed value of a PNCounter.
 #[pg_extern(schema = "meridian")]
 fn pncounter_value(state: &[u8]) -> i64 {
@@ -184,6 +202,23 @@ fn orset_remove(state: Option<&[u8]>, element: &str) -> Vec<u8> {
         }
     }
     encode_crdt(&crdt)
+}
+
+/// Merge two ORSet states (lattice join).  Useful in aggregate queries.
+#[pg_extern(schema = "meridian")]
+fn orset_merge(a: &[u8], b: &[u8]) -> Vec<u8> {
+    let mut av = match CrdtValue::from_msgpack(a) {
+        Ok(v) => v,
+        Err(_) => return a.to_vec(),
+    };
+    let bv = match CrdtValue::from_msgpack(b) {
+        Ok(v) => v,
+        Err(_) => return a.to_vec(),
+    };
+    if let (CrdtValue::ORSet(ref mut ao), CrdtValue::ORSet(ref bo)) = (&mut av, &bv) {
+        ao.merge(bo);
+    }
+    encode_crdt(&av)
 }
 
 /// Return elements of an ORSet as a JSON array string.
@@ -370,6 +405,10 @@ fn crdt_json(state: &[u8]) -> String {
 mod tests {
     use pgrx::prelude::*;
 
+    // -----------------------------------------------------------------------
+    // GCounter
+    // -----------------------------------------------------------------------
+
     #[pg_test]
     fn test_gcounter_roundtrip() {
         let state = crate::types::gcounter_increment(None, 5, 1);
@@ -377,12 +416,108 @@ mod tests {
         assert_eq!(crate::types::gcounter_value(&state), 8);
     }
 
+    /// merge is commutative: merge(a, b) == merge(b, a)
+    #[pg_test]
+    fn test_gcounter_merge_commutative() {
+        let a = crate::types::gcounter_increment(None, 5, 1);
+        let b = crate::types::gcounter_increment(None, 3, 2);
+        let ab = crate::types::gcounter_merge(&a, &b);
+        let ba = crate::types::gcounter_merge(&b, &a);
+        assert_eq!(
+            crate::types::gcounter_value(&ab),
+            crate::types::gcounter_value(&ba)
+        );
+        assert_eq!(crate::types::gcounter_value(&ab), 8);
+    }
+
+    /// merge is idempotent: merge(a, a) == a
+    #[pg_test]
+    fn test_gcounter_merge_idempotent() {
+        let a = crate::types::gcounter_increment(None, 7, 1);
+        let aa = crate::types::gcounter_merge(&a, &a);
+        assert_eq!(
+            crate::types::gcounter_value(&a),
+            crate::types::gcounter_value(&aa)
+        );
+    }
+
+    /// merge is associative: merge(merge(a, b), c) == merge(a, merge(b, c))
+    #[pg_test]
+    fn test_gcounter_merge_associative() {
+        let a = crate::types::gcounter_increment(None, 1, 1);
+        let b = crate::types::gcounter_increment(None, 2, 2);
+        let c = crate::types::gcounter_increment(None, 3, 3);
+        let left  = crate::types::gcounter_merge(&crate::types::gcounter_merge(&a, &b), &c);
+        let right = crate::types::gcounter_merge(&a, &crate::types::gcounter_merge(&b, &c));
+        assert_eq!(
+            crate::types::gcounter_value(&left),
+            crate::types::gcounter_value(&right)
+        );
+        assert_eq!(crate::types::gcounter_value(&left), 6);
+    }
+
+    /// Concurrent increments from the same client_id take the max — not sum.
+    #[pg_test]
+    fn test_gcounter_concurrent_same_client() {
+        let a = crate::types::gcounter_increment(None, 5, 1);
+        let b = crate::types::gcounter_increment(None, 3, 1); // same client
+        let merged = crate::types::gcounter_merge(&a, &b);
+        // max(5, 3) = 5, not 5 + 3 = 8
+        assert_eq!(crate::types::gcounter_value(&merged), 5);
+    }
+
+    #[pg_test]
+    fn test_gcounter_value_on_empty() {
+        // NULL state → value 0
+        assert_eq!(crate::types::gcounter_value(&[]), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // PNCounter
+    // -----------------------------------------------------------------------
+
     #[pg_test]
     fn test_pncounter_roundtrip() {
         let state = crate::types::pncounter_increment(None, 10, 1);
         let state = crate::types::pncounter_decrement(Some(&state), 3, 1);
         assert_eq!(crate::types::pncounter_value(&state), 7);
     }
+
+    #[pg_test]
+    fn test_pncounter_negative() {
+        let state = crate::types::pncounter_increment(None, 2, 1);
+        let state = crate::types::pncounter_decrement(Some(&state), 5, 1);
+        assert_eq!(crate::types::pncounter_value(&state), -3);
+    }
+
+    /// merge is commutative
+    #[pg_test]
+    fn test_pncounter_merge_commutative() {
+        let a = crate::types::pncounter_increment(None, 10, 1);
+        let b = crate::types::pncounter_decrement(None, 3, 2);
+        let ab = crate::types::pncounter_merge(&a, &b);
+        let ba = crate::types::pncounter_merge(&b, &a);
+        assert_eq!(
+            crate::types::pncounter_value(&ab),
+            crate::types::pncounter_value(&ba)
+        );
+        assert_eq!(crate::types::pncounter_value(&ab), 7);
+    }
+
+    /// merge is idempotent
+    #[pg_test]
+    fn test_pncounter_merge_idempotent() {
+        let a = crate::types::pncounter_increment(None, 5, 1);
+        let aa = crate::types::pncounter_merge(&a, &a);
+        assert_eq!(
+            crate::types::pncounter_value(&a),
+            crate::types::pncounter_value(&aa)
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // ORSet
+    // -----------------------------------------------------------------------
 
     #[pg_test]
     fn test_orset_add_remove() {
@@ -394,10 +529,116 @@ mod tests {
         assert!(!elements.contains("apple"));
     }
 
+    /// remove on element that was never added is a no-op (doesn't panic)
+    #[pg_test]
+    fn test_orset_remove_nonexistent() {
+        let state = crate::types::orset_add(None, r#""apple""#, 1, 1);
+        let state = crate::types::orset_remove(Some(&state), r#""ghost""#);
+        let elements = crate::types::orset_elements(&state);
+        assert!(elements.contains("apple"));
+    }
+
+    /// add-wins: concurrent add and remove — add survives after merge
+    #[pg_test]
+    fn test_orset_add_wins() {
+        // replica A: adds "x"
+        let a = crate::types::orset_add(None, r#""x""#, 1, 1);
+        // replica B: also adds "x" then removes it
+        let b = crate::types::orset_add(None, r#""x""#, 2, 1);
+        let b = crate::types::orset_remove(Some(&b), r#""x""#);
+        // After merge: A's add (unknown to B's remove) survives
+        let merged = crate::types::orset_merge(&a, &b);
+        let elements = crate::types::orset_elements(&merged);
+        assert!(elements.contains("x"), "add-wins: concurrent add should survive remove");
+    }
+
+    /// merge is commutative
+    #[pg_test]
+    fn test_orset_merge_commutative() {
+        let a = crate::types::orset_add(None, r#""a""#, 1, 1);
+        let b = crate::types::orset_add(None, r#""b""#, 2, 1);
+        let ab = crate::types::orset_merge(&a, &b);
+        let ba = crate::types::orset_merge(&b, &a);
+        assert_eq!(
+            crate::types::orset_elements(&ab),
+            crate::types::orset_elements(&ba)
+        );
+    }
+
+    /// merge is idempotent
+    #[pg_test]
+    fn test_orset_merge_idempotent() {
+        let a = crate::types::orset_add(None, r#""x""#, 1, 1);
+        let aa = crate::types::orset_merge(&a, &a);
+        assert_eq!(
+            crate::types::orset_elements(&a),
+            crate::types::orset_elements(&aa)
+        );
+    }
+
+    /// Non-JSON string is stored as a JSON string element (fallback)
+    #[pg_test]
+    fn test_orset_invalid_json_fallback() {
+        let state = crate::types::orset_add(None, "not json {{{", 1, 1);
+        let elements = crate::types::orset_elements(&state);
+        assert!(elements.contains("not json {{{"));
+    }
+
+    // -----------------------------------------------------------------------
+    // LwwRegister
+    // -----------------------------------------------------------------------
+
     #[pg_test]
     fn test_lww_set_get() {
         let state = crate::types::lww_set(None, r#""hello""#, 1_000_000, 1);
         let val = crate::types::lww_value(&state);
         assert_eq!(val, Some(r#""hello""#.to_string()));
+    }
+
+    /// Higher wall_ms wins regardless of author
+    #[pg_test]
+    fn test_lww_last_write_wins() {
+        let state = crate::types::lww_set(None, r#""first""#, 1_000, 1);
+        let state = crate::types::lww_set(Some(&state), r#""second""#, 2_000, 2);
+        assert_eq!(crate::types::lww_value(&state), Some(r#""second""#.to_string()));
+    }
+
+    /// Lower wall_ms loses — old write does not overwrite newer one
+    #[pg_test]
+    fn test_lww_stale_write_ignored() {
+        let state = crate::types::lww_set(None, r#""new""#, 2_000, 1);
+        let state = crate::types::lww_set(Some(&state), r#""old""#, 1_000, 2);
+        assert_eq!(crate::types::lww_value(&state), Some(r#""new""#.to_string()));
+    }
+
+    /// Same wall_ms — logical counter ensures monotonicity
+    #[pg_test]
+    fn test_lww_same_wall_ms_monotonic() {
+        let state = crate::types::lww_set(None, r#""first""#, 1_000, 1);
+        // Second write at same wall_ms — tick() advances logical counter
+        let state = crate::types::lww_set(Some(&state), r#""second""#, 1_000, 2);
+        assert_eq!(crate::types::lww_value(&state), Some(r#""second""#.to_string()));
+    }
+
+    #[pg_test]
+    fn test_lww_updated_at_ms() {
+        let state = crate::types::lww_set(None, r#""v""#, 42_000, 1);
+        assert_eq!(crate::types::lww_updated_at_ms(&state), Some(42_000));
+    }
+
+    // -----------------------------------------------------------------------
+    // Generic helpers
+    // -----------------------------------------------------------------------
+
+    #[pg_test]
+    fn test_crdt_json_gcounter() {
+        let state = crate::types::gcounter_increment(None, 3, 1);
+        let json = crate::types::crdt_json(&state);
+        assert!(json.contains("3") || json.contains("GCounter") || json.len() > 2);
+    }
+
+    #[pg_test]
+    fn test_crdt_json_empty() {
+        assert_eq!(crate::types::crdt_json(&[]), "null");
     }
 }

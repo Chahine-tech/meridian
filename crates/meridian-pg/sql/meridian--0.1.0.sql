@@ -30,6 +30,36 @@ CREATE AGGREGATE meridian.gcounter_total(bytea) (
 );
 
 -- -------------------------------------------------------------------------
+-- Aggregate: pncounter_merge_agg — merges all PNCounter BYTEA states
+-- Aggregate: pncounter_total     — returns the final signed BIGINT directly
+--
+-- SELECT meridian.pncounter_total(likes) FROM articles;
+-- -------------------------------------------------------------------------
+CREATE AGGREGATE meridian.pncounter_merge_agg(bytea) (
+    SFUNC    = meridian.pncounter_merge,
+    STYPE    = bytea,
+    INITCOND = ''
+);
+
+CREATE AGGREGATE meridian.pncounter_total(bytea) (
+    SFUNC     = meridian.pncounter_merge,
+    STYPE     = bytea,
+    FINALFUNC = meridian.pncounter_value,
+    INITCOND  = ''
+);
+
+-- -------------------------------------------------------------------------
+-- Aggregate: orset_merge_agg — merges all ORSet BYTEA states into one
+--
+-- SELECT meridian.orset_elements(meridian.orset_merge_agg(tags)) FROM articles;
+-- -------------------------------------------------------------------------
+CREATE AGGREGATE meridian.orset_merge_agg(bytea) (
+    SFUNC    = meridian.orset_merge,
+    STYPE    = bytea,
+    INITCOND = ''
+);
+
+-- -------------------------------------------------------------------------
 -- Trigger wrapper — exposes the Rust #[pg_trigger] as a SQL trigger function.
 --
 -- Usage:
