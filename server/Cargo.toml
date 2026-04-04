@@ -19,7 +19,7 @@ storage-postgres = ["meridian-storage/storage-postgres", "dep:sqlx"]
 storage-redis = ["meridian-storage/storage-redis"]
 cluster = ["dep:meridian-cluster", "meridian-cluster/transport-redis"]
 cluster-http = ["dep:meridian-cluster", "meridian-cluster/transport-http"]
-pg-sync = ["dep:meridian-cluster", "storage-postgres", "dep:async-trait", "dep:futures"]
+pg-sync = ["dep:meridian-cluster", "storage-postgres", "dep:async-trait", "dep:futures", "dep:tokio-postgres", "dep:pgwire-replication"]
 wal-archive-s3 = ["meridian-storage/wal-archive-s3"]
 
 [dependencies]
@@ -36,6 +36,10 @@ futures = { version = "0.3", optional = true }
 
 # PostgreSQL client — only needed when storage-postgres feature is enabled
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"], optional = true }
+# Logical replication streaming — only needed for pg-sync WAL consumer
+tokio-postgres = { version = "0.7", features = ["runtime"], optional = true }
+# pgwire replication protocol client — handles CopyBoth + keepalives
+pgwire-replication = { version = "0.3", optional = true }
 
 # bytes — needed for cluster delta bytes
 bytes = "1"

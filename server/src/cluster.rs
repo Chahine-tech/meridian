@@ -2,6 +2,10 @@
 #[cfg(feature = "pg-sync")]
 pub mod pg_transport;
 
+/// Server-side WAL logical replication consumer (pgoutput stream).
+#[cfg(feature = "pg-sync")]
+pub mod wal_replication;
+
 /// Server-side implementation of `AntiEntropyApplier` for `meridian-cluster`.
 ///
 /// Bridges the cluster crate (which knows only raw bytes) with the server's

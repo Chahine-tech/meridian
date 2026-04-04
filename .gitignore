@@ -1,5 +1,9 @@
 # Rust
 /target/
+crates/meridian-db/target/
+crates/meridian-db/Cargo.lock
+crates/meridian-pg/target/
+crates/meridian-pg/Cargo.lock
 
 # Secrets
 .dev.vars

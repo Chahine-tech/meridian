@@ -188,7 +188,21 @@ where
                     Arc::clone(&store),
                     Arc::clone(&subscriptions) as Arc<dyn meridian_cluster::LocalBroadcast>,
                 ));
-                pg_transport.spawn_listener(applier);
+                pg_transport.spawn_listener(Arc::clone(&applier));
+
+                // WAL logical replication — opt-in via MERIDIAN_WAL_CONNSTR.
+                // Handles payloads > 8 KB that pg_notify silently drops.
+                // Falls back to pg_notify-only mode if the variable is not set.
+                if let Ok(wal_connstr) = std::env::var("MERIDIAN_WAL_CONNSTR") {
+                    let slot = std::env::var("MERIDIAN_WAL_SLOT")
+                        .unwrap_or_else(|_| "meridian_wal".into());
+                    let pub_ = std::env::var("MERIDIAN_WAL_PUB")
+                        .unwrap_or_else(|_| "meridian_pub".into());
+                    info!(slot = %slot, publication = %pub_, "WAL replication consumer starting");
+                    pg_transport.spawn_wal_replication(wal_connstr, slot, pub_, applier);
+                } else {
+                    info!("MERIDIAN_WAL_CONNSTR not set — WAL replication disabled (pg_notify only)");
+                }
 
                 let t: Arc<dyn ClusterTransport> = pg_transport;
                 (t, cfg)
