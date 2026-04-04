@@ -5,23 +5,36 @@ edition = "2024"
 description = "Postgres extension — CRDT types and bidirectional sync for Meridian"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "pgrx_embed_meridian-pg"
+path = "src/bin/pgrx_embed.rs"
 
 [features]
 default = ["pg16"]
 pg14 = ["pgrx/pg14"]
 pg15 = ["pgrx/pg15"]
 pg16 = ["pgrx/pg16"]
+pg17 = ["pgrx/pg17"]
+pg_test = []
 
 [dependencies]
-pgrx = { version = "0.12", default-features = false }
+pgrx          = { version = "0.13", default-features = false }
 meridian-core = { path = "../meridian-core" }
-rmp-serde = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-uuid = { version = "1", features = ["v4"] }
-base64 = "0.22"
+rmp-serde     = "1.3"
+serde         = { version = "1", features = ["derive"] }
+serde_json    = "1"
+uuid          = { version = "1", features = ["v4"] }
+base64        = "0.22"
+# WAL consumer
+tokio            = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "net", "io-util"] }
+tokio-postgres   = { version = "0.7", features = ["runtime"] }
+reqwest          = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
 
 [dev-dependencies]
-pgrx-tests = "0.12"
+pgrx-tests = "0.13"
 
+# Empty [workspace] prevents Cargo from inheriting the root workspace.
+# This crate is a cdylib (pgrx extension) and must be built with `cargo pgrx`.
+[workspace]
