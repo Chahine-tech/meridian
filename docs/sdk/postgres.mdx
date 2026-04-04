@@ -154,7 +154,9 @@ The server LISTENs on `meridian_ops` and feeds incoming `pg_notify` payloads int
 
 ## WAL consumer (large documents)
 
-`pg_notify` has an 8 KB payload limit — large RGA documents or deep Tree edits will be silently dropped by the trigger. For those, enable the WAL consumer background worker which tails the logical replication stream instead.
+`pg_notify` has an 8 KB payload limit — large RGA documents or deep Tree edits will be silently dropped by the trigger. For those, enable the WAL consumer in the Meridian server, which tails the logical replication stream instead.
+
+The WAL consumer lives **server-side** (not in the extension). It opens a replication connection to Postgres, parses the pgoutput stream, and feeds BYTEA column changes through the same `merge + broadcast` path as `pg_notify`. Both paths coexist and are idempotent — for small documents you get both, for large ones you only get the WAL path.
 
 ### 1. Enable logical replication
 
@@ -164,17 +166,26 @@ ALTER SYSTEM SET wal_level = logical;
 -- then restart Postgres
 ```
 
-### 2. Configure in postgresql.conf
+### 2. Start the server with WAL replication enabled
 
-```ini
-shared_preload_libraries = 'meridian_pg'
+Set `MERIDIAN_WAL_CONNSTR` to a connection string pointing at the same Postgres instance. The server creates the replication slot and publication automatically on first boot.
 
-meridian.server_url = 'http://localhost:4000'   # Meridian server HTTP endpoint
-meridian.slot_name  = 'meridian_wal'             # replication slot (auto-created)
-meridian.pub_name   = 'meridian_pub'             # publication (auto-created)
+```bash
+DATABASE_URL=postgres://user:pass@localhost/mydb \
+MERIDIAN_WAL_CONNSTR=postgres://user:pass@localhost/mydb \
+MERIDIAN_WAL_SLOT=meridian_wal \
+MERIDIAN_WAL_PUB=meridian_pub \
+MERIDIAN_NODE_ID=1 \
+./meridian
 ```
 
-The background worker starts automatically on server boot, creates the slot and publication if they don't exist, and streams all table changes to the Meridian server via `POST /internal/pg-sync`.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MERIDIAN_WAL_CONNSTR` | — | Enables WAL replication. Same format as `DATABASE_URL`. |
+| `MERIDIAN_WAL_SLOT` | `meridian_wal` | Replication slot name (auto-created). |
+| `MERIDIAN_WAL_PUB` | `meridian_pub` | Publication name (auto-created). |
+
+If `MERIDIAN_WAL_CONNSTR` is not set, the server falls back to `pg_notify` only (no change in behaviour for documents under 8 KB).
 
 ## Function reference
 

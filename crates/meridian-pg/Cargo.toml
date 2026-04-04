@@ -2,7 +2,7 @@
 name = "meridian-pg"
 version = "0.1.0"
 edition = "2024"
-description = "Postgres extension — CRDT types and bidirectional sync for Meridian"
+description = "Postgres extension — CRDT types and real-time sync for Meridian"
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -27,10 +27,6 @@ serde         = { version = "1", features = ["derive"] }
 serde_json    = "1"
 uuid          = { version = "1", features = ["v4"] }
 base64        = "0.22"
-# WAL consumer
-tokio            = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "net", "io-util"] }
-tokio-postgres   = { version = "0.7", features = ["runtime"] }
-reqwest          = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
 
 [dev-dependencies]
 pgrx-tests = "0.13"

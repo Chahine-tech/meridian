@@ -36,6 +36,51 @@ jobs:
       - name: test (cluster features)
         run: cargo test --features cluster
 
+  wal-integration:
+    name: WAL integration (pg-sync)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: runner
+          POSTGRES_PASSWORD: runner
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: enable wal_level=logical
+        env:
+          PGPASSWORD: runner
+        run: |
+          psql -h localhost -U runner -d postgres \
+            -c "ALTER SYSTEM SET wal_level = logical;"
+          # Restart the container — wal_level requires a full restart
+          docker restart $(docker ps -q --filter expose=5432)
+          # Wait for Postgres to accept connections again
+          for i in $(seq 1 20); do
+            pg_isready -h localhost -U runner && break
+            sleep 1
+          done
+          psql -h localhost -U runner -d postgres -c "SHOW wal_level;"
+
+      - name: test WAL integration
+        env:
+          MERIDIAN_TEST_PG_URL: postgresql://runner:runner@localhost/postgres
+        run: |
+          cargo test --features pg-sync --test wal_replication_integration -- --test-threads=1
+
   edge:
     name: Edge (WASM)
     runs-on: ubuntu-latest
