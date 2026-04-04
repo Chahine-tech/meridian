@@ -18,15 +18,11 @@ use std::{
 
 // Each test spawns a WAL consumer that opens replication connections.
 // Running them in parallel exhausts Postgres's max_wal_senders and causes
-// flaky timeouts. Serialize with a process-wide mutex.
-static SERIAL: OnceLock<Mutex<()>> = OnceLock::new();
-fn serial_lock() -> std::sync::MutexGuard<'static, ()> {
-    // unwrap_or_else handles poison — a previous test panicked while holding
-    // the lock, but the underlying () is still valid.
-    match SERIAL.get_or_init(|| Mutex::new(())).lock() {
-        Ok(g) => g,
-        Err(p) => p.into_inner(),
-    }
+// flaky timeouts. Serialize with a process-wide async mutex so the guard
+// can be held across .await points without triggering clippy::await_holding_lock.
+static SERIAL: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+async fn serial_lock() -> tokio::sync::MutexGuard<'static, ()> {
+    SERIAL.get_or_init(|| tokio::sync::Mutex::new(())).lock().await
 }
 
 use meridian_server::cluster::pg_transport::PgStateApplier;
@@ -49,7 +45,7 @@ async fn check_wal_level(base_url: &str) -> bool {
         eprintln!("WAL tests: cannot connect to postgres — skipping");
         return false;
     };
-    tokio::spawn(async move { conn.await });
+    tokio::spawn(conn);
     let Ok(row) = client.query_one("SHOW wal_level", &[]).await else {
         return false;
     };
@@ -76,7 +72,7 @@ impl TestDb {
     async fn new(prefix: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let base_url = base_url();
         let (admin, conn) = tokio_postgres::connect(&base_url, NoTls).await?;
-        tokio::spawn(async move { conn.await });
+        tokio::spawn(conn);
 
         // UUID-quality uniqueness: pid + nanos
         let unique = format!(
@@ -99,7 +95,7 @@ impl TestDb {
         };
 
         let (client, conn) = tokio_postgres::connect(&test_url, NoTls).await?;
-        tokio::spawn(async move { conn.await });
+        tokio::spawn(conn);
 
         let slot = format!("slot_{unique}");
         let publication = format!("pub_{unique}");
@@ -131,7 +127,7 @@ impl TestDb {
         let Ok((admin, conn)) = tokio_postgres::connect(&self.base_url, NoTls).await else {
             return;
         };
-        tokio::spawn(async move { conn.await });
+        tokio::spawn(conn);
 
         // Drop the replication slot (required before DROP DATABASE).
         let _ = admin
@@ -180,9 +176,11 @@ impl TestDb {
 // Recording applier
 // ---------------------------------------------------------------------------
 
+type CallLog = Arc<Mutex<Vec<(String, String, Vec<u8>)>>>;
+
 #[derive(Clone)]
 struct RecordingApplier {
-    calls: Arc<Mutex<Vec<(String, String, Vec<u8>)>>>,
+    calls: CallLog,
 }
 
 impl RecordingApplier {
@@ -227,7 +225,7 @@ async fn test_insert_small_bytea() {
     if !check_wal_level(&url).await {
         return;
     }
-    let _serial = serial_lock();
+    let _serial = serial_lock().await;
 
     let mut db = TestDb::new("insert").await.expect("setup");
     db.client
@@ -269,7 +267,7 @@ async fn test_update_delivers_new_value() {
     if !check_wal_level(&url).await {
         return;
     }
-    let _serial = serial_lock();
+    let _serial = serial_lock().await;
 
     let mut db = TestDb::new("update").await.expect("setup");
     db.client
@@ -317,7 +315,7 @@ async fn test_large_payload_over_8kb() {
     if !check_wal_level(&url).await {
         return;
     }
-    let _serial = serial_lock();
+    let _serial = serial_lock().await;
 
     let mut db = TestDb::new("large").await.expect("setup");
     db.client
@@ -365,7 +363,7 @@ async fn test_multiple_bytea_columns() {
     if !check_wal_level(&url).await {
         return;
     }
-    let _serial = serial_lock();
+    let _serial = serial_lock().await;
 
     let mut db = TestDb::new("multicol").await.expect("setup");
     db.client
@@ -422,7 +420,7 @@ async fn test_real_gcounter_crdt_value() {
     if !check_wal_level(&url).await {
         return;
     }
-    let _serial = serial_lock();
+    let _serial = serial_lock().await;
 
     let mut db = TestDb::new("crdt").await.expect("setup");
     db.client
@@ -485,7 +483,7 @@ async fn test_consumer_reconnects_after_disconnect() {
     if !check_wal_level(&url).await {
         return;
     }
-    let _serial = serial_lock();
+    let _serial = serial_lock().await;
 
     let mut db = TestDb::new("reconnect").await.expect("setup");
     db.client
@@ -514,7 +512,7 @@ async fn test_consumer_reconnects_after_disconnect() {
 
     // Kill all replication connections to simulate a network drop
     let (admin, conn) = tokio_postgres::connect(&url, NoTls).await.expect("admin connect");
-    tokio::spawn(async move { conn.await });
+    tokio::spawn(conn);
     admin
         .simple_query(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
@@ -558,7 +556,7 @@ async fn test_null_bytea_not_delivered() {
     if !check_wal_level(&url).await {
         return;
     }
-    let _serial = serial_lock();
+    let _serial = serial_lock().await;
 
     let mut db = TestDb::new("null").await.expect("setup");
     db.client
@@ -610,7 +608,7 @@ async fn test_non_bytea_columns_ignored() {
     if !check_wal_level(&url).await {
         return;
     }
-    let _serial = serial_lock();
+    let _serial = serial_lock().await;
 
     let mut db = TestDb::new("nonbytea").await.expect("setup");
     db.client
