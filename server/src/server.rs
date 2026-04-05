@@ -153,7 +153,9 @@ where
     //   `--features cluster-http` → HTTP push (PostgreSQL-only deployments)
     #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
     let cluster = {
-        use meridian_cluster::{ClusterConfig, ClusterHandle, ClusterTransport};
+        use meridian_cluster::ClusterConfig;
+        #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+        use meridian_cluster::{ClusterHandle, ClusterTransport};
         use crate::cluster::anti_entropy::StoreApplier;
 
         #[cfg(not(any(feature = "cluster", feature = "cluster-http")))]
