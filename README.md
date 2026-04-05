@@ -280,6 +280,34 @@ See [`crates/meridian-edge/`](crates/meridian-edge/) for full setup.
 | [`meridian-edge`](crates/meridian-edge) | Cloudflare Workers runtime — WASM, Durable Objects |
 | [`meridian-storage`](crates/meridian-storage) | Pluggable storage backends — sled, PostgreSQL, Redis, in-memory; S3 WAL archive (`--features wal-archive-s3`) |
 | [`meridian-cluster`](crates/meridian-cluster) | Multinode clustering — Redis Pub/Sub + HTTP push transport |
+| [`meridian-pg`](crates/meridian-pg) | Postgres extension — CRDT SQL functions + notify trigger for pg-sync |
+
+## Postgres integration (`--features pg-sync`)
+
+Meridian can sync directly from your existing Postgres tables — no separate message broker needed. Every SQL write on a CRDT column is broadcast to all WebSocket clients in real time.
+
+```
+SQL UPDATE → meridian_pg trigger → pg_notify → Meridian server → WebSocket → client
+                                 ↑
+                    WAL stream (for payloads > 8 KB)
+```
+
+**How it works:**
+
+1. Install the `meridian_pg` Postgres extension — adds SQL functions (`gcounter_increment`, `pncounter_increment`, `orset_add`, `lww_set`, …) and a notify trigger
+2. Add a `BYTEA` column per CRDT type to your table and attach the trigger
+3. Start Meridian with `--features pg-sync` and `DATABASE_URL`
+
+```bash
+MERIDIAN_FEATURES=pg-sync \
+DATABASE_URL=postgres://user:pass@localhost/mydb \
+MERIDIAN_WAL_CONNSTR=postgres://user:pass@localhost/mydb \
+docker compose --profile pg up
+```
+
+The server opens a logical replication slot (`meridian_wal`) and subscribes to `pg_notify` — both paths feed the same idempotent merge, so large payloads (RGA, Tree) are covered by WAL while small ones arrive via notify.
+
+See [`examples/postgres-articles/`](examples/postgres-articles/) for a full working demo.
 
 ## Configuration
 
@@ -299,3 +327,7 @@ See [`crates/meridian-edge/`](crates/meridian-edge/) for full setup.
 | `S3_REGION` | `us-east-1` | AWS region |
 | `S3_KEY_PREFIX` | `wal/` | Object key prefix for WAL segments |
 | `WAL_SEGMENT_SIZE` | `500` | Number of WAL entries per S3 segment |
+| `DATABASE_URL` | *(unset)* | PostgreSQL URL — enables pg-sync transport and Postgres storage (`--features pg-sync`) |
+| `MERIDIAN_WAL_CONNSTR` | *(unset)* | Replication connection URL — enables WAL stream for payloads > 8 KB |
+| `MERIDIAN_WAL_SLOT` | `meridian_wal` | Logical replication slot name |
+| `MERIDIAN_WAL_PUB` | `meridian_pub` | Publication name (`FOR ALL TABLES`) |
