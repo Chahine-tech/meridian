@@ -137,7 +137,7 @@ const likes = client.pncounter(`article:${articleId}:likes`);
 const tags  = client.orset<string>(`article:${articleId}:tags`);
 
 // Subscribe to live updates
-views.subscribe(v => console.log("views:", v.value()));
+views.onChange(v => console.log("views:", v));
 ```
 
 ## Server setup

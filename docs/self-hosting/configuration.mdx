@@ -17,6 +17,15 @@ For clustering variables (`REDIS_URL`, `MERIDIAN_PEERS`, `MERIDIAN_NODE_ID`, etc
 
 For S3 WAL archive variables (`S3_BUCKET`, `S3_ENDPOINT`, etc.), see the [Storage](/self-hosting/storage) page.
 
+For PostgreSQL and WAL replication variables, see the [Postgres integration](/sdk/postgres) page.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | *(unset)* | PostgreSQL URL — enables pg-sync transport and Postgres storage (`--features pg-sync`) |
+| `MERIDIAN_WAL_CONNSTR` | *(unset)* | Replication connection URL — enables WAL stream for payloads > 8 KB |
+| `MERIDIAN_WAL_SLOT` | `meridian_wal` | Logical replication slot name (auto-created) |
+| `MERIDIAN_WAL_PUB` | `meridian_pub` | Publication name (auto-created, `FOR ALL TABLES`) |
+
 ## MERIDIAN_SIGNING_KEY
 
 Generate a secure key:
