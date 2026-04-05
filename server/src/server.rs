@@ -102,16 +102,65 @@ where
 
     let subscriptions = Arc::new(SubscriptionManager::new());
 
-    // Cluster transport modes (mutually exclusive, pick the first that applies):
+    // pg-sync transport: PostgreSQL NOTIFY/LISTEN + optional WAL replication.
+    // Activates when `--features pg-sync` is compiled and DATABASE_URL is set.
+    // Independent of MERIDIAN_PEERS / REDIS_URL — works as a single node.
+    #[cfg(all(feature = "pg-sync", not(feature = "cluster"), not(feature = "cluster-http")))]
+    {
+        use crate::cluster::pg_transport::{PostgresNotifyTransport, StorePgApplier};
+        use meridian_cluster::NodeId;
+        use sqlx::postgres::PgPoolOptions;
+
+        let pg_url = config.database_url.clone()
+            .or_else(|| std::env::var("DATABASE_URL").ok())
+            .or_else(|| std::env::var("PG_SYNC_DATABASE_URL").ok());
+
+        if let Some(pg_url) = pg_url {
+            let pg_pool = match config.pg_pool.take() {
+                Some(pool) => pool,
+                None => PgPoolOptions::new().max_connections(4).connect(&pg_url).await?,
+            };
+
+            let node_id = NodeId::from_env_or_hostname(config.bind_port());
+            info!(node_id = %node_id, "pg-sync: PostgreSQL NOTIFY/LISTEN transport active");
+            let pg_transport = Arc::new(
+                PostgresNotifyTransport::new(pg_pool, node_id).await?
+            );
+
+            let applier = Arc::new(StorePgApplier::new(
+                Arc::clone(&store),
+                Arc::clone(&subscriptions) as Arc<dyn meridian_cluster::LocalBroadcast>,
+            ));
+            pg_transport.spawn_listener(Arc::clone(&applier));
+
+            if let Ok(wal_connstr) = std::env::var("MERIDIAN_WAL_CONNSTR") {
+                let slot = std::env::var("MERIDIAN_WAL_SLOT")
+                    .unwrap_or_else(|_| "meridian_wal".into());
+                let pub_ = std::env::var("MERIDIAN_WAL_PUB")
+                    .unwrap_or_else(|_| "meridian_pub".into());
+                info!(slot = %slot, publication = %pub_, "WAL replication consumer starting");
+                pg_transport.spawn_wal_replication(wal_connstr, slot, pub_, applier);
+            } else {
+                info!("MERIDIAN_WAL_CONNSTR not set — WAL replication disabled (pg_notify only)");
+            }
+        } else {
+            info!("pg-sync: DATABASE_URL not set — pg_notify disabled");
+        }
+    }
+
+    // Cluster transport modes (cluster or cluster-http features only):
     //   `--features cluster`      → Redis Pub/Sub (recommended, low latency)
     //   `--features cluster-http` → HTTP push (PostgreSQL-only deployments)
-    //   `--features pg-sync`      → PostgreSQL NOTIFY/LISTEN (single-binary, no Redis)
     #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
     let cluster = {
         use meridian_cluster::{ClusterConfig, ClusterHandle, ClusterTransport};
         use crate::cluster::anti_entropy::StoreApplier;
 
-        if let Some(cfg) = ClusterConfig::from_env(config.bind_port()) {
+        #[cfg(not(any(feature = "cluster", feature = "cluster-http")))]
+        let _ = (ClusterConfig::from_env(config.bind_port()), StoreApplier::new(Arc::clone(&store)));
+
+        #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+        let cluster_handle = if let Some(cfg) = ClusterConfig::from_env(config.bind_port()) {
             let node_id = cfg.node_id;
 
             #[cfg(feature = "cluster")]
@@ -140,7 +189,6 @@ where
                     .unwrap_or_else(|_| "0.0.0.0:3001".into());
                 let internal_router = t.router();
                 let cancel_clone = cancel.clone();
-                // Bind before spawning so startup failures surface immediately.
                 let internal_listener = TcpListener::bind(&internal_bind).await
                     .map_err(|e| anyhow::anyhow!("failed to bind internal cluster port {internal_bind}: {e}"))?;
                 info!(addr = internal_bind, "cluster internal API listening");
@@ -157,57 +205,6 @@ where
                 (transport_dyn, cfg, t)
             };
 
-            // pg-sync transport: PostgreSQL NOTIFY/LISTEN.
-            // Activated when `--features pg-sync` is set and DATABASE_URL is present.
-            // Requires no extra infrastructure beyond the existing Postgres pool.
-            #[cfg(all(feature = "pg-sync", not(feature = "cluster"), not(feature = "cluster-http")))]
-            let (transport, cfg) = {
-                use crate::cluster::pg_transport::{PostgresNotifyTransport, StorePgApplier};
-                use sqlx::postgres::PgPoolOptions;
-
-                // Prefer the pool already open for storage (passed from main.rs).
-                // Fall back to PG_SYNC_DATABASE_URL for non-postgres storage backends.
-                let pg_pool = match config.pg_pool.take() {
-                    Some(pool) => pool,
-                    None => {
-                        let pg_url = config.database_url.clone()
-                            .or_else(|| std::env::var("PG_SYNC_DATABASE_URL").ok())
-                            .expect("pg-sync requires DATABASE_URL or PG_SYNC_DATABASE_URL");
-                        PgPoolOptions::new().max_connections(4).connect(&pg_url).await?
-                    }
-                };
-
-                info!(node_id = %node_id, "cluster enabled — PostgreSQL NOTIFY/LISTEN transport");
-                let pg_transport = Arc::new(
-                    PostgresNotifyTransport::new(pg_pool, node_id).await?
-                );
-
-                // Wire the state applier so trigger payloads (kind="state") are
-                // merged into the store before being forwarded to WS clients.
-                let applier = Arc::new(StorePgApplier::new(
-                    Arc::clone(&store),
-                    Arc::clone(&subscriptions) as Arc<dyn meridian_cluster::LocalBroadcast>,
-                ));
-                pg_transport.spawn_listener(Arc::clone(&applier));
-
-                // WAL logical replication — opt-in via MERIDIAN_WAL_CONNSTR.
-                // Handles payloads > 8 KB that pg_notify silently drops.
-                // Falls back to pg_notify-only mode if the variable is not set.
-                if let Ok(wal_connstr) = std::env::var("MERIDIAN_WAL_CONNSTR") {
-                    let slot = std::env::var("MERIDIAN_WAL_SLOT")
-                        .unwrap_or_else(|_| "meridian_wal".into());
-                    let pub_ = std::env::var("MERIDIAN_WAL_PUB")
-                        .unwrap_or_else(|_| "meridian_pub".into());
-                    info!(slot = %slot, publication = %pub_, "WAL replication consumer starting");
-                    pg_transport.spawn_wal_replication(wal_connstr, slot, pub_, applier);
-                } else {
-                    info!("MERIDIAN_WAL_CONNSTR not set — WAL replication disabled (pg_notify only)");
-                }
-
-                let t: Arc<dyn ClusterTransport> = pg_transport;
-                (t, cfg)
-            };
-
             let handle = Arc::new(ClusterHandle::new(cfg, transport));
 
             handle.spawn_receiver(Arc::clone(&subscriptions), cancel.clone());
@@ -220,7 +217,6 @@ where
                 cancel.clone(),
             );
 
-            // Pull anti-entropy: catch up from peers on restart (HTTP only).
             #[cfg(all(feature = "cluster-http", not(feature = "cluster")))]
             handle.spawn_pull_anti_entropy(
                 Arc::clone(&wal),
@@ -234,7 +230,12 @@ where
         } else {
             info!("cluster not configured — running in single-node mode");
             None
-        }
+        };
+
+        #[cfg(any(feature = "cluster", feature = "cluster-http"))]
+        { cluster_handle }
+        #[cfg(not(any(feature = "cluster", feature = "cluster-http")))]
+        { None::<std::sync::Arc<meridian_cluster::ClusterHandle>> }
     };
 
     #[cfg(not(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync")))]

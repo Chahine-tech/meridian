@@ -112,6 +112,7 @@ async fn stream_once<A: PgStateApplier>(
     while let Some(event) = repl_client.recv().await? {
         match event {
             ReplicationEvent::XLogData { wal_end, data, .. } => {
+                debug!(bytes = data.len(), "WAL XLogData received");
                 parse_pgoutput(&data, &mut schema_cache, applier).await;
                 repl_client.update_applied_lsn(wal_end);
             }

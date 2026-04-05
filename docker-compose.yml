@@ -1,13 +1,56 @@
+# Default: single-node, embedded sled storage
+#   docker compose up
+#
+# PostgreSQL mode (pg-sync, WAL replication):
+#   docker compose --profile pg up
+
 services:
   meridian:
-    build: .
+    build:
+      context: .
+      args:
+        FEATURES: ${MERIDIAN_FEATURES:-}
     ports:
       - "3000:3000"
     volumes:
       - meridian_data:/data
     environment:
-      MERIDIAN_SIGNING_KEY: ${MERIDIAN_SIGNING_KEY:?MERIDIAN_SIGNING_KEY is required}
+      # Dev default key — override in production via .env or environment variable.
+      # Generate a production key: openssl rand -hex 32
+      MERIDIAN_SIGNING_KEY: ${MERIDIAN_SIGNING_KEY:-4242424242424242424242424242424242424242424242424242424242424242}
+      MERIDIAN_NODE_ID: ${MERIDIAN_NODE_ID:-1}
+      DATABASE_URL: ${DATABASE_URL:-}
+      MERIDIAN_WAL_CONNSTR: ${MERIDIAN_WAL_CONNSTR:-}
+      MERIDIAN_WAL_SLOT: ${MERIDIAN_WAL_SLOT:-meridian_wal}
+      MERIDIAN_WAL_PUB: ${MERIDIAN_WAL_PUB:-meridian_pub}
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+
+  postgres:
+    profiles: [pg]
+    image: postgres:17-alpine
+    command: postgres -c wal_level=logical
+    environment:
+      POSTGRES_USER: meridian
+      POSTGRES_PASSWORD: meridian
+      POSTGRES_DB: meridian
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meridian"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
 volumes:
   meridian_data:
+  pg_data:

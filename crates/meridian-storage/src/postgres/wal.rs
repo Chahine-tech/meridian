@@ -72,16 +72,29 @@ impl PgWal {
                 crdt_id      TEXT NOT NULL,
                 op_bytes     BYTEA NOT NULL,
                 timestamp_ms BIGINT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS wal_entries_namespace_seq_idx
-                ON wal_entries (namespace, seq);
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS wal_entries_namespace_seq_idx ON wal_entries (namespace, seq)",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS wal_checkpoint (
                 id  INT PRIMARY KEY DEFAULT 1,
                 seq BIGINT NOT NULL DEFAULT 0,
                 CHECK (id = 1)
-            );
-            INSERT INTO wal_checkpoint (id, seq) VALUES (1, 0) ON CONFLICT DO NOTHING;
+            )
             "#,
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO wal_checkpoint (id, seq) VALUES (1, 0) ON CONFLICT DO NOTHING",
         )
         .execute(pool)
         .await?;
