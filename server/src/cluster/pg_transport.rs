@@ -257,6 +257,25 @@ impl PostgresNotifyTransport {
         self.inner.resync_namespaces.write().await.push(namespace.into());
     }
 
+    /// Start the background WAL logical replication consumer.
+    ///
+    /// `connstr` must be a libpq connection string or URL pointing to the same
+    /// Postgres instance.  The slot and publication are created automatically
+    /// if they don't exist.
+    ///
+    /// This supplements `spawn_listener`: large payloads (> ~7 800 bytes) that
+    /// are silently dropped by pg_notify are delivered reliably via the WAL
+    /// stream instead.  Both paths feed the same idempotent `PgStateApplier`.
+    pub fn spawn_wal_replication<A: PgStateApplier>(
+        &self,
+        connstr: String,
+        slot_name: String,
+        pub_name: String,
+        applier: Arc<A>,
+    ) {
+        tokio::spawn(super::wal_replication::run(connstr, slot_name, pub_name, applier));
+    }
+
     /// Start the background LISTEN loop.
     ///
     /// Must be called after construction.  Separated from `new()` so the

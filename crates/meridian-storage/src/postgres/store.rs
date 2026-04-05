@@ -43,17 +43,27 @@ impl PgStore {
                 updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
                 expires_at_ms BIGINT,
                 PRIMARY KEY (namespace, crdt_id)
-            );
-            CREATE INDEX IF NOT EXISTS crdt_snapshots_namespace_idx
-                ON crdt_snapshots (namespace);
-            -- Partial index for efficient TTL-based GC queries.
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS crdt_snapshots_namespace_idx ON crdt_snapshots (namespace)",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            r#"
             CREATE INDEX IF NOT EXISTS crdt_snapshots_expires_idx
                 ON crdt_snapshots (expires_at_ms)
-                WHERE expires_at_ms IS NOT NULL;
-            -- Idempotent: add column if upgrading from a schema without it.
-            ALTER TABLE crdt_snapshots
-                ADD COLUMN IF NOT EXISTS expires_at_ms BIGINT;
+                WHERE expires_at_ms IS NOT NULL
             "#,
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "ALTER TABLE crdt_snapshots ADD COLUMN IF NOT EXISTS expires_at_ms BIGINT",
         )
         .execute(pool)
         .await?;

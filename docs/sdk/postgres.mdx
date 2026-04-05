@@ -5,15 +5,17 @@ description: Turn any Postgres table column into a collaborative CRDT with live 
 
 `meridian-pg` is a Postgres extension that exposes Meridian CRDT types directly in SQL. A trigger fires `pg_notify` on every write, and the Meridian server broadcasts the delta to all connected clients in real time.
 
-**Pitch**: "Postgres as the source of truth, real-time sync on every client, zero conflicts."
+```
+Postgres UPDATE → trigger → pg_notify('meridian_ops') → Meridian server → WebSocket clients
+```
 
 ## Install the extension
 
 ```sql
-CREATE EXTENSION meridian;
+CREATE EXTENSION meridian_pg;
 ```
 
-> Requires pgrx 0.12 and Postgres 14–16. See [Building](#building) below.
+> Requires Postgres 14–17. Built with [pgrx](https://github.com/pgcentralfoundation/pgrx) 0.13.
 
 ## Add CRDT columns to a table
 
@@ -29,16 +31,33 @@ ALTER TABLE articles
 
 ## Attach the sync trigger
 
+The trigger accepts any number of CRDT columns as variadic arguments:
+
 ```sql
--- One trigger per CRDT column.
--- Arguments: namespace, crdt_id prefix, pk column, crdt column.
-
-CREATE TRIGGER sync_views
-AFTER INSERT OR UPDATE OF views ON articles
+-- Arguments: namespace, crdt_id prefix, pk column, crdt columns...
+CREATE TRIGGER meridian_sync
+AFTER INSERT OR UPDATE ON articles
 FOR EACH ROW
-EXECUTE FUNCTION meridian.notify_trigger('my-app', 'gc', 'id', 'views');
+EXECUTE FUNCTION meridian.notify_trigger(
+  'my-app',   -- $1: Meridian namespace
+  'article',  -- $2: crdt_id prefix → "article:<pk>:<col>"
+  'id',       -- $3: primary-key column
+  'views',    -- $4+: CRDT columns to watch
+  'likes',
+  'tags',
+  'headline'
+);
+```
 
--- crdt_id sent to Meridian = "gc:<row_id>"
+One `pg_notify` is emitted per changed column per row, on channel `meridian_ops`:
+
+```json
+{
+  "kind": "state",
+  "ns": "my-app",
+  "crdt_id": "article:art-1:views",
+  "d": "<base64 msgpack>"
+}
 ```
 
 ## Write from SQL
@@ -54,7 +73,11 @@ UPDATE articles
 SET likes = meridian.pncounter_increment(likes, 1, 42)
 WHERE id = 'article-1';
 
--- ORSet: add / remove
+UPDATE articles
+SET likes = meridian.pncounter_decrement(likes, 1, 42)
+WHERE id = 'article-1';
+
+-- ORSet: add / remove (add-wins on concurrent add+remove)
 UPDATE articles
 SET tags = meridian.orset_add(tags, '"rust"', 42, 1)
 WHERE id = 'article-1';
@@ -63,7 +86,7 @@ UPDATE articles
 SET tags = meridian.orset_remove(tags, '"rust"')
 WHERE id = 'article-1';
 
--- LwwRegister: set value (wall_ms = epoch milliseconds)
+-- LwwRegister: set value (wall_ms = epoch milliseconds, last write wins)
 UPDATE articles
 SET headline = meridian.lww_set(
   headline,
@@ -80,56 +103,89 @@ WHERE id = 'article-1';
 SELECT
   meridian.gcounter_value(views)   AS view_count,
   meridian.pncounter_value(likes)  AS like_count,
-  meridian.orset_elements(tags)    AS tags_json,
-  meridian.lww_value(headline)     AS headline,
+  meridian.orset_elements(tags)    AS tags_json,     -- → '["rust","go"]'
+  meridian.lww_value(headline)     AS headline,      -- → '"Hello world"'
   meridian.rga_text(body)          AS body_text,
   meridian.tree_json(outline)      AS outline_json
 FROM articles
 WHERE id = 'article-1';
 ```
 
-## Aggregate: sum across rows
+## Merge two states
+
+Useful for manual conflict resolution or backfills:
 
 ```sql
--- GCounter: total views — returns BIGINT directly
-SELECT meridian.gcounter_total(views) AS total_views
-FROM articles;
-
--- PNCounter: signed sum across rows
-SELECT meridian.pncounter_total(likes) AS total_likes
-FROM articles;
-
--- ORSet: union of all tag sets across rows
-SELECT meridian.orset_elements(
-  meridian.orset_merge_agg(tags)
-) AS all_tags
-FROM articles;
-
--- Intermediate BYTEA state (for further merging or storage):
-SELECT meridian.gcounter_merge_agg(views)  AS merged_gcounter,
-       meridian.pncounter_merge_agg(likes) AS merged_pncounter,
-       meridian.orset_merge_agg(tags)      AS merged_orset
-FROM articles;
+UPDATE articles a
+SET views = meridian.gcounter_merge(a.views, b.views)
+FROM articles b
+WHERE a.id = 'article-1' AND b.id = 'article-2';
 ```
 
 ## Connect from the SDK
 
-Use `pgCrdtKey` to build the `crdt_id` that matches the trigger prefix:
+The `crdt_id` sent over `pg_notify` is `"<prefix>:<pk>:<col>"`. Use it directly with the SDK:
 
 ```ts
-import { MeridianClient, pgCrdtKey, pgCrdtKeys } from "meridian-sdk";
+import { MeridianClient } from "meridian-sdk";
 
 const client = await MeridianClient.create({ url, namespace: "my-app", token });
 
-// Single column
-const views = client.gcounter(pgCrdtKey("gc", articleId));
-// → subscribed to crdt_id "gc:<articleId>"
+// crdt_id matches the trigger: "article:<articleId>:views"
+const views = client.gcounter(`article:${articleId}:views`);
+const likes = client.pncounter(`article:${articleId}:likes`);
+const tags  = client.orset<string>(`article:${articleId}:tags`);
 
-// Multiple columns in one call
-const keys = pgCrdtKeys(articleId, { views: "gc", likes: "pn", tags: "or" });
-const likes = client.pncounter(keys.likes);
-const tags  = client.orset<string>(keys.tags);
+// Subscribe to live updates
+views.onChange(v => console.log("views:", v));
 ```
+
+## Server setup
+
+Start the server with `DATABASE_URL` pointing to the same Postgres instance:
+
+```bash
+DATABASE_URL=postgres://user:pass@localhost/mydb \
+MERIDIAN_NODE_ID=1 \
+./meridian
+```
+
+The server LISTENs on `meridian_ops` and feeds incoming `pg_notify` payloads into the same apply + WebSocket broadcast pipeline as any other op.
+
+## WAL consumer (large documents)
+
+`pg_notify` has an 8 KB payload limit — large RGA documents or deep Tree edits will be silently dropped by the trigger. For those, enable the WAL consumer in the Meridian server, which tails the logical replication stream instead.
+
+The WAL consumer lives **server-side** (not in the extension). It opens a replication connection to Postgres, parses the pgoutput stream, and feeds BYTEA column changes through the same `merge + broadcast` path as `pg_notify`. Both paths coexist and are idempotent — for small documents you get both, for large ones you only get the WAL path.
+
+### 1. Enable logical replication
+
+```sql
+-- postgresql.conf (or ALTER SYSTEM)
+ALTER SYSTEM SET wal_level = logical;
+-- then restart Postgres
+```
+
+### 2. Start the server with WAL replication enabled
+
+Set `MERIDIAN_WAL_CONNSTR` to a connection string pointing at the same Postgres instance. The server creates the replication slot and publication automatically on first boot.
+
+```bash
+DATABASE_URL=postgres://user:pass@localhost/mydb \
+MERIDIAN_WAL_CONNSTR=postgres://user:pass@localhost/mydb \
+MERIDIAN_WAL_SLOT=meridian_wal \
+MERIDIAN_WAL_PUB=meridian_pub \
+MERIDIAN_NODE_ID=1 \
+./meridian
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MERIDIAN_WAL_CONNSTR` | — | Enables WAL replication. Same format as `DATABASE_URL`. |
+| `MERIDIAN_WAL_SLOT` | `meridian_wal` | Replication slot name (auto-created). |
+| `MERIDIAN_WAL_PUB` | `meridian_pub` | Publication name (auto-created). |
+
+If `MERIDIAN_WAL_CONNSTR` is not set, the server falls back to `pg_notify` only (no change in behaviour for documents under 8 KB).
 
 ## Function reference
 
@@ -138,87 +194,39 @@ const tags  = client.orset<string>(keys.tags);
 | `gcounter_increment(col, amount, client_id)` | `BYTEA` | Increment a GCounter |
 | `gcounter_value(col)` | `BIGINT` | Current total |
 | `gcounter_merge(a, b)` | `BYTEA` | Lattice join of two GCounters |
-| `gcounter_total(col)` | `BIGINT` | Aggregate total across rows |
-| `gcounter_merge_agg(col)` | `BYTEA` | Aggregate merged state across rows |
 | `pncounter_increment(col, amount, client_id)` | `BYTEA` | Increment |
 | `pncounter_decrement(col, amount, client_id)` | `BYTEA` | Decrement |
 | `pncounter_value(col)` | `BIGINT` | Signed value |
-| `pncounter_merge(a, b)` | `BYTEA` | Lattice join of two PNCounters |
-| `pncounter_total(col)` | `BIGINT` | Aggregate signed total across rows |
-| `pncounter_merge_agg(col)` | `BYTEA` | Aggregate merged state across rows |
+| `pncounter_merge(a, b)` | `BYTEA` | Lattice join |
 | `orset_add(col, json, node_id, seq)` | `BYTEA` | Add element |
 | `orset_remove(col, json)` | `BYTEA` | Remove element (add-wins) |
 | `orset_elements(col)` | `TEXT` | JSON array of live elements |
-| `orset_merge(a, b)` | `BYTEA` | Lattice join of two ORSets |
-| `orset_merge_agg(col)` | `BYTEA` | Aggregate union across rows |
+| `orset_merge(a, b)` | `BYTEA` | Lattice join |
 | `lww_set(col, json, wall_ms, author)` | `BYTEA` | Set value (LWW) |
-| `lww_value(col)` | `TEXT` | Current value as JSON |
+| `lww_value(col)` | `TEXT` | Current value as JSON string |
 | `lww_updated_at_ms(col)` | `BIGINT` | Last-write timestamp (ms) |
-| `rga_text(col)` | `TEXT` | Current text (read-only) |
+| `rga_text(col)` | `TEXT` | Current text content (read-only) |
 | `rga_len(col)` | `BIGINT` | Visible character count |
 | `tree_json(col)` | `TEXT` | Tree as JSON (read-only) |
 | `tree_node_count(col)` | `BIGINT` | Live node count |
-| `crdt_json(col)` | `TEXT` | Generic JSON dump |
+| `notify_trigger(...)` | trigger | Row-level sync trigger |
 | `meridian_version()` | `TEXT` | Extension version |
 
-## Server setup (pg-sync feature)
-
-Start the server with the `pg-sync` feature and set `DATABASE_URL` (or `PG_SYNC_DATABASE_URL`):
+## Building from source
 
 ```bash
-cargo build --features pg-sync
-DATABASE_URL=postgres://... MERIDIAN_NODE_ID=1 ./meridian
-```
-
-The server LISTENs on `meridian_ops` and feeds incoming `pg_notify` payloads
-into `apply_op_atomic` + WebSocket broadcast — the same pipeline as any other op.
-
-```
-Postgres UPDATE → trigger → pg_notify('meridian_ops') → Meridian server → WebSocket clients
-```
-
-### Anti-entropy resync
-
-`pg_notify` does not buffer missed notifications across listener disconnections.
-To recover state lost during a server outage, register an optional resync function
-and the namespace(s) it covers:
-
-```sql
--- Implement meridian.resync_fn — return all CRDT states for a given namespace.
-CREATE OR REPLACE FUNCTION meridian.resync_fn(ns TEXT)
-RETURNS TABLE(crdt_id TEXT, state BYTEA) AS $$
-  SELECT 'gc:' || id::TEXT, views
-  FROM   articles
-  WHERE  views IS NOT NULL
-    AND  ns = 'my-app';   -- filter by namespace if you use multiple
-$$ LANGUAGE sql STABLE;
-```
-
-```rust
-// Register namespace(s) before spawn_listener — in server startup code.
-pg_transport.register_resync_namespace("my-app").await;
-pg_transport.spawn_listener(applier);
-```
-
-After every reconnection the server calls `meridian.resync_fn(namespace)` for
-each registered namespace and merges all returned states. If the function is
-absent, the behaviour is unchanged (best-effort delivery only).
-
-## Building
-
-```bash
-cargo install cargo-pgrx --version "~0.12"
-cargo pgrx init           # downloads Postgres 14-16 locally
+cargo install cargo-pgrx --version "~0.13"
+cargo pgrx init               # downloads Postgres 14–17 locally
 
 cd crates/meridian-pg
-cargo pgrx test           # unit tests
-cargo pgrx run            # interactive psql session
+cargo pgrx test pg16          # unit tests (28 tests)
+cargo pgrx run pg16           # interactive psql session
+cargo pgrx install            # install into local Postgres
 ```
 
 ## Caveats
 
-- **pg_notify limit** — 8 000 bytes. Deltas > ~5.8 KB raw (large RGA documents, deep Tree edits) are silently dropped. Use `RedisTransport` for those.
-- **RGA / Tree writes** — require HLC timestamps; write exclusively via WebSocket clients or the HTTP API. SQL read functions are provided for observability.
+- **pg_notify limit** — 8 KB. Large RGA / Tree documents should use the WAL consumer instead (see above).
+- **RGA / Tree writes** — require HLC timestamps; write exclusively via WebSocket clients or the HTTP API. SQL functions are read-only for these types.
 - **Clock drift** — always pass `EXTRACT(EPOCH FROM now())::bigint * 1000` as `wall_ms` to `lww_set`. The server validates HLC drift within ±30 s.
 - **Trusted ops** — ops from `pg_notify` bypass token auth. Treat DB write access as equivalent to Meridian admin access.
-- **Postgres 17** — pgrx 0.12 does not yet support PG 17. Use PG 14–16.

@@ -9,7 +9,8 @@
     "examples/collaborative-workspace",
     "examples/cursors",
     "examples/ai-agents",
-    "examples/ai-agents/ui"
+    "examples/ai-agents/ui",
+    "examples/postgres-articles"
   ],
   "scripts": {
     "release": "changeset publish"
