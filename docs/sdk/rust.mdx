@@ -1,0 +1,207 @@
+---
+title: Rust SDK
+description: Use Meridian from a native Rust application — terminal UIs, games, daemons, CLI tools.
+---
+
+`meridian-client` is the official Rust SDK for Meridian. It exposes the same eight CRDT handles as the TypeScript SDK, wrapped in a fully async, `Arc`-backed API built on Tokio.
+
+## Installation
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+meridian-client = { git = "https://github.com/Chahine-tech/meridian" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+```
+
+## Connect
+
+```rust
+use meridian_client::MeridianClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = MeridianClient::connect(
+        "ws://localhost:3000",
+        "my-room",
+        &std::env::var("MERIDIAN_TOKEN")?,
+    ).await?;
+
+    // … use handles
+
+    client.close().await;
+    Ok(())
+}
+```
+
+`MeridianClient::connect` returns `Arc<MeridianClient>` — cheap to clone across tasks.
+
+## CRDT handles
+
+Every handle is obtained from the client and shares state via `Arc`. Calling the same method twice with the same CRDT ID returns handles backed by the same inner state.
+
+### GCounter
+
+```rust
+let views = client.gcounter("gc:views");
+views.increment(1).await?;
+println!("total views: {}", views.value());
+
+// React to remote changes
+let _guard = views.on_change(|v| println!("views updated: {v}"));
+```
+
+### PNCounter
+
+```rust
+let balance = client.pncounter("pn:balance");
+balance.increment(100).await?;
+balance.decrement(20).await?;
+println!("balance: {}", balance.value()); // 80
+```
+
+### LwwRegister
+
+```rust
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Clone)]
+struct UserStatus { online: bool, last_seen: u64 }
+
+let status = client.lwwregister::<UserStatus>("lw:status:alice");
+status.set(UserStatus { online: true, last_seen: 0 }).await?;
+
+if let Ok(Some(s)) = status.value() {
+    println!("alice online: {}", s.online);
+}
+```
+
+### ORSet
+
+```rust
+let cart = client.orset::<String>("or:cart:42");
+cart.add("apple".to_owned()).await?;
+cart.add("banana".to_owned()).await?;
+cart.remove(&"apple".to_owned()).await?;
+
+let items = cart.elements()?; // ["banana"]
+```
+
+### Presence
+
+```rust
+#[derive(Serialize, Deserialize, Clone)]
+struct Cursor { x: f32, y: f32 }
+
+let presence = client.presence::<Cursor>("pr:cursors");
+presence.heartbeat(Cursor { x: 100.0, y: 200.0 }, 5_000).await?;
+```
+
+### Awareness
+
+```rust
+#[derive(Serialize, Deserialize, Clone)]
+struct ViewState { page: String }
+
+let awareness = client.awareness::<ViewState>("aw:viewport");
+awareness.update(ViewState { page: "home".into() }).await?;
+```
+
+### RGA (collaborative text)
+
+```rust
+let doc = client.rga("rga:doc:1");
+doc.insert(0, "Hello").await?;
+doc.insert(5, ", world!").await?;
+println!("{}", doc.text()); // "Hello, world!"
+```
+
+### Tree
+
+```rust
+let tree = client.tree("tree:org-chart");
+let root = tree.add_node(None, serde_json::json!({ "name": "CEO" })).await?;
+tree.add_node(Some(root), serde_json::json!({ "name": "CTO" })).await?;
+```
+
+## Live queries
+
+```rust
+let mut rx = client.live_query("gc:score:*", "sum");
+
+tokio::spawn(async move {
+    while let Some(result) = rx.recv().await {
+        println!("total score: {:?}", result.value);
+    }
+});
+```
+
+## Reconnection & offline
+
+The WebSocket transport reconnects automatically with exponential backoff (100 ms → 30 s, ×2, ±25 % jitter). Ops sent while disconnected are queued and replayed once the connection is restored.
+
+```rust
+use meridian_client::ConnectionState;
+
+let mut state = client.connection_state();
+tokio::spawn(async move {
+    while state.changed().await.is_ok() {
+        match *state.borrow() {
+            ConnectionState::Connected    => println!("online"),
+            ConnectionState::Disconnected => println!("offline — ops queued"),
+            _ => {}
+        }
+    }
+});
+```
+
+## Testing with FakeTransport
+
+Use `FakeTransport` to unit-test your application logic without a real server:
+
+```rust
+use std::sync::Arc;
+use meridian_client::{MeridianClient, transport::fake::FakeTransport};
+
+#[tokio::test]
+async fn my_test() {
+    let (transport, handle) = FakeTransport::new();
+    let client = MeridianClient::from_transport("test-ns", 1, transport);
+
+    let score = client.gcounter("gc:score");
+    score.increment(10).await.unwrap();
+
+    assert_eq!(score.value(), 10);
+    // Inspect messages sent to the server
+    let sent = handle.sent();
+    assert!(!sent.is_empty());
+}
+```
+
+## Example — Ratatui leaderboard
+
+The repository ships a full terminal leaderboard example in [`examples/ratatui-game/`](https://github.com/Chahine-tech/meridian/tree/main/examples/ratatui-game) demonstrating:
+
+- Multiple players each with their own GCounter
+- Live leaderboard updated on every remote change
+- Offline-resilient — reconnects automatically
+
+```bash
+cargo run -p ratatui-game -- \
+  --player alice \
+  --peers bob,charlie \
+  --token $MERIDIAN_TOKEN
+```
+
+## Features
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `ws` | ✅ | WebSocket transport via `tokio-tungstenite` |
+
+Disable `ws` and inject a custom `Transport` impl for embedded or test environments:
+
+```toml
+meridian-client = { ..., default-features = false }
+```

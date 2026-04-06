@@ -49,6 +49,7 @@
             "pages": [
               "sdk/installation",
               "sdk/client",
+              "sdk/rust",
               "sdk/error-handling",
               "sdk/react",
               "sdk/query",

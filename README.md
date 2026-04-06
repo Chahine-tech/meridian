@@ -280,6 +280,7 @@ See [`crates/meridian-edge/`](crates/meridian-edge/) for full setup.
 | [`meridian-edge`](crates/meridian-edge) | Cloudflare Workers runtime — WASM, Durable Objects |
 | [`meridian-storage`](crates/meridian-storage) | Pluggable storage backends — sled, PostgreSQL, Redis, in-memory; S3 WAL archive (`--features wal-archive-s3`) |
 | [`meridian-cluster`](crates/meridian-cluster) | Multinode clustering — Redis Pub/Sub + HTTP push transport |
+| [`meridian-client`](crates/meridian-client) | Rust client SDK — all 8 CRDT handles, WebSocket transport, `FakeTransport` for tests |
 | [`meridian-pg`](crates/meridian-pg) | Postgres extension — CRDT SQL functions + notify trigger for pg-sync |
 
 ## Postgres integration (`--features pg-sync`)
