@@ -161,7 +161,7 @@ mod tests {
     #[tokio::test]
     async fn on_change_fires() {
         let (h, _fh) = make_handle();
-        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = tokio::sync::oneshot::channel();
         let tx = std::sync::Mutex::new(Some(tx));
         let _guard = h.on_change(move |v| {
             if let Some(sender) = tx.lock().unwrap().take() {
