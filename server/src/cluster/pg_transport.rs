@@ -64,10 +64,6 @@ use crate::{
 const NOTIFY_CHANNEL: &str = "meridian_ops";
 const MAX_NOTIFY_BYTES: usize = 7_800;
 
-// ---------------------------------------------------------------------------
-// Wire format
-// ---------------------------------------------------------------------------
-
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum PgPayload<'a> {
@@ -92,11 +88,6 @@ enum PgPayloadOwned {
     Delta { origin: String, ns: String, crdt_id: String, d: String },
     State { ns: String, crdt_id: String, d: String },
 }
-
-// ---------------------------------------------------------------------------
-// State applier — merges a full CrdtValue from Postgres into the local store
-// and returns the typed delta bytes for broadcasting to WS clients.
-// ---------------------------------------------------------------------------
 
 /// Implemented by the server to merge an incoming Postgres state snapshot.
 ///
@@ -209,10 +200,6 @@ fn merge_crdt_value(target: &mut CrdtValue, source: &CrdtValue) {
         _ => {}
     }
 }
-
-// ---------------------------------------------------------------------------
-// Transport
-// ---------------------------------------------------------------------------
 
 /// Cluster transport backed by PostgreSQL NOTIFY/LISTEN.
 ///

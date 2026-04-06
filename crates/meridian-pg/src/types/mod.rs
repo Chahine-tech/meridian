@@ -7,10 +7,6 @@ pub mod tree;
 
 use meridian_core::crdt::registry::{CrdtType, CrdtValue};
 
-// ---------------------------------------------------------------------------
-// Shared helpers used by all type modules
-// ---------------------------------------------------------------------------
-
 pub(super) fn decode_crdt(bytes: &[u8]) -> Option<CrdtValue> {
     CrdtValue::from_msgpack(bytes).ok()
 }
