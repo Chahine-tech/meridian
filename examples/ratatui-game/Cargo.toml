@@ -1,0 +1,19 @@
+[package]
+name = "ratatui-game"
+version = "0.1.0"
+edition = "2024"
+description = "Multiplayer terminal leaderboard powered by Meridian CRDTs"
+
+[[bin]]
+name = "ratatui-game"
+path = "src/main.rs"
+
+[dependencies]
+meridian-client = { path = "../../crates/meridian-client" }
+
+ratatui       = "0.30"
+crossterm     = { version = "0.29", features = ["event-stream"] }
+tokio         = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tokio-stream  = { version = "0.1", features = ["time"] }
+tracing       = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
