@@ -103,6 +103,32 @@ cursors.onChange(peers => console.log("live cursors:", peers));
 client.close();
 ```
 
+### Rust
+
+```toml
+[dependencies]
+meridian-client = "0.1.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+```
+
+```rust
+use meridian_client::MeridianClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = MeridianClient::connect("ws://localhost:3000", "my-room", &token).await?;
+
+    let views = client.gcounter("gc:views");
+    views.increment(1).await?;
+    println!("views: {}", views.value());
+
+    views.on_change(|v| println!("views updated: {v}"));
+
+    client.close().await;
+    Ok(())
+}
+```
+
 ## CRDT types
 
 | Type | Use case | Example key |
