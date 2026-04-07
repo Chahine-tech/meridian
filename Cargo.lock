@@ -2716,7 +2716,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "dashmap",
@@ -2761,7 +2761,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",

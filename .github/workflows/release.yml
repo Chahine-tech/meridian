@@ -90,7 +90,7 @@ jobs:
         working-directory: crates/meridian-core
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish
+        run: cargo publish --allow-dirty
 
   publish-meridian-client:
     name: Publish meridian-client
@@ -117,7 +117,7 @@ jobs:
         working-directory: crates/meridian-client
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish
+        run: cargo publish --allow-dirty
 
   server:
     name: Build server binaries

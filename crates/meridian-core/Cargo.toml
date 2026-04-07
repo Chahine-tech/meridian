@@ -1,6 +1,6 @@
 [package]
 name = "meridian-core"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Meridian core — CRDTs, auth, protocol (no runtime dep, compiles to WASM)"
 license = "MIT"
