@@ -53,12 +53,27 @@ export const snapshotFromPNCounter = (h: PNCounterHandle): PNCounterSnapshot => 
   return { type: "pncounter", pos: s.p, neg: s.n };
 };
 
-export const snapshotFromLww = (h: LwwRegisterHandle<unknown>): LwwSnapshot => ({
+export const snapshotFromLww = (h: LwwLike): LwwSnapshot => ({
   type: "lwwregister",
   entry: h.rawEntry(),
 });
 
-export const snapshotFromORSet = (h: ORSetHandle<unknown>): ORSetSnapshot => {
+interface ORSetLike {
+  rawTags(): ReadonlyMap<string, ReadonlySet<string>>;
+  restoreSnapshot(data: ORSetSnapshot): void;
+}
+
+interface LwwLike {
+  rawEntry(): import("../sync/delta.js").LwwEntry | null;
+  applyDelta(delta: { entry: import("../sync/delta.js").LwwEntry | null }): void;
+}
+
+interface PresenceLike {
+  rawEntries(): ReadonlyMap<string, { data: unknown; expiresAtMs: number }>;
+  restoreSnapshot(data: PresenceSnapshot): void;
+}
+
+export const snapshotFromORSet = (h: ORSetLike): ORSetSnapshot => {
   const adds: Record<string, string[]> = {};
   for (const [key, tagSet] of h.rawTags()) {
     adds[key] = Array.from(tagSet);
@@ -66,7 +81,7 @@ export const snapshotFromORSet = (h: ORSetHandle<unknown>): ORSetSnapshot => {
   return { type: "orset", adds };
 };
 
-export const snapshotFromPresence = (h: PresenceHandle<unknown>): PresenceSnapshot => {
+export const snapshotFromPresence = (h: PresenceLike): PresenceSnapshot => {
   const entries: Record<string, { data: unknown; ttl_ms: number; wall_ms: number }> = {};
   for (const [key, entry] of h.rawEntries()) {
     const ttl_ms = entry.expiresAtMs - Date.now();
@@ -95,9 +110,9 @@ export const snapshotFromCRDTMap = (h: CRDTMapHandle): CRDTMapSnapshot => ({
 type AnyHandle =
   | GCounterHandle
   | PNCounterHandle
-  | LwwRegisterHandle<unknown>
-  | ORSetHandle<unknown>
-  | PresenceHandle<unknown>
+  | LwwLike
+  | ORSetLike
+  | PresenceLike
   | RGAHandle
   | TreeHandle
   | CRDTMapHandle;

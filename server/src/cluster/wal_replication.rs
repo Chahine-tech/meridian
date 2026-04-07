@@ -27,10 +27,6 @@ use tracing::{debug, info, warn};
 
 use super::pg_transport::PgStateApplier;
 
-// ---------------------------------------------------------------------------
-// Schema cache
-// ---------------------------------------------------------------------------
-
 const BYTEA_OID: u32 = 17;
 
 struct RelationSchema {
@@ -47,10 +43,6 @@ struct ColumnInfo {
     /// true if this column is part of the replica identity key
     is_key: bool,
 }
-
-// ---------------------------------------------------------------------------
-// Public entry point
-// ---------------------------------------------------------------------------
 
 /// Stream logical replication from Postgres, apply CRDT state changes.
 ///
@@ -80,10 +72,6 @@ pub async fn run<A: PgStateApplier>(
         backoff = (backoff * 2).min(MAX_BACKOFF);
     }
 }
-
-// ---------------------------------------------------------------------------
-// Single connection attempt
-// ---------------------------------------------------------------------------
 
 async fn stream_once<A: PgStateApplier>(
     connstr: &str,
@@ -130,10 +118,6 @@ async fn stream_once<A: PgStateApplier>(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Slot and publication setup
-// ---------------------------------------------------------------------------
-
 async fn ensure_slot_and_pub(
     client: &tokio_postgres::Client,
     slot_name: &str,
@@ -174,9 +158,6 @@ async fn ensure_slot_and_pub(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Config parsing
-// ---------------------------------------------------------------------------
 
 type ConnParams = (String, u16, String, String, String);
 type ParseError = Box<dyn std::error::Error + Send + Sync>;
@@ -278,10 +259,6 @@ fn parse_kv_connstr(kv: &str) -> Result<ConnParams, ParseError> {
 
     Ok((host, port, user, password, database))
 }
-
-// ---------------------------------------------------------------------------
-// pgoutput parser
-// ---------------------------------------------------------------------------
 
 async fn parse_pgoutput<A: PgStateApplier>(
     data: &[u8],
@@ -504,10 +481,6 @@ fn decode_bytea_text(raw: &[u8]) -> Vec<u8> {
         raw.to_vec()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Minimal cursor over a byte slice
-// ---------------------------------------------------------------------------
 
 struct Reader<'a> {
     data: &'a [u8],

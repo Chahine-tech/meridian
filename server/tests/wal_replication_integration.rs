@@ -28,9 +28,6 @@ async fn serial_lock() -> tokio::sync::MutexGuard<'static, ()> {
 use meridian_server::cluster::pg_transport::PgStateApplier;
 use tokio_postgres::NoTls;
 
-// ---------------------------------------------------------------------------
-// Test harness
-// ---------------------------------------------------------------------------
 
 fn base_url() -> String {
     std::env::var("MERIDIAN_TEST_PG_URL").unwrap_or_else(|_| {
@@ -172,9 +169,6 @@ impl TestDb {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Recording applier
-// ---------------------------------------------------------------------------
 
 type CallLog = Arc<Mutex<Vec<(String, String, Vec<u8>)>>>;
 
@@ -215,9 +209,6 @@ impl PgStateApplier for RecordingApplier {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Test 1: Basic INSERT — small BYTEA payload is delivered and decoded
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_insert_small_bytea() {
@@ -256,10 +247,6 @@ async fn test_insert_small_bytea() {
 
     db.cleanup().await;
 }
-
-// ---------------------------------------------------------------------------
-// Test 2: UPDATE — consumer delivers the *new* value, not the old one
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_update_delivers_new_value() {
@@ -305,10 +292,6 @@ async fn test_update_delivers_new_value() {
     db.cleanup().await;
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: Large payload > 8 KB (pg_notify would silently drop this)
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn test_large_payload_over_8kb() {
     let url = base_url();
@@ -352,10 +335,6 @@ async fn test_large_payload_over_8kb() {
 
     db.cleanup().await;
 }
-
-// ---------------------------------------------------------------------------
-// Test 4: Multiple BYTEA columns — each gets its own applier call
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_multiple_bytea_columns() {
@@ -407,10 +386,6 @@ async fn test_multiple_bytea_columns() {
 
     db.cleanup().await;
 }
-
-// ---------------------------------------------------------------------------
-// Test 5: Real CrdtValue (GCounter) — msgpack roundtrip through the WAL
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_real_gcounter_crdt_value() {
@@ -472,10 +447,6 @@ async fn test_real_gcounter_crdt_value() {
 
     db.cleanup().await;
 }
-
-// ---------------------------------------------------------------------------
-// Test 6: Reconnection — consumer recovers after Postgres drops the connection
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_consumer_reconnects_after_disconnect() {
@@ -546,10 +517,6 @@ async fn test_consumer_reconnects_after_disconnect() {
     db.cleanup().await;
 }
 
-// ---------------------------------------------------------------------------
-// Test 7: NULL BYTEA column — must NOT trigger an applier call
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn test_null_bytea_not_delivered() {
     let url = base_url();
@@ -597,10 +564,6 @@ async fn test_null_bytea_not_delivered() {
 
     db.cleanup().await;
 }
-
-// ---------------------------------------------------------------------------
-// Test 8: Non-BYTEA columns — must NOT trigger applier calls
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_non_bytea_columns_ignored() {

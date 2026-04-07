@@ -29,10 +29,6 @@ function stubTransport(): WsTransport {
   } as unknown as WsTransport;
 }
 
-// ---------------------------------------------------------------------------
-// 1. ORSet snapshot round-trip
-// ---------------------------------------------------------------------------
-
 describe("ORSet snapshot", () => {
   it("round-trips elements through snapshot → bytes → restore", () => {
     const t = stubTransport();
@@ -84,10 +80,6 @@ describe("ORSet snapshot", () => {
     expect(restored.elements()).toEqual(["banana"]);
   });
 });
-
-// ---------------------------------------------------------------------------
-// 2. Pending op queue — SyncStateStorage round-trip
-// ---------------------------------------------------------------------------
 
 describe("SyncStateStorage op queue", () => {
   it("encodes and decodes a queue of ClientMsg-shaped objects", () => {

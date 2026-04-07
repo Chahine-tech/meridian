@@ -34,9 +34,6 @@ fn run_notify(channel: &str, payload: &str) -> Result<(), pgrx::spi::SpiError> {
     Spi::run(&format!("SELECT pg_notify('{channel}', '{escaped}')"))
 }
 
-// ---------------------------------------------------------------------------
-// Trigger function (placed in the meridian schema)
-// ---------------------------------------------------------------------------
 
 #[pg_schema]
 mod meridian {
@@ -143,9 +140,6 @@ mod meridian {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pg_schema]

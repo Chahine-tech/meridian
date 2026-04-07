@@ -71,6 +71,27 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+  crates-publish:
+    name: Publish Rust crates
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: publish meridian-core
+        run: cargo publish -p meridian-core --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # crates.io needs a moment to index the new version before dependents can publish
+      - name: wait for crates.io index
+        run: sleep 30
+
+      - name: publish meridian-client
+        run: cargo publish -p meridian-client --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
   server:
     name: Build server binaries
     runs-on: ubuntu-latest
