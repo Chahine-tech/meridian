@@ -72,8 +72,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  crates-publish:
-    name: Publish Rust crates
+  publish-meridian-core:
+    name: Publish meridian-core
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/rust-v')
     steps:
@@ -81,26 +81,39 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2
+      - name: set version from git tag
+        run: |
+          VERSION=${GITHUB_REF_NAME#rust-v}
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" crates/meridian-core/Cargo.toml
 
-      - name: set crate versions from git tag
+      - name: publish
+        working-directory: crates/meridian-core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish
+
+  publish-meridian-client:
+    name: Publish meridian-client
+    runs-on: ubuntu-latest
+    needs: publish-meridian-core
+    if: startsWith(github.ref, 'refs/tags/rust-v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: set version from git tag
         run: |
           VERSION=${GITHUB_REF_NAME#rust-v}
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" crates/meridian-core/Cargo.toml
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" crates/meridian-client/Cargo.toml
           sed -i "s/meridian-core = { version = \".*\"/meridian-core = { version = \"$VERSION\"/" crates/meridian-client/Cargo.toml
 
-      - name: publish meridian-core
-        working-directory: crates/meridian-core
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish
-
-      # crates.io needs time to index before dependents can resolve the new version
+      # Wait for crates.io to index meridian-core before publishing the dependent
       - name: wait for crates.io index
         run: sleep 60
 
-      - name: publish meridian-client
+      - name: publish
         working-directory: crates/meridian-client
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
