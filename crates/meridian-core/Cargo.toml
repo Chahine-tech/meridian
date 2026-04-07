@@ -2,6 +2,12 @@
 name = "meridian-core"
 version = "0.1.0"
 edition = "2024"
+description = "Meridian core — CRDTs, auth, protocol (no runtime dep, compiles to WASM)"
+license = "MIT"
+repository = "https://github.com/Chahine-tech/meridian"
+homepage = "https://github.com/Chahine-tech/meridian"
+keywords = ["crdt", "realtime", "sync", "wasm", "collaborative"]
+categories = ["data-structures", "network-programming", "wasm"]
 
 [dependencies]
 # Serialization

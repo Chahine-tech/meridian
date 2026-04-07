@@ -2,11 +2,15 @@
 name = "meridian-client"
 version = "0.1.0"
 edition = "2024"
-description = "Rust client SDK for Meridian — real-time CRDT sync"
+description = "Rust client SDK for Meridian — real-time CRDT sync over WebSocket"
 license = "MIT"
+repository = "https://github.com/Chahine-tech/meridian"
+homepage = "https://github.com/Chahine-tech/meridian"
+keywords = ["crdt", "realtime", "sync", "websocket", "collaborative"]
+categories = ["network-programming", "asynchronous", "data-structures"]
 
 [dependencies]
-meridian-core = { path = "../meridian-core" }
+meridian-core = { version = "0.1.0", path = "../meridian-core" }
 
 tokio  = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"], optional = true }
