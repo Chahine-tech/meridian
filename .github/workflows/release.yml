@@ -74,7 +74,7 @@ jobs:
   crates-publish:
     name: Publish Rust crates
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/rust-v')
     steps:
       - uses: actions/checkout@v4
 
@@ -84,10 +84,9 @@ jobs:
 
       - name: set crate versions from git tag
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${GITHUB_REF_NAME#rust-v}
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" crates/meridian-core/Cargo.toml
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" crates/meridian-client/Cargo.toml
-          # Update the meridian-core dependency version in meridian-client
           sed -i "s/meridian-core = { version = \".*\"/meridian-core = { version = \"$VERSION\"/" crates/meridian-client/Cargo.toml
 
       - name: publish meridian-core
