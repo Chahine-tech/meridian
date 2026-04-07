@@ -1,5 +1,12 @@
 # meridian-cli
 
+## 1.1.6
+
+### Patch Changes
+
+- Updated dependencies [ef364b6]
+  - meridian-sdk@1.5.0
+
 ## 1.1.5
 
 ### Patch Changes
