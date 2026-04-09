@@ -107,7 +107,7 @@ pub struct TreeDelta {
 }
 
 /// Recursive tree node as delivered to clients.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TreeNodeValue {
     /// HLC serialized as "wall_ms:logical:node_id" — avoids JS bigint issues.
     pub id: String,
@@ -118,7 +118,7 @@ pub struct TreeNodeValue {
 }
 
 /// The root-level value returned by `TreeCrdt::value()`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TreeValue {
     pub roots: Vec<TreeNodeValue>,
 }

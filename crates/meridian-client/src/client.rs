@@ -74,7 +74,8 @@ impl MeridianClient {
         token: &str,
     ) -> Result<Arc<Self>, ClientError> {
         let transport = crate::transport::ws::WsTransport::connect(url, namespace, token).await?;
-        Ok(Self::from_transport(namespace, 0, transport))
+        let client_id = rand::random::<u64>();
+        Ok(Self::from_transport(namespace, client_id, transport))
     }
 
     /// Create a client from an existing transport. Used in tests with `FakeTransport`.

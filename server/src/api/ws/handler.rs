@@ -326,7 +326,6 @@ async fn handle_client_message<S: WsState>(
 
             let server_now = now_ms();
 
-            // Phase 1: decode + validate all ops before touching any state.
             struct Parsed { crdt_id: String, op: CrdtOp, ttl_ms: Option<u64> }
             let mut parsed: Vec<Parsed> = Vec::with_capacity(ops.len());
             for BatchItem { crdt_id, op_bytes, ttl_ms } in ops {
@@ -350,7 +349,6 @@ async fn handle_client_message<S: WsState>(
                 parsed.push(Parsed { crdt_id, op, ttl_ms });
             }
 
-            // Phase 2: apply all ops and collect deltas + messages to broadcast.
             let mut delta_count = 0usize;
             let mut broadcast_msgs: Vec<Arc<ServerMsg>> = Vec::new();
             #[cfg(any(feature = "cluster", feature = "cluster-http"))]
@@ -393,8 +391,7 @@ async fn handle_client_message<S: WsState>(
                     }
                 }
             }
-
-            // Phase 3: fan-out all deltas atomically.
+            
             for msg in broadcast_msgs {
                 state.subscriptions().publish(ns, msg);
             }

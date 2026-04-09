@@ -133,6 +133,8 @@ export class TreeHandle {
    * @param ttlMs       - Optional TTL.
    */
   moveNode(nodeId: string, newParentId: string | null, newPosition: string, ttlMs?: number): void {
+    if (this.parseHlc(nodeId) === null) return;
+    if (newParentId !== null && this.parseHlc(newParentId) === null) return;
     const wallMs = Date.now();
     const logical = this.opCounter++;
     const opId = { wall_ms: wallMs, logical, node_id: this.clientId };
@@ -171,6 +173,7 @@ export class TreeHandle {
    * @param ttlMs   - Optional TTL.
    */
   updateNode(nodeId: string, value: string, ttlMs?: number): void {
+    if (this.parseHlc(nodeId) === null) return;
     runValidator(this.validator, value);
     const wallMs = Date.now();
     const logical = this.opCounter++;
@@ -210,6 +213,7 @@ export class TreeHandle {
    * @param ttlMs  - Optional TTL.
    */
   deleteNode(nodeId: string, ttlMs?: number): void {
+    if (this.parseHlc(nodeId) === null) return;
     const op = encode({
       Tree: {
         DeleteNode: {
@@ -356,8 +360,9 @@ export class TreeHandle {
   }
 
   /** Parse an HLC string "wall_ms:logical:node_id" back to a Rust-compatible object. */
-  private parseHlc(id: string): { wall_ms: number; logical: number; node_id: number } {
+  private parseHlc(id: string): { wall_ms: number; logical: number; node_id: number } | null {
     const parts = id.split(":");
+    if (parts.length !== 3) return null;
     return {
       wall_ms: Number(parts[0]),
       logical: Number(parts[1]),

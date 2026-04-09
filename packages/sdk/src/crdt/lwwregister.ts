@@ -1,4 +1,4 @@
-import { Chunk, Effect, Schema, Stream } from "effect";
+import { Chunk, Effect, Option, Schema, Stream } from "effect";
 import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { LwwDelta, LwwEntry } from "../sync/delta.js";
@@ -105,11 +105,11 @@ export class LwwRegisterHandle<T> {
     }
   }
 
-  private decode(raw: unknown): T {
+  private decode(raw: unknown): T | null {
     if (this.schema !== null) {
-      return Schema.decodeUnknownSync(this.schema)(raw);
+      return Option.getOrNull(Schema.decodeUnknownOption(this.schema)(raw));
     }
-    // HACK: No schema provided — T defaults to unknown, cast is the caller's responsibility.
+    // No schema provided — T defaults to unknown, cast is the caller's responsibility.
     return raw as T;
   }
 

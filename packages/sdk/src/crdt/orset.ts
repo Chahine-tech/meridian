@@ -1,4 +1,4 @@
-import { Chunk, Effect, Schema, Stream } from "effect";
+import { Chunk, Effect, Option, Schema, Stream } from "effect";
 import { encode, uuidToBytes } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { ORSetDelta } from "../sync/delta.js";
@@ -36,7 +36,10 @@ export class ORSetHandle<T> {
   elements(): T[] {
     return Array.from(this.tags.keys())
       .filter(k => (this.tags.get(k)?.size ?? 0) > 0)
-      .map(k => this.decode(JSON.parse(k)));
+      .flatMap(k => {
+        const decoded = this.decode(JSON.parse(k));
+        return decoded !== null ? [decoded] : [];
+      });
   }
 
   /** Returns `true` if the set currently contains `element`. */
@@ -151,9 +154,9 @@ export class ORSetHandle<T> {
     if (changed) this.emit();
   }
 
-  private decode(raw: unknown): T {
+  private decode(raw: unknown): T | null {
     if (this.schema !== null) {
-      return Schema.decodeUnknownSync(this.schema)(raw);
+      return Option.getOrNull(Schema.decodeUnknownOption(this.schema)(raw));
     }
     return raw as T;
   }

@@ -113,6 +113,7 @@ export class RGAHandle {
    */
   deleteById(hlcString: string, ttlMs?: number): void {
     const parts = hlcString.split(":");
+    if (parts.length !== 3) return;
     const id = {
       wall_ms: Number(parts[0]),
       logical: Number(parts[1]),

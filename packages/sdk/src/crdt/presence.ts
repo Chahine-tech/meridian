@@ -1,4 +1,4 @@
-import { Chunk, Effect, Schema, Stream } from "effect";
+import { Chunk, Effect, Option, Schema, Stream } from "effect";
 import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
 import type { PresenceDelta, PresenceEntryDelta } from "../sync/delta.js";
@@ -159,9 +159,9 @@ export class PresenceHandle<T> {
     if (changed) this.emit();
   }
 
-  private decode(raw: unknown): T {
+  private decode(raw: unknown): T | null {
     if (this.schema !== null) {
-      return Schema.decodeUnknownSync(this.schema)(raw);
+      return Option.getOrNull(Schema.decodeUnknownOption(this.schema)(raw));
     }
     return raw as T;
   }
@@ -172,11 +172,9 @@ export class PresenceHandle<T> {
 
     if (existing === undefined) {
       if (incoming.ttl_ms > 0) {
-        this.entries.set(clientIdStr, {
-          clientId: Number(clientIdStr),
-          data: this.decode(incoming.data),
-          expiresAtMs: incomingExpiresAt,
-        });
+        const data = this.decode(incoming.data);
+        if (data === null) return false;
+        this.entries.set(clientIdStr, { clientId: Number(clientIdStr), data, expiresAtMs: incomingExpiresAt });
         return true;
       }
       return false;
@@ -186,11 +184,9 @@ export class PresenceHandle<T> {
       if (incoming.ttl_ms === 0) {
         this.entries.delete(clientIdStr);
       } else {
-        this.entries.set(clientIdStr, {
-          clientId: Number(clientIdStr),
-          data: this.decode(incoming.data),
-          expiresAtMs: incomingExpiresAt,
-        });
+        const data = this.decode(incoming.data);
+        if (data === null) return false;
+        this.entries.set(clientIdStr, { clientId: Number(clientIdStr), data, expiresAtMs: incomingExpiresAt });
       }
       return true;
     }
