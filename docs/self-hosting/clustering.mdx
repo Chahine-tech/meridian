@@ -16,7 +16,7 @@ Two transport modes are available depending on your infrastructure:
 
 ## How it works
 
-### Real-time fan-out (Phase 1)
+### Real-time fan-out
 
 When a node receives a write (HTTP or WebSocket), it:
 
@@ -26,7 +26,7 @@ When a node receives a write (HTTP or WebSocket), it:
 
 Peers receive the delta and forward it to their local WebSocket subscribers — clients see the update in real time regardless of which node they're connected to.
 
-### Anti-entropy gossip (Phase 2)
+### Anti-entropy gossip
 
 Every 30 seconds (configurable), each node replays its recent WAL entries and re-broadcasts any deltas that peers may have missed. This guarantees convergence after:
 

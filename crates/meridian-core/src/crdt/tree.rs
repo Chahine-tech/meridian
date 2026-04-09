@@ -107,7 +107,7 @@ pub struct TreeDelta {
 }
 
 /// Recursive tree node as delivered to clients.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TreeNodeValue {
     /// HLC serialized as "wall_ms:logical:node_id" — avoids JS bigint issues.
     pub id: String,
@@ -118,7 +118,7 @@ pub struct TreeNodeValue {
 }
 
 /// The root-level value returned by `TreeCrdt::value()`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TreeValue {
     pub roots: Vec<TreeNodeValue>,
 }
@@ -431,10 +431,24 @@ impl Crdt for TreeCrdt {
                     id: node.id,
                     parent_id: node.parent_id,
                     position: node.position.clone(),
+                    // Emit the original value; if updated_at > id, we emit an
+                    // UpdateNode below (after this block) to carry the latest value.
                     value: node.value.clone(),
                 });
                 if node.deleted {
                     ops.push(TreeOp::DeleteNode { id: node.id });
+                }
+            } else if node.updated_at != node.id {
+                // Node was seen (AddNode received), but a subsequent UpdateNode may
+                // not have been. Emit UpdateNode if the client hasn't seen updated_at.
+                let seen_update = since.get(node.updated_at.node_id);
+                let logical_update = u32::from(node.updated_at.logical);
+                if seen_update < logical_update {
+                    ops.push(TreeOp::UpdateNode {
+                        id: node.id,
+                        value: node.value.clone(),
+                        updated_at: node.updated_at,
+                    });
                 }
             }
         }

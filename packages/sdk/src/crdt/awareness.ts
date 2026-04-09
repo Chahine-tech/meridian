@@ -1,4 +1,4 @@
-import { Chunk, Effect, Schema as S, Stream } from "effect";
+import { Chunk, Effect, Option, Schema as S, Stream } from "effect";
 import type { Schema } from "effect";
 import { encode, decode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
@@ -89,8 +89,9 @@ export class AwarenessHandle<T = unknown> {
     }
 
     const data = this.schema
-      ? S.decodeUnknownSync(this.schema)(decoded)
+      ? Option.getOrNull(S.decodeUnknownOption(this.schema)(decoded))
       : (decoded as T);
+    if (data === null) return;
 
     const existing = this.entries.get(fromClientId);
     this.entries.set(fromClientId, {

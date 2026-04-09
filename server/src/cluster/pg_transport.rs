@@ -14,7 +14,6 @@
 //     before forwarding to subscribers — so clients always receive correct deltas.
 //
 // Large payloads (> ~7 800 bytes) are silently dropped — use logical
-// replication (Phase 4) for large RGA / Tree documents.
 //
 // Anti-entropy (reconnect resync):
 //

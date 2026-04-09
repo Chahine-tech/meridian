@@ -282,8 +282,6 @@ impl DurableObject for NsObject {
                 }
 
                 let now_ms = js_sys::Date::now() as u64;
-
-                // --- Phase 1: decode + validate all ops before touching any state ---
                 struct ParsedItem {
                     crdt_id: String,
                     op: CrdtOp,
@@ -308,11 +306,8 @@ impl DurableObject for NsObject {
                     parsed.push(ParsedItem { crdt_id, op, op_bytes: op_bytes.into_vec(), ttl_ms });
                 }
 
-                // --- Phase 2: write one WAL entry per op ---
                 // Each op is stored individually so anti-entropy and point-in-time
                 // recovery can replay them one by one using the standard path.
-                // Client-side atomicity (all-or-nothing visibility) is provided by
-                // the grouped fan-out in Phase 4, not by the WAL.
                 for item in &parsed {
                     if self.append_wal(&item.crdt_id, &item.op_bytes).await.is_err() {
                         let err = ServerMsg::Error { code: 503, message: "wal write failed".into() };
@@ -322,7 +317,6 @@ impl DurableObject for NsObject {
                 }
                 self.touch_activity().await;
 
-                // --- Phase 3: apply all ops and collect deltas ---
                 let mut delta_count = 0usize;
                 let mut all_msg_bytes: Vec<Vec<u8>> = Vec::new();
                 for item in &parsed {
@@ -353,7 +347,6 @@ impl DurableObject for NsObject {
                     }
                 }
 
-                // --- Phase 4: fan-out all deltas together to every connected client ---
                 let all_sockets = self.state.get_websockets();
                 for msg_bytes in &all_msg_bytes {
                     for sock in &all_sockets {

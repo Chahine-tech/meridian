@@ -150,11 +150,11 @@ export const restoreSnapshotToHandle = (snap: CRDTSnapshot, handle: AnyHandle): 
     return;
   }
   if (snap.type === "rga" && handle instanceof RGAHandle) {
-    handle.applyDelta({ text: snap.text });
+    handle.restoreSnapshot(snap.text);
     return;
   }
   if (snap.type === "tree" && handle instanceof TreeHandle) {
-    handle.applyDelta({ roots: snap.roots });
+    handle.restoreSnapshot(snap.roots);
     return;
   }
   if (snap.type === "crdtmap" && handle instanceof CRDTMapHandle) {

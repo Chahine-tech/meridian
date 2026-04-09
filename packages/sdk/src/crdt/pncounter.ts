@@ -16,6 +16,7 @@ export interface PNCounterState {
  */
 export class PNCounterHandle {
   private state: PNCounterState;
+  private readonly ns: string;
   private readonly clientId: number;
   private readonly crdtId: string;
   private readonly transport: WsTransport;
@@ -28,6 +29,7 @@ export class PNCounterHandle {
     transport: WsTransport;
     initial?: PNCounterState;
   }) {
+    this.ns = opts.ns;
     this.crdtId = opts.crdtId;
     this.clientId = opts.clientId;
     this.transport = opts.transport;

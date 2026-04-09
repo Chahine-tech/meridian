@@ -54,6 +54,7 @@ impl TreeHandle {
         self.0.watch_tx.subscribe()
     }
 
+    #[must_use = "dropping the JoinHandle cancels the subscription"]
     pub fn on_change<F>(&self, f: F) -> tokio::task::JoinHandle<()>
     where
         F: Fn(Vec<TreeNodeValue>) + Send + 'static,
@@ -152,8 +153,7 @@ impl TreeHandle {
     fn notify(&self, state: &TreeCrdt) {
         let roots = state.value().roots;
         let _ = self.0.watch_tx.send_if_modified(|v| {
-            // Simple length check to avoid deep comparison on every delta
-            if v.len() != roots.len() { *v = roots; return true; }
+            if *v == roots { return false; }
             *v = roots;
             true
         });

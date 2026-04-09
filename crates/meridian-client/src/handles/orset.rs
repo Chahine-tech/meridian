@@ -77,6 +77,7 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> ORSetHandle<T> {
         self.inner.watch_tx.subscribe()
     }
 
+    #[must_use = "dropping the JoinHandle cancels the subscription"]
     pub fn on_change<F>(&self, f: F) -> tokio::task::JoinHandle<()>
     where
         F: Fn(Vec<serde_json::Value>) + Send + 'static,

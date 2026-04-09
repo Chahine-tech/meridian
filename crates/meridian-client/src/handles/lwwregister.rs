@@ -78,6 +78,7 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> LwwRegisterHandle<
     }
 
     /// Register a callback invoked on each value change.
+    #[must_use = "dropping the JoinHandle cancels the subscription"]
     pub fn on_change<F>(&self, f: F) -> tokio::task::JoinHandle<()>
     where
         F: Fn(Option<serde_json::Value>) + Send + 'static,

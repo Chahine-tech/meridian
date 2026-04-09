@@ -61,6 +61,7 @@ impl GCounterHandle {
 
     /// Register a callback invoked whenever the value changes.
     /// Returns a `JoinHandle` — dropping it cancels the subscription.
+    #[must_use = "dropping the JoinHandle cancels the subscription"]
     pub fn on_change<F>(&self, f: F) -> tokio::task::JoinHandle<()>
     where
         F: Fn(u64) + Send + 'static,

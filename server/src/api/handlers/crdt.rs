@@ -12,7 +12,7 @@ use crate::{
     crdt::{
         clock::now_ms,
         ops::{apply_op_atomic, ApplyError},
-        registry::CrdtOp,
+        registry::{validate_clock_drift, CrdtOp},
         VectorClock,
     },
     metrics,
@@ -81,20 +81,13 @@ pub async fn post_op<S: AppStateExt>(
             .into_response();
     }
 
-    // Validate HLC clock drift for LwwRegister ops (piège critique)
-    if let CrdtOp::LwwRegister(ref lww_op) = op {
-        let now = now_ms();
-        let drift = now.abs_diff(lww_op.hlc.wall_ms);
-        if drift > 30_000 {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": "clock_drift",
-                    "detail": format!("HLC drift of {drift}ms exceeds 30s limit")
-                })),
-            )
-                .into_response();
-        }
+    // Validate HLC clock drift for ops that carry a client timestamp (LwwRegister, Presence).
+    if let Err(e) = validate_clock_drift(&op, now_ms()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "clock_drift", "detail": e.to_string() })),
+        )
+            .into_response();
     }
 
     // HTTP API does not expose TTL — pass None (permanent entry).

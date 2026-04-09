@@ -72,13 +72,25 @@ export const decodePresenceDelta = (bytes: Uint8Array): PresenceDelta => {
   return { changes: raw.changes ?? {} };
 };
 
+export interface RgaHlc {
+  wall_ms: number | bigint;
+  logical: number;
+  node_id: number | bigint;
+}
+
+export type RgaOp =
+  | { Insert: { id: RgaHlc; origin_id: RgaHlc | null; content: string } }
+  | { Delete: { id: RgaHlc } };
+
 export interface RGADelta {
-  text: string;
+  ops?: RgaOp[];
+  /** Legacy / snapshot format: rendered text string. Used by tests and snapshot restore. */
+  text?: string;
 }
 
 export const decodeRGADelta = (bytes: Uint8Array): RGADelta => {
-  const raw = decode(bytes) as { text?: string };
-  return { text: raw.text ?? "" };
+  const raw = decode(bytes) as { ops?: RgaOp[] };
+  return { ops: raw.ops ?? [] };
 };
 
 export interface TreeNodeValue {
@@ -98,15 +110,33 @@ export interface DiscardedMove {
   actual_position: string;
 }
 
+export interface TreeHlc {
+  wall_ms: number | bigint;
+  logical: number;
+  node_id: number | bigint;
+}
+
+export type TreeOp =
+  | { AddNode: { id: TreeHlc; parent_id: TreeHlc | null; position: string; value: string } }
+  | { MoveNode: { op_id: TreeHlc; node_id: TreeHlc; new_parent_id: TreeHlc | null; new_position: string } }
+  | { UpdateNode: { id: TreeHlc; value: string; updated_at: TreeHlc } }
+  | { DeleteNode: { id: TreeHlc } };
+
 export interface TreeDelta {
-  roots: TreeNodeValue[];
+  ops?: TreeOp[];
   /** MoveNode ops discarded due to cycle prevention. Empty in the common case. */
   discarded_moves?: DiscardedMove[];
+  /**
+   * Legacy / snapshot format: hierarchical roots array.
+   * Accepted by applyDelta for conflict detection against nodeMetaMap.
+   * Not emitted by the server — used by tests and snapshot restore paths.
+   */
+  roots?: TreeNodeValue[];
 }
 
 export const decodeTreeDelta = (bytes: Uint8Array): TreeDelta => {
-  const raw = decode(bytes) as { roots?: TreeNodeValue[]; discarded_moves?: DiscardedMove[] };
-  return { roots: raw.roots ?? [], discarded_moves: raw.discarded_moves ?? [] };
+  const raw = decode(bytes) as { ops?: TreeOp[]; discarded_moves?: DiscardedMove[] };
+  return { ops: raw.ops ?? [], discarded_moves: raw.discarded_moves ?? [] };
 };
 
 export type CrdtValueDelta =

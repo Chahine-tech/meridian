@@ -291,6 +291,8 @@ export class WsTransport {
             (msg) => {
               if ("Ack" in msg && msg.Ack.client_seq !== undefined) {
                 this.recordAck(msg.Ack.client_seq);
+              } else if ("BatchAck" in msg && msg.BatchAck.client_seq !== undefined) {
+                this.recordAck(msg.BatchAck.client_seq);
               }
               this.config.onMessage(msg);
             },
@@ -363,7 +365,7 @@ export class WsTransport {
             break;
           }
           try {
-            this.ws.send(encodeClientMsg(this.tagOp(next.value)));
+            this.ws.send(encodeClientMsg(next.value));
           } catch {
             yield* Queue.offer(this.pendingQueue, next.value);
             break;

@@ -54,6 +54,7 @@ impl RgaHandle {
         self.0.watch_tx.subscribe()
     }
 
+    #[must_use = "dropping the JoinHandle cancels the subscription"]
     pub fn on_change<F>(&self, f: F) -> tokio::task::JoinHandle<()>
     where
         F: Fn(String) + Send + 'static,
