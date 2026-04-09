@@ -312,13 +312,20 @@ export class TreeHandle {
   /**
    * Apply a delta received from the server.
    *
-   * Applies each TreeOp (AddNode / MoveNode / UpdateNode / DeleteNode) to the
-   * flat node store, then rebuilds the hierarchical roots view and emits.
+   * Accepts either the op-based wire format `{ ops }` or the legacy roots format
+   * `{ roots }` (used by tests and snapshot paths). The ops-based path applies
+   * each TreeOp to the flat node store; the roots-based path walks the incoming
+   * tree and detects conflicts against the local nodeMetaMap.
    */
   applyDelta(delta: TreeDelta): void {
     this.emitDiscardedMoveConflicts(delta.discarded_moves ?? []);
 
-    for (const op of delta.ops) {
+    if (delta.roots !== undefined) {
+      this.applyRootsDelta(delta.roots);
+      return;
+    }
+
+    for (const op of (delta.ops ?? [])) {
       if ("AddNode" in op) {
         const { id, parent_id, position, value } = op.AddNode;
         const idStr = this.hlcToStr(id);
@@ -380,6 +387,60 @@ export class TreeHandle {
       }
     }
 
+    this.roots = this.buildRoots();
+    this.syncMetaMapFromFlatNodes();
+    this.emit();
+  }
+
+  /**
+   * Apply a roots-based delta (legacy / test format).
+   * Walks the incoming tree recursively, upserts nodes into flatNodes,
+   * and detects conflicts against nodeMetaMap.
+   */
+  private applyRootsDelta(roots: TreeNodeValue[]): void {
+    const walk = (nodes: TreeNodeValue[], parentId: string | null): void => {
+      for (const node of nodes) {
+        const existing = this.flatNodes.get(node.id);
+        const meta = this.nodeMetaMap.get(node.id);
+
+        if (existing) {
+          // Conflict detection: position/parent changed vs local optimistic.
+          if (meta && (meta.parentId !== parentId || meta.position !== node.position)) {
+            this.emitConflict({
+              kind: "move_reordered",
+              nodeId: node.id,
+              localParentId: meta.parentId,
+              localPosition: meta.position,
+              serverParentId: parentId,
+              serverPosition: node.position,
+              at: Date.now(),
+            } satisfies import("../conflict/types.js").MoveReorderedEvent);
+          }
+          // LWW conflict: value changed vs local optimistic.
+          if (meta && meta.value !== node.value) {
+            this.emitConflict({
+              kind: "lww_overwrite",
+              nodeId: node.id,
+              discardedValue: meta.value,
+              winnerValue: node.value,
+              at: Date.now(),
+            } satisfies import("../conflict/types.js").LwwOverwriteEvent);
+          }
+          existing.parentId = parentId;
+          existing.position = node.position;
+          existing.value = node.value;
+          existing.deleted = false;
+        } else {
+          this.flatNodes.set(node.id, {
+            id: node.id, parentId, position: node.position, value: node.value,
+            deleted: false, updatedAt: node.id,
+          });
+        }
+
+        walk(node.children, node.id);
+      }
+    };
+    walk(roots, null);
     this.roots = this.buildRoots();
     this.syncMetaMapFromFlatNodes();
     this.emit();

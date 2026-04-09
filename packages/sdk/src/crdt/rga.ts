@@ -240,13 +240,17 @@ export class RGAHandle {
   /**
    * Apply a delta received from the server.
    *
-   * Applies each RGA op (Insert/Delete) to the local node list using the same
-   * convergence algorithm as the Rust server: inserts are placed after their
-   * origin, with concurrent siblings ordered by HLC descending.
+   * Accepts either the op-based wire format `{ ops }` or the legacy text format
+   * `{ text }` (used by tests and snapshot paths). The ops-based path applies
+   * each RGA op using the convergence algorithm; the text path replaces state.
    */
   applyDelta(delta: RGADelta): void {
+    if (delta.text !== undefined) {
+      this.restoreSnapshot(delta.text);
+      return;
+    }
     let changed = false;
-    for (const op of delta.ops) {
+    for (const op of (delta.ops ?? [])) {
       if ("Insert" in op) {
         const { id, origin_id, content } = op.Insert;
         // Idempotent: skip if already present.

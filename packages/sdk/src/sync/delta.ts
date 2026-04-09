@@ -83,7 +83,9 @@ export type RgaOp =
   | { Delete: { id: RgaHlc } };
 
 export interface RGADelta {
-  ops: RgaOp[];
+  ops?: RgaOp[];
+  /** Legacy / snapshot format: rendered text string. Used by tests and snapshot restore. */
+  text?: string;
 }
 
 export const decodeRGADelta = (bytes: Uint8Array): RGADelta => {
@@ -121,9 +123,15 @@ export type TreeOp =
   | { DeleteNode: { id: TreeHlc } };
 
 export interface TreeDelta {
-  ops: TreeOp[];
+  ops?: TreeOp[];
   /** MoveNode ops discarded due to cycle prevention. Empty in the common case. */
   discarded_moves?: DiscardedMove[];
+  /**
+   * Legacy / snapshot format: hierarchical roots array.
+   * Accepted by applyDelta for conflict detection against nodeMetaMap.
+   * Not emitted by the server — used by tests and snapshot restore paths.
+   */
+  roots?: TreeNodeValue[];
 }
 
 export const decodeTreeDelta = (bytes: Uint8Array): TreeDelta => {
