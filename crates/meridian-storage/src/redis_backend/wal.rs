@@ -188,18 +188,10 @@ async fn xrange(conn: &mut MultiplexedConnection, start: &str, end: &str) -> Res
                 let seq = stream_id_to_seq(&id);
 
                 if let redis::Value::Array(fields) = &parts[1] {
-                    let map = fields_to_map(fields);
-                    let namespace = map.get("namespace").cloned().unwrap_or_default();
-                    let crdt_id = map.get("crdt_id").cloned().unwrap_or_default();
-                    let op_bytes = map
-                        .get("op_bytes")
-                        .map(|s| s.as_bytes().to_vec())
-                        .unwrap_or_default();
-                    let timestamp_ms: u64 = map
-                        .get("timestamp_ms")
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(0);
+                    let parsed = fields_to_wal_fields(fields);
+                    if let Some((namespace, crdt_id, op_bytes, timestamp_ms)) = parsed {
                     entries.push(WalEntry { seq, namespace, crdt_id, op_bytes, timestamp_ms });
+                    }
                 }
             }
         }
@@ -208,19 +200,46 @@ async fn xrange(conn: &mut MultiplexedConnection, start: &str, end: &str) -> Res
     Ok(entries)
 }
 
-fn fields_to_map(fields: &[redis::Value]) -> std::collections::HashMap<String, String> {
-    let mut map = std::collections::HashMap::new();
+/// Parse Redis hash fields (alternating key/value BulkString pairs) into typed WAL fields.
+///
+/// `op_bytes` is kept as raw bytes — converting to String via `from_utf8_lossy` would
+/// corrupt arbitrary binary payloads. All other fields are valid UTF-8.
+fn fields_to_wal_fields(fields: &[redis::Value]) -> Option<(String, String, Vec<u8>, u64)> {
+    let mut namespace = None::<String>;
+    let mut crdt_id = None::<String>;
+    let mut op_bytes = None::<Vec<u8>>;
+    let mut timestamp_ms = None::<u64>;
+
     let mut iter = fields.iter();
     while let (Some(k), Some(v)) = (iter.next(), iter.next()) {
         let key = match k {
             redis::Value::BulkString(b) => String::from_utf8_lossy(b).to_string(),
             _ => continue,
         };
-        let val = match v {
-            redis::Value::BulkString(b) => String::from_utf8_lossy(b).to_string(),
-            _ => continue,
-        };
-        map.insert(key, val);
+        match key.as_str() {
+            "namespace" => {
+                if let redis::Value::BulkString(b) = v {
+                    namespace = Some(String::from_utf8_lossy(b).to_string());
+                }
+            }
+            "crdt_id" => {
+                if let redis::Value::BulkString(b) = v {
+                    crdt_id = Some(String::from_utf8_lossy(b).to_string());
+                }
+            }
+            "op_bytes" => {
+                if let redis::Value::BulkString(b) = v {
+                    op_bytes = Some(b.clone());
+                }
+            }
+            "timestamp_ms" => {
+                if let redis::Value::BulkString(b) = v {
+                    timestamp_ms = String::from_utf8_lossy(b).parse().ok();
+                }
+            }
+            _ => {}
+        }
     }
-    map
+
+    Some((namespace?, crdt_id?, op_bytes?, timestamp_ms.unwrap_or(0)))
 }

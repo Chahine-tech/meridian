@@ -112,6 +112,7 @@ export const ServerMsg = Schema.Union(
     }),
   }),
   Schema.Struct({ Ack: Schema.Struct({ seq: Schema.Number, client_seq: Schema.optional(Schema.Number) }) }),
+  Schema.Struct({ BatchAck: Schema.Struct({ seq: Schema.Number, count: Schema.Number, client_seq: Schema.optional(Schema.Number) }) }),
   Schema.Struct({
     Error: Schema.Struct({ code: Schema.Number, message: Schema.String }),
   }),

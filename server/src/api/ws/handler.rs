@@ -412,7 +412,7 @@ async fn handle_client_message<S: WsState>(
         ClientMsg::AwarenessUpdate { key, data } => {
             // Stateless fan-out — no persistence, no ack.
             let broadcast_msg = Arc::new(ServerMsg::AwarenessBroadcast {
-                client_id: 0,
+                client_id,
                 key,
                 data,
             });
