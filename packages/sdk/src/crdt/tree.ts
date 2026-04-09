@@ -27,8 +27,19 @@ export interface TreeNodeMeta {
 /** Maximum number of conflict events retained in the in-memory log. */
 const CONFLICT_LOG_CAP = 200;
 
+interface FlatTreeNode {
+  id: string;
+  parentId: string | null;
+  position: string;
+  value: string;
+  deleted: boolean;
+  updatedAt: string;
+}
+
 export class TreeHandle {
   private roots: TreeNodeValue[] = [];
+  /** Flat node store keyed by HLC string — source of truth for applying ops. */
+  private readonly flatNodes = new Map<string, FlatTreeNode>();
   private readonly crdtId: string;
   private readonly clientId: number;
   private readonly transport: WsTransport;
@@ -94,13 +105,11 @@ export class TreeHandle {
     const id = { wall_ms: wallMs, logical, node_id: this.clientId };
     const idStr = `${wallMs}:${logical}:${this.clientId}`;
 
-    // Optimistic meta update — allows UndoManager to read state immediately.
-    this.nodeMetaMap.set(idStr, {
-      parentId,
-      position,
-      updatedAt: idStr,
-      value,
-    });
+    // Optimistic update — reflects immediately in value() and UndoManager.
+    this.flatNodes.set(idStr, { id: idStr, parentId, position, value, deleted: false, updatedAt: idStr });
+    this.nodeMetaMap.set(idStr, { parentId, position, updatedAt: idStr, value });
+    this.roots = this.buildRoots();
+    this.emit();
 
     const op = encode({
       Tree: {
@@ -139,10 +148,17 @@ export class TreeHandle {
     const logical = this.opCounter++;
     const opId = { wall_ms: wallMs, logical, node_id: this.clientId };
 
-    // Optimistic meta update.
+    // Optimistic update.
     const existing = this.nodeMetaMap.get(nodeId);
     if (existing !== undefined) {
       this.nodeMetaMap.set(nodeId, { ...existing, parentId: newParentId, position: newPosition });
+    }
+    const flatNode = this.flatNodes.get(nodeId);
+    if (flatNode) {
+      flatNode.parentId = newParentId;
+      flatNode.position = newPosition;
+      this.roots = this.buildRoots();
+      this.emit();
     }
 
     const op = encode({
@@ -180,10 +196,17 @@ export class TreeHandle {
     const updatedAt = { wall_ms: wallMs, logical, node_id: this.clientId };
     const updatedAtStr = `${wallMs}:${logical}:${this.clientId}`;
 
-    // Optimistic meta update.
+    // Optimistic update.
     const existing = this.nodeMetaMap.get(nodeId);
     if (existing !== undefined) {
       this.nodeMetaMap.set(nodeId, { ...existing, value, updatedAt: updatedAtStr });
+    }
+    const flatNode = this.flatNodes.get(nodeId);
+    if (flatNode) {
+      flatNode.value = value;
+      flatNode.updatedAt = updatedAtStr;
+      this.roots = this.buildRoots();
+      this.emit();
     }
 
     const op = encode({
@@ -214,6 +237,13 @@ export class TreeHandle {
    */
   deleteNode(nodeId: string, ttlMs?: number): void {
     if (this.parseHlc(nodeId) === null) return;
+    // Optimistic tombstone.
+    const flatNode = this.flatNodes.get(nodeId);
+    if (flatNode) {
+      flatNode.deleted = true;
+      this.roots = this.buildRoots();
+      this.emit();
+    }
     const op = encode({
       Tree: {
         DeleteNode: {
@@ -258,12 +288,140 @@ export class TreeHandle {
     return this.conflictHistory;
   }
 
-  /** Apply a delta received from the server. Replaces local state with authoritative tree. */
-  applyDelta(delta: TreeDelta): void {
-    this.detectConflicts(delta.roots, null, delta.discarded_moves ?? []);
-    this.roots = delta.roots;
-    this.rebuildMetaMap(delta.roots, null);
+  /**
+   * Restore state from a persisted snapshot (hierarchical roots).
+   * Rebuilds the flat node store from the snapshot and emits.
+   */
+  restoreSnapshot(roots: TreeNodeValue[]): void {
+    this.flatNodes.clear();
+    const addNodes = (nodes: TreeNodeValue[], parentId: string | null): void => {
+      for (const node of nodes) {
+        this.flatNodes.set(node.id, {
+          id: node.id, parentId, position: node.position, value: node.value,
+          deleted: false, updatedAt: node.id,
+        });
+        addNodes(node.children, node.id);
+      }
+    };
+    addNodes(roots, null);
+    this.roots = this.buildRoots();
+    this.syncMetaMapFromFlatNodes();
     this.emit();
+  }
+
+  /**
+   * Apply a delta received from the server.
+   *
+   * Applies each TreeOp (AddNode / MoveNode / UpdateNode / DeleteNode) to the
+   * flat node store, then rebuilds the hierarchical roots view and emits.
+   */
+  applyDelta(delta: TreeDelta): void {
+    this.emitDiscardedMoveConflicts(delta.discarded_moves ?? []);
+
+    for (const op of delta.ops) {
+      if ("AddNode" in op) {
+        const { id, parent_id, position, value } = op.AddNode;
+        const idStr = this.hlcToStr(id);
+        if (!this.flatNodes.has(idStr)) {
+          const parentStr = parent_id !== null ? this.hlcToStr(parent_id) : null;
+          this.flatNodes.set(idStr, {
+            id: idStr, parentId: parentStr, position, value, deleted: false, updatedAt: idStr,
+          });
+        }
+      } else if ("MoveNode" in op) {
+        const { node_id, new_parent_id, new_position } = op.MoveNode;
+        const idStr = this.hlcToStr(node_id);
+        const node = this.flatNodes.get(idStr);
+        if (node) {
+          const prevPos = node.position;
+          node.parentId = new_parent_id !== null ? this.hlcToStr(new_parent_id) : null;
+          node.position = new_position;
+          // Conflict detection for concurrent move.
+          const meta = this.nodeMetaMap.get(idStr);
+          if (meta && (meta.parentId !== node.parentId || meta.position !== prevPos)) {
+            this.emitConflict({
+              kind: "move_reordered",
+              nodeId: idStr,
+              localParentId: meta.parentId,
+              localPosition: prevPos,
+              serverParentId: node.parentId,
+              serverPosition: new_position,
+              at: Date.now(),
+            } satisfies MoveReorderedEvent);
+          }
+        }
+      } else if ("UpdateNode" in op) {
+        const { id, value, updated_at } = op.UpdateNode;
+        const idStr = this.hlcToStr(id);
+        const node = this.flatNodes.get(idStr);
+        if (node) {
+          const newUpdatedAt = this.hlcToStr(updated_at);
+          // LWW: only accept if strictly newer.
+          if (newUpdatedAt > node.updatedAt) {
+            const meta = this.nodeMetaMap.get(idStr);
+            if (meta && meta.value !== value) {
+              this.emitConflict({
+                kind: "lww_overwrite",
+                nodeId: idStr,
+                discardedValue: meta.value,
+                winnerValue: value,
+                at: Date.now(),
+              } satisfies LwwOverwriteEvent);
+            }
+            node.value = value;
+            node.updatedAt = newUpdatedAt;
+          }
+        }
+      } else if ("DeleteNode" in op) {
+        const { id } = op.DeleteNode;
+        const idStr = this.hlcToStr(id);
+        const node = this.flatNodes.get(idStr);
+        if (node) node.deleted = true;
+      }
+    }
+
+    this.roots = this.buildRoots();
+    this.syncMetaMapFromFlatNodes();
+    this.emit();
+  }
+
+  private hlcToStr(hlc: { wall_ms: number | bigint; logical: number; node_id: number | bigint }): string {
+    return `${Number(hlc.wall_ms)}:${hlc.logical}:${Number(hlc.node_id)}`;
+  }
+
+  /** Build the hierarchical roots view from the flat node store. */
+  private buildRoots(): TreeNodeValue[] {
+    const buildChildren = (parentId: string | null): TreeNodeValue[] => {
+      const children: FlatTreeNode[] = [];
+      for (const node of this.flatNodes.values()) {
+        if (!node.deleted && node.parentId === parentId) children.push(node);
+      }
+      children.sort((a, b) =>
+        a.position < b.position ? -1 : a.position > b.position ? 1 :
+        b.id < a.id ? -1 : b.id > a.id ? 1 : 0,
+      );
+      return children.map(n => ({
+        id: n.id,
+        value: n.value,
+        position: n.position,
+        children: buildChildren(n.id),
+      }));
+    };
+    return buildChildren(null);
+  }
+
+  /** Sync nodeMetaMap from flatNodes after applying server ops. */
+  private syncMetaMapFromFlatNodes(): void {
+    for (const node of this.flatNodes.values()) {
+      if (!node.deleted) {
+        this.nodeMetaMap.set(node.id, {
+          parentId: node.parentId,
+          position: node.position,
+          updatedAt: node.updatedAt,
+          value: node.value,
+        });
+      }
+    }
   }
 
   /** Emit a conflict event to all listeners and append to history. */
@@ -275,82 +433,19 @@ export class TreeHandle {
     for (const listener of this.conflictListeners) listener(event);
   }
 
-  /**
-   * Walks the incoming delta tree and compares each node's server-authoritative
-   * parent/position/value against what the local client last recorded.
-   * Also processes discarded_moves from the server to emit move_discarded events.
-   * Emits conflict events for discrepancies caused by concurrent op resolution.
-   */
-  private detectConflicts(
-    nodes: TreeNodeValue[],
-    serverParentId: string | null,
-    discardedMoves: DiscardedMove[],
-  ): void {
+  /** Emit move_discarded conflict events for server-rejected cycle moves. */
+  private emitDiscardedMoveConflicts(discardedMoves: DiscardedMove[]): void {
     const now = Date.now();
-
-    // Emit move_discarded events for server-rejected cycle moves.
     for (const dm of discardedMoves) {
-      const hlcToStr = (hlc: { wall_ms: number; logical: number; node_id: number }): string =>
-        `${hlc.wall_ms}:${hlc.logical}:${hlc.node_id}`;
-      const event: MoveDiscardedEvent = {
+      this.emitConflict({
         kind: "move_discarded",
-        nodeId: hlcToStr(dm.node_id),
-        attemptedParentId: dm.attempted_parent_id !== null ? hlcToStr(dm.attempted_parent_id) : null,
+        nodeId: this.hlcToStr(dm.node_id),
+        attemptedParentId: dm.attempted_parent_id !== null ? this.hlcToStr(dm.attempted_parent_id) : null,
         attemptedPosition: dm.attempted_position,
-        actualParentId: dm.actual_parent_id !== null ? hlcToStr(dm.actual_parent_id) : null,
+        actualParentId: dm.actual_parent_id !== null ? this.hlcToStr(dm.actual_parent_id) : null,
         actualPosition: dm.actual_position,
         at: now,
-      };
-      this.emitConflict(event);
-    }
-
-    for (const node of nodes) {
-      const local = this.nodeMetaMap.get(node.id);
-      if (local !== undefined) {
-        // Detect move reordering: server placed the node somewhere different
-        // from what the local optimistic update recorded.
-        if (local.parentId !== serverParentId || local.position !== node.position) {
-          const event: MoveReorderedEvent = {
-            kind: "move_reordered",
-            nodeId: node.id,
-            localParentId: local.parentId,
-            localPosition: local.position,
-            serverParentId,
-            serverPosition: node.position,
-            at: now,
-          };
-          this.emitConflict(event);
-        }
-
-        // Detect LWW overwrite: server has a different value than local recorded.
-        if (local.value !== node.value) {
-          const event: LwwOverwriteEvent = {
-            kind: "lww_overwrite",
-            nodeId: node.id,
-            discardedValue: local.value,
-            winnerValue: node.value,
-            at: now,
-          };
-          this.emitConflict(event);
-        }
-      }
-      // Recurse into children — serverParentId for children is this node's id.
-      // discardedMoves are top-level only (already processed above).
-      this.detectConflicts(node.children, node.id, []);
-    }
-  }
-
-  /** Rebuilds nodeMetaMap from a full tree snapshot (called on each server delta). */
-  private rebuildMetaMap(nodes: TreeNodeValue[], parentId: string | null): void {
-    for (const node of nodes) {
-      const existing = this.nodeMetaMap.get(node.id);
-      this.nodeMetaMap.set(node.id, {
-        parentId,
-        position: node.position,
-        updatedAt: existing?.updatedAt ?? node.id,
-        value: node.value,
-      });
-      this.rebuildMetaMap(node.children, node.id);
+      } satisfies MoveDiscardedEvent);
     }
   }
 

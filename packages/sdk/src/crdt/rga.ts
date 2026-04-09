@@ -1,7 +1,7 @@
 import { Chunk, Effect, Stream } from "effect";
 import { encode } from "../codec.js";
 import type { WsTransport } from "../transport/websocket.js";
-import type { RGADelta } from "../sync/delta.js";
+import type { RGADelta, RgaHlc } from "../sync/delta.js";
 import { type CrdtValidator, runValidator } from "../validation/index.js";
 
 /**
@@ -12,8 +12,36 @@ import { type CrdtValidator, runValidator } from "../validation/index.js";
  *
  * Operations use visible-position indices (tombstones are invisible to callers).
  */
+interface RgaNode {
+  id: RgaHlc;
+  originId: RgaHlc | null;
+  content: string;
+  deleted: boolean;
+}
+
+/** Compare two HLC values: returns negative if a < b, 0 if equal, positive if a > b. */
+function hlcCompare(a: RgaHlc, b: RgaHlc): number {
+  const aw = Number(a.wall_ms), bw = Number(b.wall_ms);
+  if (aw !== bw) return aw - bw;
+  if (a.logical !== b.logical) return a.logical - b.logical;
+  return Number(a.node_id) - Number(b.node_id);
+}
+
+function hlcEqual(a: RgaHlc, b: RgaHlc): boolean {
+  return Number(a.wall_ms) === Number(b.wall_ms) &&
+    a.logical === b.logical &&
+    Number(a.node_id) === Number(b.node_id);
+}
+
+function hlcEqualNullable(a: RgaHlc | null, b: RgaHlc | null): boolean {
+  if (a === null && b === null) return true;
+  if (a === null || b === null) return false;
+  return hlcEqual(a, b);
+}
+
 export class RGAHandle {
-  private text = "";
+  /** Full node list including tombstones — matches Rust Rga.nodes layout. */
+  private nodes: RgaNode[] = [];
   private readonly crdtId: string;
   private readonly clientId: number;
   private readonly transport: WsTransport;
@@ -35,9 +63,9 @@ export class RGAHandle {
   /** The CRDT key this handle is bound to. */
   get id(): string { return this.crdtId; }
 
-  /** Returns the current text content. */
+  /** Returns the current text content (visible characters only, tombstones excluded). */
   value(): string {
-    return this.text;
+    return this.nodes.filter(n => !n.deleted).map(n => n.content).join("");
   }
 
   /**
@@ -72,23 +100,42 @@ export class RGAHandle {
     if (text.length === 0) return [];
     runValidator(this.validator, text);
 
-    // Optimistic local update.
-    this.text = this.text.slice(0, pos) + text + this.text.slice(pos);
-    this.emit();
-
-    // Send each character as a separate RGA Insert op. The server reorders
-    // them using their HLC IDs — sending individually preserves per-char identity.
     const wallMs = Date.now();
     const nodeIds: string[] = [];
-    for (let i = 0; i < text.length; i++) {
-      const id = { wall_ms: wallMs, logical: i, node_id: this.clientId };
+
+    // Find the origin node at visible position `pos - 1` in the node list.
+    let visibleCount = 0;
+    let originIdx = -1; // -1 = insert before all visible nodes
+    for (let i = 0; i < this.nodes.length; i++) {
+      const n = this.nodes[i];
+      if (n && !n.deleted) {
+        visibleCount++;
+        if (visibleCount === pos) { originIdx = i; break; }
+      }
+    }
+    const originNode = originIdx >= 0 ? this.nodes[originIdx] : undefined;
+    const originId = originNode ? originNode.id : null;
+
+    // Insert nodes optimistically into local node list and send ops.
+    let prevOriginId = originId;
+    let insertAfterIdx = originIdx; // index after which each char is inserted
+    const chars = [...text];
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i] ?? "";
+      const id: RgaHlc = { wall_ms: wallMs, logical: i, node_id: this.clientId };
       nodeIds.push(`${wallMs}:${i}:${this.clientId}`);
+      const newNode: RgaNode = { id, originId: prevOriginId, content: ch, deleted: false };
+      // Insert immediately after the previous char (or after origin if first char).
+      this.nodes.splice(insertAfterIdx + 1, 0, newNode);
+      insertAfterIdx++;
+      prevOriginId = id;
+
       const op = encode({
         RGA: {
           Insert: {
             id,
-            origin_id: null, // server resolves via WAL
-            content: text[i],
+            origin_id: newNode.originId,
+            content: ch,
           },
         },
       });
@@ -100,6 +147,7 @@ export class RGAHandle {
         },
       });
     }
+    this.emit();
     return nodeIds;
   }
 
@@ -139,20 +187,29 @@ export class RGAHandle {
   delete(pos: number, length: number, ttlMs?: number): void {
     if (length <= 0) return;
 
-    // Optimistic local update.
-    this.text = this.text.slice(0, pos) + this.text.slice(pos + length);
+    // Collect the node IDs of the `length` visible characters starting at `pos`.
+    const toDelete: RgaHlc[] = [];
+    let visibleCount = 0;
+    for (const node of this.nodes) {
+      if (!node.deleted) {
+        if (visibleCount >= pos && visibleCount < pos + length) {
+          toDelete.push(node.id);
+        }
+        visibleCount++;
+        if (visibleCount >= pos + length) break;
+      }
+    }
+
+    // Optimistic local tombstone.
+    for (const id of toDelete) {
+      const node = this.nodes.find(n => hlcEqual(n.id, id));
+      if (node) node.deleted = true;
+    }
     this.emit();
 
-    // Send a single Delete op per character position.
-    // The server resolves the actual RGA node IDs from position.
-    for (let i = 0; i < length; i++) {
-      const op = encode({
-        RGA: {
-          Delete: {
-            pos: pos + i,
-          },
-        },
-      });
+    // Send one Delete op per character.
+    for (const id of toDelete) {
+      const op = encode({ RGA: { Delete: { id } } });
       this.transport.send({
         Op: {
           crdt_id: this.crdtId,
@@ -163,14 +220,78 @@ export class RGAHandle {
     }
   }
 
-  /** Apply a delta received from the server. Replaces local text with authoritative state. */
-  applyDelta(delta: RGADelta): void {
-    if (delta.text === this.text) return;
-    this.text = delta.text;
+  /**
+   * Restore state from a persisted snapshot (text string).
+   * Creates synthetic sequential nodes — used only for offline snapshot restore,
+   * not for live delta application.
+   */
+  restoreSnapshot(text: string): void {
+    this.nodes = [];
+    const chars = [...text];
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i] ?? "";
+      const id: RgaHlc = { wall_ms: 0, logical: i, node_id: 0 };
+      const originId: RgaHlc | null = i === 0 ? null : { wall_ms: 0, logical: i - 1, node_id: 0 };
+      this.nodes.push({ id, originId, content: ch, deleted: false });
+    }
     this.emit();
   }
 
+  /**
+   * Apply a delta received from the server.
+   *
+   * Applies each RGA op (Insert/Delete) to the local node list using the same
+   * convergence algorithm as the Rust server: inserts are placed after their
+   * origin, with concurrent siblings ordered by HLC descending.
+   */
+  applyDelta(delta: RGADelta): void {
+    let changed = false;
+    for (const op of delta.ops) {
+      if ("Insert" in op) {
+        const { id, origin_id, content } = op.Insert;
+        // Idempotent: skip if already present.
+        if (this.nodes.some(n => hlcEqual(n.id, id))) continue;
+        const insertPos = this.insertPosition(origin_id, id);
+        this.nodes.splice(insertPos, 0, { id, originId: origin_id, content, deleted: false });
+        changed = true;
+      } else {
+        const { id } = op.Delete;
+        const node = this.nodes.find(n => hlcEqual(n.id, id));
+        if (node && !node.deleted) {
+          node.deleted = true;
+          changed = true;
+        }
+      }
+    }
+    if (changed) this.emit();
+  }
+
+  /**
+   * Find insertion index for a new node with the given origin_id and id.
+   * Mirrors the Rust `Rga::insert_position` algorithm exactly.
+   */
+  private insertPosition(originId: RgaHlc | null, id: RgaHlc): number {
+    const start = originId === null
+      ? 0
+      : (() => {
+          const idx = this.nodes.findIndex(n => hlcEqual(n.id, originId));
+          return idx === -1 ? this.nodes.length : idx + 1;
+        })();
+
+    let pos = start;
+    while (pos < this.nodes.length) {
+      const sibling = this.nodes[pos];
+      if (sibling && hlcEqualNullable(sibling.originId, originId) && hlcCompare(sibling.id, id) > 0) {
+        pos++;
+      } else {
+        break;
+      }
+    }
+    return pos;
+  }
+
   private emit(): void {
-    for (const listener of this.listeners) listener(this.text);
+    const text = this.value();
+    for (const listener of this.listeners) listener(text);
   }
 }
