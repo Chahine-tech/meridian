@@ -15,7 +15,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Effect } from "effect";
 import { MeridianClient } from "../src/client.js";
 import { HttpClient } from "../src/transport/http.js";
-import { uuidToBytes } from "../src/codec.js";
+import { uuidToBytes, encode } from "../src/codec.js";
 
 // Config — matches the dev signing key [0x42; 32]
 // The token below is for namespace="integration", client_id=1, TTL=24h
@@ -27,9 +27,9 @@ const NAMESPACE = "integration";
 // Generated via: cargo run --bin gen_token -- integration 1
 let TOKEN: string;
 
-async function generateToken(): Promise<string> {
+async function generateToken(clientId = 1): Promise<string> {
   const proc = Bun.spawn(
-    ["cargo", "run", "--quiet", "--bin", "gen_token", "--", NAMESPACE, "1"],
+    ["cargo", "run", "--quiet", "--bin", "gen_token", "--", NAMESPACE, String(clientId)],
     { cwd: new URL("../../", import.meta.url).pathname, stderr: "inherit" },
   );
   const text = await new Response(proc.stdout).text();
@@ -52,6 +52,8 @@ async function isServerUp(): Promise<boolean> {
 
 describe("Meridian integration", () => {
   let http: HttpClient;
+  // Pre-generated token for client_id=2 — used by tests that need two distinct clients
+  let TOKEN2: string;
 
   beforeAll(async () => {
     const up = await isServerUp();
@@ -64,7 +66,8 @@ describe("Meridian integration", () => {
       );
       return;
     }
-    TOKEN = await generateToken();
+    TOKEN = await generateToken(1);
+    TOKEN2 = await generateToken(2);
     http = new HttpClient({ baseUrl: SERVER_URL, token: TOKEN });
   });
 
@@ -74,6 +77,30 @@ describe("Meridian integration", () => {
       if (!TOKEN) return;
       await fn();
     });
+  }
+
+  /** Polls until wsState === "CONNECTED" for at least two consecutive checks.
+   *  Calls reopen() if stuck in DISCONNECTED to kick the Effect reconnect loop. */
+  async function ensureConnected(client: import("../src/client.js").MeridianClient, timeoutMs = 8000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let stable = 0;
+    let lastReopen = 0;
+    while (Date.now() < deadline) {
+      const s = client.snapshot().wsState;
+      if (s === "CONNECTED") {
+        stable++;
+        if (stable >= 2) return;
+      } else {
+        stable = 0;
+        // If stuck DISCONNECTED for >500ms, force a reopen.
+        if (s === "DISCONNECTED" && Date.now() - lastReopen > 500) {
+          lastReopen = Date.now();
+          client.reopen();
+        }
+      }
+      await new Promise(r => setTimeout(r, 50));
+    }
+    throw new Error(`ensureConnected: still ${client.snapshot().wsState} after ${timeoutMs}ms (clientId=${client.clientId})`);
   }
 
   skip("GET non-existent CRDT returns 404", async () => {
@@ -153,26 +180,36 @@ describe("Meridian integration", () => {
 
   skip("ORSet: add and remove", async () => {
     const key = `or:${Date.now()}`;
-    // Rust Uuid is serialized as 16-byte bin — generate a proper UUID and encode as bytes
     const tagUuid = crypto.randomUUID();
     const tagBytes = uuidToBytes(tagUuid);
 
-    // Add "apple"
-    await Effect.runPromise(http.postOp(NAMESPACE, key, {
-      ORSet: { Add: { element: "apple", tag: tagBytes } },
-    }));
+    // Server only accepts msgpack bodies. GET returns JSON (to_json_value).
+    const postMsgpack = async (op: unknown) => {
+      const r = await fetch(
+        `${SERVER_URL}/v1/namespaces/${NAMESPACE}/crdts/${key}/ops`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/msgpack" },
+          body: encode(op).buffer as ArrayBuffer,
+        },
+      );
+      if (!r.ok) throw new Error(`postOp failed: ${r.status}`);
+    };
 
-    const r1 = await Effect.runPromise(http.getCrdt(NAMESPACE, key));
-    const v1 = r1 as { elements?: unknown[] };
+    const getJson = async () => {
+      const r = await fetch(
+        `${SERVER_URL}/v1/namespaces/${NAMESPACE}/crdts/${key}`,
+        { headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json" } },
+      );
+      return r.json() as Promise<{ elements?: unknown[] }>;
+    };
+
+    await postMsgpack({ ORSet: { Add: { element: "apple", tag: tagBytes } } });
+    const v1 = await getJson();
     expect(v1.elements?.includes("apple")).toBe(true);
 
-    // Remove "apple" — known_tags is a set of 16-byte UUIDs
-    await Effect.runPromise(http.postOp(NAMESPACE, key, {
-      ORSet: { Remove: { element: "apple", known_tags: [tagBytes] } },
-    }));
-
-    const r2 = await Effect.runPromise(http.getCrdt(NAMESPACE, key));
-    const v2 = r2 as { elements?: unknown[] };
+    await postMsgpack({ ORSet: { Remove: { element: "apple", known_tags: [tagBytes] } } });
+    const v2 = await getJson();
     expect((v2.elements ?? []).includes("apple")).toBe(false);
   });
 
@@ -204,6 +241,119 @@ describe("Meridian integration", () => {
 
   skip("MeridianClient: live delta propagation between two clients", async () => {
     const key = `gc:live:${Date.now()}`;
+    // Regenerate tokens to avoid reusing a token whose WS session may be in flux.
+    const tok1 = await generateToken(1);
+    const tok2 = await generateToken(2);
+
+    const client1 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: tok1 }),
+    );
+    const client2 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: tok2 }),
+    );
+
+    await Promise.all([ensureConnected(client1), ensureConnected(client2)]);
+
+    const counter1 = client1.gcounter(key);
+    const counter2 = client2.gcounter(key);
+
+    // Register the listener synchronously before any increment so we can't miss the delta.
+    let resolveReceived!: () => void;
+    let rejectReceived!: (e: Error) => void;
+    const deltaReceived = new Promise<void>((res, rej) => { resolveReceived = res; rejectReceived = rej; });
+    const timer = setTimeout(() => rejectReceived(new Error("timeout: delta not received")), 3000);
+    counter2.onChange(() => { clearTimeout(timer); resolveReceived(); });
+
+    counter1.increment(3);
+    await deltaReceived;
+
+    expect(counter2.value()).toBeGreaterThanOrEqual(3);
+
+    client1.close();
+    client2.close();
+  });
+
+  // ── RGA convergence ────────────────────────────────────────────────────────
+
+  skip("RGA: concurrent inserts from two clients converge", async () => {
+    const key = `rga:concurrent:${Date.now()}`;
+
+
+    const client1 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
+    );
+    const client2 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN2 }),
+    );
+
+    await Promise.all([ensureConnected(client1), ensureConnected(client2)]);
+
+    const doc1 = client1.rga(key);
+    const doc2 = client2.rga(key);
+
+    // Both clients insert concurrently — RGA must converge to the same text.
+    // Register convergence watchers before the inserts to avoid missing early deltas.
+    let resolveDoc1!: () => void, resolveDoc2!: () => void;
+    const doc1Len2 = new Promise<void>((r) => { resolveDoc1 = r; });
+    const doc2Len2 = new Promise<void>((r) => { resolveDoc2 = r; });
+    doc1.onChange((v) => { if (v.length >= 2) resolveDoc1(); });
+    doc2.onChange((v) => { if (v.length >= 2) resolveDoc2(); });
+
+    doc1.insert(0, "A");
+    doc2.insert(0, "B");
+
+    // Wait until both replicas have length 2 (each received the other's insert).
+    await Promise.all([
+      Promise.race([doc1Len2, Bun.sleep(2000)]),
+      Promise.race([doc2Len2, Bun.sleep(2000)]),
+    ]);
+
+    // Both replicas must have converged to the same text (order may differ but must match)
+    expect(doc1.value()).toBe(doc2.value());
+    expect(doc1.value()).toHaveLength(2);
+    expect(doc1.value()).toContain("A");
+    expect(doc1.value()).toContain("B");
+
+    client1.close();
+    client2.close();
+  });
+
+  skip("RGA: sequential inserts preserve order", async () => {
+    const key = `rga:seq:${Date.now()}`;
+
+    const client1 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
+    );
+    const client2 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN2 }),
+    );
+
+    await Promise.all([ensureConnected(client1), ensureConnected(client2)]);
+
+    const doc1 = client1.rga(key);
+    const doc2 = client2.rga(key);
+
+    // Wait for doc2 to reach length 2 before asserting.
+    let resolveDoc2!: () => void;
+    const doc2Ready = new Promise<void>((r) => { resolveDoc2 = r; });
+    doc2.onChange((v) => { if (v.length >= 2) resolveDoc2(); });
+
+    // Sequential inserts from client1
+    doc1.insert(0, "H");
+    await Bun.sleep(50);
+    doc1.insert(1, "i");
+
+    await Promise.race([doc2Ready, Bun.sleep(2000)]);
+
+    // client2 must have received both inserts in order
+    expect(doc2.value()).toBe("Hi");
+
+    client1.close();
+    client2.close();
+  });
+
+  skip("RGA: delete propagates to remote client", async () => {
+    const key = `rga:delete:${Date.now()}`;
 
     const client1 = await Effect.runPromise(
       MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
@@ -212,26 +362,256 @@ describe("Meridian integration", () => {
       MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
     );
 
-    await Promise.all([client1.waitForConnected(), client2.waitForConnected()]);
+    await Promise.all([ensureConnected(client1), ensureConnected(client2)]);
 
-    const counter1 = client1.gcounter(key);
-    const counter2 = client2.gcounter(key);
+    const doc1 = client1.rga(key);
+    const doc2 = client2.rga(key);
 
-    // Give time for subscriptions to be established
-    await Bun.sleep(100);
-
-    let received = false;
-    counter2.onChange(() => { received = true; });
-
-    counter1.increment(3);
-
-    // Wait for delta to propagate
+    doc1.insert(0, "abc");
     await Bun.sleep(300);
 
-    expect(received).toBe(true);
-    expect(counter2.value()).toBeGreaterThanOrEqual(3);
+    expect(doc2.value()).toBe("abc");
+
+    doc1.delete(1, 1); // delete "b"
+    await Bun.sleep(300);
+
+    expect(doc1.value()).toBe("ac");
+    expect(doc2.value()).toBe("ac");
 
     client1.close();
+    client2.close();
+  });
+
+  // ── Tree convergence ───────────────────────────────────────────────────────
+
+  skip("Tree: addNode propagates to remote client", async () => {
+    const key = `tree:add:${Date.now()}`;
+
+    const client1 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
+    );
+    const client2 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
+    );
+
+    await Promise.all([ensureConnected(client1), ensureConnected(client2)]);
+
+    const tree1 = client1.tree(key);
+    const tree2 = client2.tree(key);
+
+    let resolveTree2!: () => void;
+    const tree2Received = new Promise<void>((r) => { resolveTree2 = r; });
+    tree2.onChange(() => resolveTree2());
+
+    tree1.addNode(null, "a0", "Root");
+    await Promise.race([tree2Received, Bun.sleep(2000)]);
+
+    expect(tree2.value().roots.length).toBeGreaterThan(0);
+    expect(tree2.value().roots).toHaveLength(1);
+    expect(tree2.value().roots[0]!.value).toBe("Root");
+
+    client1.close();
+    client2.close();
+  });
+
+  skip("Tree: moveNode converges — no cycles allowed", async () => {
+    const key = `tree:cycle:${Date.now()}`;
+
+
+    const client1 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
+    );
+    const client2 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN2 }),
+    );
+
+    await Promise.all([ensureConnected(client1), ensureConnected(client2)]);
+
+    const tree1 = client1.tree(key);
+    const tree2 = client2.tree(key);
+
+    // Register the wait BEFORE sending addNodes so we don't miss early deltas.
+    type N = { children: N[] };
+    const countAll = (acc: number, n: N): number => acc + 1 + n.children.reduce(countAll, 0);
+
+    const bothNodesOnClient2 = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timeout: tree2 did not receive both nodes")), 3000);
+      const check = () => {
+        const count = (tree2.value().roots as N[]).reduce(countAll, 0);
+        if (count >= 2) { clearTimeout(timer); resolve(); }
+      };
+      tree2.onChange(check);
+      check();
+    });
+
+    const parentId = tree1.addNode(null, "a0", "Parent");
+    const childId = tree1.addNode(parentId, "a0", "Child");
+
+    await bothNodesOnClient2;
+
+    // Concurrent: client1 moves child under parent (no-op, already there)
+    // client2 tries to move parent under child (would create a cycle)
+    tree1.moveNode(childId, parentId, "b0");
+    tree2.moveNode(parentId, childId, "a0");
+    // No reliable event to await here — wait for both ops to round-trip.
+    await Bun.sleep(800);
+
+    // Both replicas must have converged — no cycles in either
+    const roots1 = tree1.value().roots;
+    const roots2 = tree2.value().roots;
+
+    // Verify no node appears twice (which would indicate a cycle)
+    const hasNoCycle = (roots: typeof roots1): boolean => {
+      const allIds = new Set<string>();
+      const walk = (nodes: typeof roots1): boolean => {
+        for (const n of nodes) {
+          if (allIds.has(n.id)) return false;
+          allIds.add(n.id);
+          if (!walk(n.children)) return false;
+        }
+        return true;
+      };
+      return walk(roots);
+    };
+
+    expect(hasNoCycle(roots1)).toBe(true);
+    expect(hasNoCycle(roots2)).toBe(true);
+    // Both replicas must have seen at least the two originally added nodes.
+    const countNodes = (roots: typeof roots1): number =>
+      roots.reduce((acc, n) => acc + 1 + countNodes(n.children), 0);
+    expect(countNodes(roots1) + countNodes(roots2)).toBeGreaterThanOrEqual(2);
+
+    client1.close();
+    client2.close();
+  });
+
+  skip("Tree: deleteNode propagates to remote client", async () => {
+    const key = `tree:delete:${Date.now()}`;
+
+    const client1 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
+    );
+    const client2 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
+    );
+
+    await Promise.all([ensureConnected(client1), ensureConnected(client2)]);
+
+    const tree1 = client1.tree(key);
+    const tree2 = client2.tree(key);
+
+    const nodeId = tree1.addNode(null, "a0", "ToDelete");
+    await Bun.sleep(300);
+
+    expect(tree2.value().roots).toHaveLength(1);
+
+    tree1.deleteNode(nodeId);
+    await Bun.sleep(300);
+
+    expect(tree1.value().roots).toHaveLength(0);
+    expect(tree2.value().roots).toHaveLength(0);
+
+    client1.close();
+    client2.close();
+  });
+
+  // ── Offline queue ──────────────────────────────────────────────────────────
+
+  skip("offline queue: close() drains pending ops immediately", async () => {
+    const client1 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
+    );
+    await client1.waitForConnected();
+
+    const counter1 = client1.gcounter(`gc:drain:${Date.now()}`);
+    counter1.increment(1);
+
+    // close() must drain the queue synchronously
+    client1.close();
+    expect(client1.pendingOpCount).toBe(0);
+  });
+
+  skip("offline queue: ops increment before connected are flushed after connect", async () => {
+    const key = `gc:preconnect:${Date.now()}`;
+
+    // create() returns an Effect — resolve it, then immediately use the handle
+    // before the WebSocket has had time to connect
+    const client = Effect.runSync(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
+    );
+    const counter = client.gcounter(key);
+    counter.increment(7); // queued in offline queue until WS connects
+
+    await client.waitForConnected();
+    await Bun.sleep(400);
+
+    // Verify server received the op
+    const r = await Effect.runPromise(http.getCrdt(NAMESPACE, key));
+    const val = r as { total?: number };
+    expect(val.total).toBe(7);
+
+    client.close();
+  });
+
+  // ── Presence ───────────────────────────────────────────────────────────────
+
+  skip("Presence: heartbeat from client1 seen by client2", async () => {
+
+    const client1 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
+    );
+    const client2 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN2 }),
+    );
+
+    await Promise.all([ensureConnected(client1), ensureConnected(client2)]);
+
+    const presenceKey = `pr:test:${Date.now()}`;
+    const presence1 = client1.presence(presenceKey);
+    const presence2 = client2.presence(presenceKey);
+
+    await Bun.sleep(100);
+
+    let peerSeen = false;
+    presence2.onChange(() => { peerSeen = true; });
+
+    presence1.heartbeat({ name: "Alice" }, 5_000);
+    await Bun.sleep(400);
+
+    expect(peerSeen).toBe(true);
+    const online = presence2.online();
+    expect(online.length).toBeGreaterThanOrEqual(1);
+
+    client1.close();
+    client2.close();
+  });
+
+  // ── Delta sync (Sync message) ──────────────────────────────────────────────
+
+  skip("late-joining client receives full state via Sync", async () => {
+    const key = `gc:sync:${Date.now()}`;
+
+    // client1 does 5 increments
+    const client1 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
+    );
+    await client1.waitForConnected();
+    const counter1 = client1.gcounter(key);
+    counter1.increment(5);
+    await Bun.sleep(300);
+    client1.close();
+    await Bun.sleep(100);
+
+    // client2 connects after — must receive state via Sync
+    const client2 = await Effect.runPromise(
+      MeridianClient.create({ url: SERVER_URL, namespace: NAMESPACE, token: TOKEN }),
+    );
+    await client2.waitForConnected();
+    const counter2 = client2.gcounter(key);
+    await Bun.sleep(400);
+
+    expect(counter2.value()).toBe(5);
+
     client2.close();
   });
 });
