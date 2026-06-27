@@ -417,7 +417,7 @@ async fn apply_tuple<A: PgStateApplier>(
     };
 
     // Apply each BYTEA column.
-    for (col, raw) in schema.columns.iter().zip(col_values.into_iter()) {
+    for (col, raw) in schema.columns.iter().zip(col_values) {
         if col.type_oid != BYTEA_OID {
             continue;
         }
