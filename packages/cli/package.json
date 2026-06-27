@@ -13,15 +13,15 @@
     "dev": "bun run src/main.ts"
   },
   "dependencies": {
-    "@effect/cli": "^0.75.0",
-    "@effect/platform": "^0.80.0",
-    "@effect/platform-node": "^0.106.0",
-    "effect": "^3.21.0",
+    "@effect/cli": "^0.75.2",
+    "@effect/platform": "^0.96.2",
+    "@effect/platform-node": "^0.107.0",
+    "effect": "^3.21.4",
     "meridian-sdk": "workspace:*"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.7",
-    "typescript": "^5.8.0"
+    "@biomejs/biome": "^2.5.1",
+    "typescript": "^6.0.0"
   },
   "license": "MIT",
   "repository": {

@@ -2,6 +2,7 @@
 name = "meridian-client"
 version = "0.1.1"
 edition = "2024"
+rust-version.workspace = true
 description = "Rust client SDK for Meridian — real-time CRDT sync over WebSocket"
 license = "MIT"
 repository = "https://github.com/Chahine-tech/meridian"

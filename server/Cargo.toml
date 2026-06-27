@@ -2,6 +2,8 @@
 name = "meridian-server"
 version = "0.2.0"
 edition = "2024"
+rust-version.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "meridian"
@@ -53,7 +55,7 @@ async-stream = "0.3"
 # HTTP + WebSocket
 axum = { version = "0.8", features = ["ws", "macros"] }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.7", features = ["cors", "trace"] }
 
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }

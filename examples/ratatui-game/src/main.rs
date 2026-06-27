@@ -111,7 +111,7 @@ impl App {
             .iter()
             .map(|(name, h)| (name.clone(), h.value(), name == &self.player))
             .collect();
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_by_key(|k| std::cmp::Reverse(k.1));
         entries
     }
 

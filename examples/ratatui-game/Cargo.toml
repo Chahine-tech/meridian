@@ -3,6 +3,7 @@ name = "ratatui-game"
 version = "0.1.0"
 edition = "2024"
 description = "Multiplayer terminal leaderboard powered by Meridian CRDTs"
+license = "MIT"
 
 [[bin]]
 name = "ratatui-game"
