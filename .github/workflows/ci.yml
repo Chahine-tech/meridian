@@ -36,6 +36,13 @@ jobs:
       - name: test (cluster features)
         run: cargo test --features cluster
 
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
   wal-integration:
     name: WAL integration (pg-sync)
     runs-on: ubuntu-latest
@@ -131,6 +138,47 @@ jobs:
       - name: test
         working-directory: packages/sdk
         run: bun test
+
+  sdk-integration:
+    name: SDK integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: install
+        working-directory: packages/sdk
+        run: bun install
+
+      - name: build server
+        run: cargo build --bin meridian
+
+      - name: start server
+        run: |
+          MERIDIAN_SIGNING_KEY=4242424242424242424242424242424242424242424242424242424242424242 \
+          MERIDIAN_DATA_DIR=/tmp/meridian-int-test \
+          MERIDIAN_BIND=127.0.0.1:3737 \
+          ./target/debug/meridian &
+          echo $! > /tmp/meridian.pid
+          # Wait until the server accepts TCP connections (401 = up, connection refused = not yet)
+          for i in $(seq 1 20); do
+            curl -s http://127.0.0.1:3737/v1/namespaces/integration/crdts/__probe \
+              -H "Authorization: Bearer invalid" -o /dev/null -w "%{http_code}" | grep -q "401\|403\|404" && break
+            sleep 1
+          done
+
+      - name: integration tests
+        working-directory: packages/sdk
+        run: bun test test/integration.test.ts --timeout 60000
+
+      - name: stop server
+        if: always()
+        run: kill $(cat /tmp/meridian.pid) 2>/dev/null || true
 
   sdk-react:
     name: SDK React

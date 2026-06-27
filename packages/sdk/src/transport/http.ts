@@ -19,17 +19,20 @@ export interface HttpClientConfig {
   timeoutMs?: number;
 }
 
-export interface HistoryEntry {
-  seq: number;
-  timestamp_ms: number;
-  op: unknown;
-}
+const HistoryEntrySchema = Schema.Struct({
+  seq: Schema.Number,
+  timestamp_ms: Schema.Number,
+  op: Schema.Unknown,
+});
 
-export interface HistoryResponse {
-  crdt_id: string;
-  entries: HistoryEntry[];
-  next_seq: number | null;
-}
+const HistoryResponseSchema = Schema.Struct({
+  crdt_id: Schema.String,
+  entries: Schema.Array(HistoryEntrySchema),
+  next_seq: Schema.NullOr(Schema.Number),
+});
+
+export type HistoryEntry = typeof HistoryEntrySchema.Type;
+export type HistoryResponse = typeof HistoryResponseSchema.Type;
 
 export class HttpClient {
   readonly baseUrl: string;
@@ -63,9 +66,12 @@ export class HttpClient {
     return this.request(CrdtGetResponse, "GET", path);
   }
 
-  getHistory(ns: string, id: string, sinceSeq = 0, limit = 50): Promise<HistoryResponse> {
-    const url = `${this.baseUrl}/v1/namespaces/${ns}/crdts/${encodeURIComponent(id)}/history?since_seq=${sinceSeq}&limit=${limit}`;
-    return fetch(url, { headers: { Authorization: `Bearer ${this.token}` } }).then(r => r.json() as Promise<HistoryResponse>);
+  getHistory(ns: string, id: string, sinceSeq = 0, limit = 50): Effect.Effect<HistoryResponse, HttpError | NetworkError> {
+    return this.requestJson(
+      HistoryResponseSchema,
+      "GET",
+      `/v1/namespaces/${ns}/crdts/${encodeURIComponent(id)}/history?since_seq=${sinceSeq}&limit=${limit}`,
+    );
   }
 
   /**
@@ -124,7 +130,7 @@ export class HttpClient {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), this.timeoutMs);
         try {
-          const response = await fetch(url, { method, headers, body: bodyStr, signal: controller.signal });
+          const response = await fetch(url, { method, headers, body: bodyStr ?? null, signal: controller.signal });
           const text = await response.text();
           return { response, text };
         } finally {
@@ -168,7 +174,7 @@ export class HttpClient {
       Accept: "application/msgpack",
     };
 
-    let bodyBytes: Uint8Array | undefined;
+    let bodyBytes: Uint8Array<ArrayBuffer> | undefined;
     if (body !== undefined) {
       bodyBytes = encode(body);
       headers["Content-Type"] = "application/msgpack";
@@ -179,7 +185,7 @@ export class HttpClient {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), this.timeoutMs);
         try {
-          const response = await fetch(url, { method, headers, body: bodyBytes, signal: controller.signal });
+          const response = await fetch(url, { method, headers, body: bodyBytes ?? null, signal: controller.signal });
           const bytes = new Uint8Array(await response.arrayBuffer());
           return { response, bytes };
         } finally {

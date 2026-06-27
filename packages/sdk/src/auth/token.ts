@@ -8,27 +8,20 @@ export const parseToken = (token: string): Effect.Effect<TokenClaims, TokenParse
   Effect.gen(function* () {
     const dotIndex = token.indexOf(".");
     if (dotIndex === -1) {
-      yield* Effect.fail(new TokenParseError({ message: "Invalid token format: missing '.'" }));
-      return undefined as never;
+      return yield* Effect.fail(new TokenParseError({ message: "Invalid token format: missing '.'" }));
     }
 
     const payloadB64 = token.slice(0, dotIndex);
 
-    let bytes: Uint8Array;
-    try {
-      bytes = base64urlDecode(payloadB64);
-    } catch {
-      yield* Effect.fail(new TokenParseError({ message: "Invalid token format: base64url decode failed" }));
-      return undefined as never;
-    }
+    const bytes = yield* Effect.try({
+      try: () => base64urlDecode(payloadB64),
+      catch: () => new TokenParseError({ message: "Invalid token format: base64url decode failed" }),
+    });
 
-    let raw: unknown;
-    try {
-      raw = decode(bytes);
-    } catch {
-      yield* Effect.fail(new TokenParseError({ message: "Invalid token format: msgpack decode failed" }));
-      return undefined as never;
-    }
+    const raw = yield* Effect.try({
+      try: () => decode(bytes),
+      catch: () => new TokenParseError({ message: "Invalid token format: msgpack decode failed" }),
+    });
 
     return yield* Schema.decodeUnknown(TokenClaims)(raw).pipe(
       Effect.mapError((e) =>

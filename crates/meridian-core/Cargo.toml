@@ -2,6 +2,7 @@
 name = "meridian-core"
 version = "0.1.1"
 edition = "2024"
+rust-version.workspace = true
 description = "Meridian core — CRDTs, auth, protocol (no runtime dep, compiles to WASM)"
 license = "MIT"
 repository = "https://github.com/Chahine-tech/meridian"

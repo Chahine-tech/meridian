@@ -4,3 +4,6 @@ members = ["server", "crates/meridian-storage", "crates/meridian-cluster", "crat
 # compile and cannot be included in the normal workspace build.
 # Build it separately: cd crates/meridian-pg && cargo pgrx test
 resolver = "2"
+
+[workspace.package]
+rust-version = "1.85"

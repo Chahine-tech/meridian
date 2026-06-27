@@ -287,16 +287,20 @@ export class WsTransport {
       Effect.async((resume) => {
         const onMessage = (event: MessageEvent) => {
           const bytes = new Uint8Array(event.data as ArrayBuffer);
-          Effect.runPromise(decodeServerMsg(bytes)).then(
-            (msg) => {
-              if ("Ack" in msg && msg.Ack.client_seq !== undefined) {
-                this.recordAck(msg.Ack.client_seq);
-              } else if ("BatchAck" in msg && msg.BatchAck.client_seq !== undefined) {
-                this.recordAck(msg.BatchAck.client_seq);
-              }
-              this.config.onMessage(msg);
-            },
-            (e) => { console.warn("[meridian] failed to decode server message", e); },
+          this.runtime.runFork(
+            decodeServerMsg(bytes).pipe(
+              Effect.tap((msg) => Effect.sync(() => {
+                if ("Ack" in msg && msg.Ack.client_seq !== undefined) {
+                  this.recordAck(msg.Ack.client_seq);
+                } else if ("BatchAck" in msg && msg.BatchAck.client_seq !== undefined) {
+                  this.recordAck(msg.BatchAck.client_seq);
+                }
+                this.config.onMessage(msg);
+              })),
+              Effect.tapError((e) => Effect.sync(() => {
+                console.warn("[meridian] failed to decode server message", e);
+              })),
+            ),
           );
         };
         const onClose = () => {

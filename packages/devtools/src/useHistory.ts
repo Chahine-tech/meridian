@@ -1,8 +1,9 @@
 import { useState, useCallback } from "react";
+import { Effect } from "effect";
 import type { MeridianClient, HistoryEntry, HistoryResponse } from "meridian-sdk";
 
 interface HistoryState {
-  entries: HistoryEntry[];
+  entries: ReadonlyArray<HistoryEntry>;
   nextSeq: number | null;
   loading: boolean;
   error: string | null;
@@ -25,7 +26,9 @@ export function useHistory(client: MeridianClient) {
     }));
 
     try {
-      const data: HistoryResponse = await client.http.getHistory(client.namespace, crdtId, fromSeq);
+      const data: HistoryResponse = await Effect.runPromise(
+        client.http.getHistory(client.namespace, crdtId, fromSeq),
+      );
       setStates(prev => ({
         ...prev,
         [crdtId]: {

@@ -4,11 +4,12 @@ import { CodecError } from "./errors.js";
 import { ServerMsg } from "./schema.js";
 import type { ClientMsg, VectorClock } from "./schema.js";
 
-export const encode = (value: unknown): Uint8Array => msgpackEncode(value);
+export const encode = (value: unknown): Uint8Array<ArrayBuffer> =>
+  new Uint8Array(msgpackEncode(value));
 
-export const decode = (bytes: Uint8Array): unknown => msgpackDecode(bytes);
+export const decode = (bytes: Uint8Array<ArrayBufferLike>): unknown => msgpackDecode(bytes);
 
-export const encodeClientMsg = (msg: ClientMsg): Uint8Array => encode(msg);
+export const encodeClientMsg = (msg: ClientMsg): Uint8Array<ArrayBuffer> => encode(msg);
 
 export const decodeServerMsg = (bytes: Uint8Array): Effect.Effect<ServerMsg, CodecError> => {
   let raw: unknown;

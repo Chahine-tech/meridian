@@ -113,8 +113,8 @@ export function createMeridianRpc<
       const listeners = new Map<string, Set<(payload: unknown) => void>>();
 
       client.onRpcFrame((raw: unknown) => {
+        if (typeof raw !== "object" || raw === null || typeof (raw as Record<string, unknown>).t !== "string") return;
         const frame = raw as RpcFrame;
-        if (typeof frame?.t !== "string") return;
         const schema = config.responses[frame.t];
         if (!schema) return;
 

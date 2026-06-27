@@ -72,10 +72,9 @@ const replayCommand = Command.make(
       let hasMore = true;
 
       while (hasMore) {
-        const response = yield* Effect.tryPromise({
-          try: () => http.getHistory(namespace, crdtId, currentSeq, limit),
-          catch: (e) => new Error(`Request failed: ${String(e)}`),
-        });
+        const response = yield* http.getHistory(namespace, crdtId, currentSeq, limit).pipe(
+          Effect.mapError((e) => new Error(`Request failed: ${JSON.stringify(e)}`)),
+        );
 
         for (const entry of response.entries) {
           const ts = new Date(entry.timestamp_ms).toISOString();
