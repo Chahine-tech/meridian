@@ -1,5 +1,16 @@
 # meridian-cli
 
+## 1.2.0
+
+### Minor Changes
+
+- 0360ecc: Upgrade to TypeScript 6, Effect 3.21.4, and Biome 2.5.1. Fix Effect usage across all packages: `getHistory` now returns `Effect` instead of `Promise`, `parseToken` uses proper `yield* Effect.fail` and `Effect.try` patterns, WebSocket message decoding uses `runFork` instead of orphaned `runPromise`. Full type-safety pass for TypeScript 6 strictness (`Uint8Array<ArrayBuffer>`, `exactOptionalPropertyTypes`, DOM lib explicit).
+
+### Patch Changes
+
+- Updated dependencies [0360ecc]
+  - meridian-sdk@1.6.0
+
 ## 1.1.6
 
 ### Patch Changes
