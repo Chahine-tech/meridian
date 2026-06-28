@@ -156,7 +156,7 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> LwwRegisterHandle<
 
         let op = LwwOp {
             value: wire_val,
-            hlc: hlc.clone(),
+            hlc,
             author: self.inner.client_id,
         };
 
