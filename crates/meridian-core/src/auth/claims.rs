@@ -629,6 +629,41 @@ mod tests {
     }
 
     #[test]
+    fn client_pubkey_roundtrip() {
+        let pubkey = serde_bytes::ByteBuf::from(vec![0xab; 32]);
+        let claims = TokenClaims::new("ns", 1, 60_000, Permissions::read_write())
+            .with_pubkey(Some(pubkey.clone()));
+        assert_eq!(claims.client_pubkey.as_ref().unwrap().as_ref(), &[0xab; 32]);
+
+        let bytes = rmp_serde::encode::to_vec_named(&claims).unwrap();
+        let decoded: TokenClaims = rmp_serde::decode::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.client_pubkey.unwrap(), pubkey);
+    }
+
+    #[test]
+    fn client_pubkey_absent_roundtrip() {
+        // A token without client_pubkey must still deserialize cleanly.
+        let claims = TokenClaims::new("ns", 1, 60_000, Permissions::read_write());
+        assert!(claims.client_pubkey.is_none());
+        let bytes = rmp_serde::encode::to_vec_named(&claims).unwrap();
+        let decoded: TokenClaims = rmp_serde::decode::from_slice(&bytes).unwrap();
+        assert!(decoded.client_pubkey.is_none());
+    }
+
+    #[test]
+    fn with_pubkey_builder() {
+        let key = serde_bytes::ByteBuf::from(vec![1u8; 32]);
+        let claims = TokenClaims::new("ns", 42, 60_000, Permissions::read_write())
+            .with_pubkey(Some(key));
+        assert_eq!(claims.client_id, 42);
+        assert!(claims.client_pubkey.is_some());
+
+        // with_pubkey(None) clears the key.
+        let cleared = claims.with_pubkey(None);
+        assert!(cleared.client_pubkey.is_none());
+    }
+
+    #[test]
     fn v1_token_still_deserializes() {
         // Simulate an old V1 token payload encoded with msgpack
         let old = TokenClaims {

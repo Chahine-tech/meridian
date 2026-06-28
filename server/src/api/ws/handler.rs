@@ -602,6 +602,56 @@ async fn handle_client_message<S: WsState>(
     true
 }
 
+#[cfg(test)]
+mod tests {
+    use super::verify_op_sig;
+    use ed25519_dalek::{Signature, Signer, SigningKey};
+
+    fn make_key() -> SigningKey {
+        SigningKey::from_bytes(&[0x42u8; 32])
+    }
+
+    #[test]
+    fn valid_signature_accepted() {
+        let sk = make_key();
+        let msg = b"op_bytes_payload";
+        let sig: Signature = sk.sign(msg);
+        let vk = sk.verifying_key();
+        assert!(verify_op_sig(vk.as_bytes(), msg, sig.to_bytes().as_ref()));
+    }
+
+    #[test]
+    fn tampered_message_rejected() {
+        let sk = make_key();
+        let msg = b"op_bytes_payload";
+        let sig: Signature = sk.sign(msg);
+        let vk = sk.verifying_key();
+        assert!(!verify_op_sig(vk.as_bytes(), b"tampered_payload", sig.to_bytes().as_ref()));
+    }
+
+    #[test]
+    fn wrong_key_rejected() {
+        let sk = make_key();
+        let other_sk = SigningKey::from_bytes(&[0x99u8; 32]);
+        let msg = b"op_bytes_payload";
+        let sig: Signature = sk.sign(msg);
+        let wrong_vk = other_sk.verifying_key();
+        assert!(!verify_op_sig(wrong_vk.as_bytes(), msg, sig.to_bytes().as_ref()));
+    }
+
+    #[test]
+    fn bad_pubkey_length_rejected() {
+        assert!(!verify_op_sig(&[0u8; 16], b"msg", &[0u8; 64]));
+    }
+
+    #[test]
+    fn bad_sig_length_rejected() {
+        let sk = make_key();
+        let vk = sk.verifying_key();
+        assert!(!verify_op_sig(vk.as_bytes(), b"msg", &[0u8; 32]));
+    }
+}
+
 async fn send_error(socket: &mut WebSocket, code: u16, message: &str) {
     let err = ServerMsg::Error {
         code,
