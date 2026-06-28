@@ -7,7 +7,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-from ._codec import decode, encode, encode_vector_clock
+from ._codec import decode, encode_vector_clock
 from ._transport import Transport
 from .crdt._gcounter import GCounter
 from .crdt._lww import LwwRegister
@@ -51,6 +51,7 @@ class MeridianClient:
         self._pncounters: dict[str, PNCounter] = {}
         self._lwws: dict[str, LwwRegister] = {}
         self._presences: dict[str, Presence] = {}
+        self._bg_tasks: set[asyncio.Task] = set()
 
         self._query_queues: dict[str, list[asyncio.Queue]] = {}
 
@@ -67,7 +68,7 @@ class MeridianClient:
         client_id: int | None = None,
         signing_keypair=None,
         wait_connected: bool = True,
-    ) -> "MeridianClient":
+    ) -> MeridianClient:
         """Create a client and wait for the WebSocket to be established."""
         c = cls(url, token, client_id=client_id, signing_keypair=signing_keypair)
         await c._transport.start()
@@ -78,7 +79,7 @@ class MeridianClient:
     async def close(self) -> None:
         await self._transport.stop()
 
-    async def __aenter__(self) -> "MeridianClient":
+    async def __aenter__(self) -> MeridianClient:
         await self._transport.start()
         await self._transport.wait_connected()
         return self
@@ -111,8 +112,11 @@ class MeridianClient:
     ) -> LwwRegister:
         if crdt_id not in self._lwws:
             h = LwwRegister(
-                crdt_id, self._client_id, self._transport,
-                encrypt_fn=encrypt_fn, decrypt_fn=decrypt_fn,
+                crdt_id,
+                self._client_id,
+                self._transport,
+                encrypt_fn=encrypt_fn,
+                decrypt_fn=decrypt_fn,
             )
             self._lwws[crdt_id] = h
             self._subscribe(crdt_id)
@@ -127,8 +131,11 @@ class MeridianClient:
     ) -> Presence:
         if crdt_id not in self._presences:
             h = Presence(
-                crdt_id, self._client_id, self._transport,
-                encrypt_fn=encrypt_fn, decrypt_fn=decrypt_fn,
+                crdt_id,
+                self._client_id,
+                self._transport,
+                encrypt_fn=encrypt_fn,
+                decrypt_fn=decrypt_fn,
             )
             self._presences[crdt_id] = h
             self._subscribe(crdt_id)
@@ -203,7 +210,11 @@ class MeridianClient:
                     pass
         elif "Error" in msg:
             import logging
-            logging.getLogger(__name__).warning("server error %s: %s", msg["Error"].get("code"), msg["Error"].get("message"))
+
+            err = msg["Error"]
+            logging.getLogger(__name__).warning(
+                "server error %s: %s", err.get("code"), err.get("message")
+            )
 
     def _handle_delta(self, delta: dict) -> None:
         crdt_id = delta.get("crdt_id", "")
@@ -228,16 +239,23 @@ class MeridianClient:
             if h._decrypt_fn is None:
                 h._apply_delta_sync(raw)
             else:
-                asyncio.create_task(h._apply_delta(raw))
+                self._spawn(h._apply_delta(raw))
         elif crdt_id in self._presences:
-            asyncio.create_task(self._presences[crdt_id]._apply_delta(raw))
+            self._spawn(self._presences[crdt_id]._apply_delta(raw))
+
+    def _spawn(self, coro) -> None:
+        t = asyncio.create_task(coro)
+        self._bg_tasks.add(t)
+        t.add_done_callback(self._bg_tasks.discard)
 
 
 def _derive_client_id(token: str) -> int:
     """Decode the client_id from a Meridian token (msgpack + no signature check)."""
     try:
         import base64
+
         import msgpack
+
         # Meridian tokens: base64url(msgpack(claims)) + "." + base64url(hmac)
         payload = token.split(".")[0]
         pad = 4 - len(payload) % 4

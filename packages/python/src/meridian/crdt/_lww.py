@@ -1,7 +1,7 @@
 import asyncio
 import time
 from collections.abc import AsyncIterator
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .._codec import encode
 
@@ -67,7 +67,8 @@ class LwwRegister:
                 msg["Op"]["ttl_ms"] = ttl_ms
             self._transport.send(msg)
         else:
-            asyncio.create_task(self._send_set(value, hlc, ttl_ms))
+            t = asyncio.create_task(self._send_set(value, hlc, ttl_ms))
+            t.add_done_callback(lambda _: None)
 
     async def set_async(self, value: Any, *, ttl_ms: int | None = None) -> None:
         """Awaitable version — use when an encrypt_fn is configured."""
@@ -119,7 +120,8 @@ class LwwRegister:
         if entry is None:
             return
         if self._wins(entry, self._entry):
-            if self._decrypt_fn and isinstance(entry.get("value"), dict) and entry["value"].get("$e") == 1:
+            v = entry.get("value")
+            if self._decrypt_fn and isinstance(v, dict) and v.get("$e") == 1:
                 entry = dict(entry)
                 entry["value"] = await self._decrypt_fn(entry["value"])
             self._entry = entry

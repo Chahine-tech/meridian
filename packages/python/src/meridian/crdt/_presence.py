@@ -2,7 +2,7 @@ import asyncio
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .._codec import encode
 
@@ -50,7 +50,8 @@ class Presence:
     # ── write ─────────────────────────────────────────────────────────────────
 
     def join(self, data: Any, *, ttl_ms: int = 30_000) -> None:
-        asyncio.create_task(self._send_heartbeat(data, ttl_ms))
+        t = asyncio.create_task(self._send_heartbeat(data, ttl_ms))
+        t.add_done_callback(lambda _: None)
 
     async def join_async(self, data: Any, *, ttl_ms: int = 30_000) -> None:
         await self._send_heartbeat(data, ttl_ms)
@@ -80,16 +81,18 @@ class Presence:
         wall_ms = int(time.time() * 1000)
         hlc = {"wall_ms": wall_ms, "logical": 0, "node_id": self._client_id}
         wire_data = await self._encrypt_fn(data) if self._encrypt_fn else data
-        op = encode({
-            "Presence": {
-                "Heartbeat": {
-                    "client_id": self._client_id,
-                    "data": wire_data,
-                    "hlc": hlc,
-                    "ttl_ms": ttl_ms,
+        op = encode(
+            {
+                "Presence": {
+                    "Heartbeat": {
+                        "client_id": self._client_id,
+                        "data": wire_data,
+                        "hlc": hlc,
+                        "ttl_ms": ttl_ms,
+                    }
                 }
             }
-        })
+        )
         self._transport.send({"Op": {"crdt_id": self._id, "op_bytes": op}})
 
     async def _apply_delta(self, delta: dict) -> None:

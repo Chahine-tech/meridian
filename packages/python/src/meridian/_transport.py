@@ -55,8 +55,8 @@ class Transport:
                 except (asyncio.CancelledError, Exception):
                     pass
 
-    async def wait_connected(self, timeout: float = 10.0) -> None:
-        async with asyncio.timeout(timeout):
+    async def wait_connected(self, deadline: float = 10.0) -> None:
+        async with asyncio.timeout(deadline):
             await self._connected.wait()
 
     # ── send ─────────────────────────────────────────────────────────────────
@@ -75,7 +75,8 @@ class Transport:
         backoff = _BACKOFF_INITIAL
         while not self._closed:
             try:
-                async with websockets.asyncio.client.connect(self._url, max_size=20 * 1024 * 1024) as ws:
+                _20mb = 20 * 1024 * 1024
+                async with websockets.asyncio.client.connect(self._url, max_size=_20mb) as ws:
                     self._ws = ws
                     self._connected.set()
                     backoff = _BACKOFF_INITIAL
@@ -88,7 +89,7 @@ class Transport:
                     except* ConnectionClosed:
                         pass
                     except* asyncio.CancelledError:
-                        raise asyncio.CancelledError
+                        raise asyncio.CancelledError from None
             except ConnectionClosed:
                 pass
             except Exception:

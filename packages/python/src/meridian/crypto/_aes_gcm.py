@@ -47,12 +47,7 @@ class AesGcmKey:
 
     @staticmethod
     def is_encrypted(value: object) -> bool:
-        return (
-            isinstance(value, dict)
-            and value.get("$e") == 1
-            and "n" in value
-            and "d" in value
-        )
+        return isinstance(value, dict) and value.get("$e") == 1 and "n" in value and "d" in value
 
 
 def generate_key() -> AesGcmKey:

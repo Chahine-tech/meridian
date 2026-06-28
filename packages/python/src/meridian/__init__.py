@@ -4,9 +4,9 @@ from ._client import MeridianClient
 from .crdt import GCounter, LwwRegister, PNCounter, Presence, PresenceEntry
 
 __all__ = [
-    "MeridianClient",
     "GCounter",
     "LwwRegister",
+    "MeridianClient",
     "PNCounter",
     "Presence",
     "PresenceEntry",
