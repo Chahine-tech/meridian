@@ -602,6 +602,16 @@ async fn handle_client_message<S: WsState>(
     true
 }
 
+async fn send_error(socket: &mut WebSocket, code: u16, message: &str) {
+    let err = ServerMsg::Error {
+        code,
+        message: message.to_owned(),
+    };
+    if let Ok(b) = err.to_msgpack() {
+        let _ = socket.send(Message::Binary(b.into())).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::verify_op_sig;
@@ -649,15 +659,5 @@ mod tests {
         let sk = make_key();
         let vk = sk.verifying_key();
         assert!(!verify_op_sig(vk.as_bytes(), b"msg", &[0u8; 32]));
-    }
-}
-
-async fn send_error(socket: &mut WebSocket, code: u16, message: &str) {
-    let err = ServerMsg::Error {
-        code,
-        message: message.to_owned(),
-    };
-    if let Ok(b) = err.to_msgpack() {
-        let _ = socket.send(Message::Binary(b.into())).await;
     }
 }
