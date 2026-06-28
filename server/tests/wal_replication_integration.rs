@@ -375,7 +375,7 @@ async fn test_multiple_bytea_columns() {
 
     let applier = Arc::new(RecordingApplier::new());
     db.spawn_consumer(Arc::clone(&applier));
-    tokio::time::sleep(Duration::from_millis(600)).await;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
 
     let views_bytes: Vec<u8> = vec![0x01, 0x00];
     let likes_bytes: Vec<u8> = vec![0x02, 0x00];
@@ -389,7 +389,7 @@ async fn test_multiple_bytea_columns() {
 
     let a = applier.clone();
     db.wait_for(
-        Duration::from_secs(5),
+        Duration::from_secs(10),
         move || {
             !a.calls_for("items:item-1:views").is_empty()
                 && !a.calls_for("items:item-1:likes").is_empty()

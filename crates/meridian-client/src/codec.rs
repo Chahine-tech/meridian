@@ -25,6 +25,18 @@ pub fn decode_delta<D: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<D, C
     rmp_serde::decode::from_slice(bytes).map_err(ClientError::Decode)
 }
 
+/// Encode a vector-clock map `{client_id: seq}` as msgpack bytes (for HTTP sync endpoint).
+///
+/// Wire format mirrors the TypeScript SDK: `msgpack({ entries: vc_map })`.
+#[cfg(any(feature = "http", feature = "crypto"))]
+pub fn encode_vc_map(vc: serde_json::Value) -> Result<Vec<u8>, ClientError> {
+    #[derive(serde::Serialize)]
+    struct Wrapper {
+        entries: serde_json::Value,
+    }
+    rmp_serde::encode::to_vec_named(&Wrapper { entries: vc }).map_err(ClientError::Encode)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

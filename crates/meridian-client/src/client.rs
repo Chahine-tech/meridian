@@ -21,6 +21,9 @@ use crate::{
     transport::{ConnectionState, Transport},
 };
 
+#[cfg(feature = "crypto")]
+use crate::crypto::{AesGcmKey, ClientKeypair};
+
 /// Result type for live query pushes.
 #[derive(Debug, Clone)]
 pub struct LiveQueryResult {
@@ -56,6 +59,9 @@ pub struct MeridianClient {
     // Live query registry: query_id → channel sender
     live_queries: DashMap<String, mpsc::Sender<LiveQueryResult>>,
     lq_counter: std::sync::atomic::AtomicU64,
+
+    #[cfg(feature = "crypto")]
+    signing_keypair: Option<Arc<ClientKeypair>>,
 }
 
 impl MeridianClient {
@@ -73,6 +79,49 @@ impl MeridianClient {
         let transport = crate::transport::ws::WsTransport::connect(url, namespace, token).await?;
         let client_id = rand::random::<u64>();
         Ok(Self::from_transport(namespace, client_id, transport))
+    }
+
+    /// Connect with an Ed25519 signing keypair for BFT op signing.
+    #[cfg(all(feature = "ws", feature = "crypto"))]
+    pub async fn connect_signed(
+        url: &str,
+        namespace: &str,
+        token: &str,
+        keypair: ClientKeypair,
+    ) -> Result<Arc<Self>, ClientError> {
+        let transport = crate::transport::ws::WsTransport::connect(url, namespace, token).await?;
+        let client_id = rand::random::<u64>();
+        Ok(Self::from_transport_with_keypair(namespace, client_id, transport, keypair))
+    }
+
+    #[cfg(feature = "crypto")]
+    pub fn from_transport_with_keypair(
+        namespace: &str,
+        client_id: u64,
+        transport: Arc<dyn Transport>,
+        keypair: ClientKeypair,
+    ) -> Arc<Self> {
+        let op_queue = Arc::new(OpQueue::new());
+        let client = Arc::new(Self {
+            namespace: namespace.to_owned(),
+            client_id,
+            transport: Arc::clone(&transport),
+            op_queue,
+            gc_handles: DashMap::new(),
+            pn_handles: DashMap::new(),
+            or_handles: DashMap::new(),
+            lw_handles: DashMap::new(),
+            pr_handles: DashMap::new(),
+            aw_handles: DashMap::new(),
+            rga_handles: DashMap::new(),
+            tree_handles: DashMap::new(),
+            subscriptions: DashMap::new(),
+            live_queries: DashMap::new(),
+            lq_counter: std::sync::atomic::AtomicU64::new(0),
+            signing_keypair: Some(Arc::new(keypair)),
+        });
+        Self::spawn_dispatch(Arc::clone(&client));
+        client
     }
 
     /// Create a client from an existing transport. Used in tests with `FakeTransport`.
@@ -98,6 +147,8 @@ impl MeridianClient {
             subscriptions: DashMap::new(),
             live_queries: DashMap::new(),
             lq_counter: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(feature = "crypto")]
+            signing_keypair: None,
         });
         Self::spawn_dispatch(Arc::clone(&client));
         client
@@ -344,11 +395,58 @@ impl MeridianClient {
             .lw_handles
             .entry(crdt_id.to_owned())
             .or_insert_with(|| {
-                LwwRegisterHandle::<serde_json::Value>::new(
+                #[cfg(feature = "crypto")]
+                {
+                    LwwRegisterHandle::<serde_json::Value>::new_with_crypto(
+                        crdt_id.to_owned(),
+                        self.client_id,
+                        Arc::clone(&self.transport),
+                        Arc::clone(&self.op_queue),
+                        self.signing_keypair.clone(),
+                        None,
+                        None,
+                    )
+                    .into_inner()
+                }
+                #[cfg(not(feature = "crypto"))]
+                {
+                    LwwRegisterHandle::<serde_json::Value>::new(
+                        crdt_id.to_owned(),
+                        self.client_id,
+                        Arc::clone(&self.transport),
+                        Arc::clone(&self.op_queue),
+                    )
+                    .into_inner()
+                }
+            })
+            .clone();
+        self.subscribe_crdt(crdt_id);
+        LwwRegisterHandle::from_inner(inner)
+    }
+
+    /// Get or create an encrypted LwwRegister handle.
+    ///
+    /// `encrypt_key` encrypts values before sending; `decrypt_key` decrypts incoming deltas.
+    /// Both can be the same key for symmetric encryption.
+    #[cfg(feature = "crypto")]
+    pub fn lwwregister_encrypted<T: DeserializeOwned + Serialize + Send + Sync + 'static>(
+        &self,
+        crdt_id: &str,
+        encrypt_key: Option<AesGcmKey>,
+        decrypt_key: Option<AesGcmKey>,
+    ) -> LwwRegisterHandle<T> {
+        let inner = self
+            .lw_handles
+            .entry(crdt_id.to_owned())
+            .or_insert_with(|| {
+                LwwRegisterHandle::<serde_json::Value>::new_with_crypto(
                     crdt_id.to_owned(),
                     self.client_id,
                     Arc::clone(&self.transport),
                     Arc::clone(&self.op_queue),
+                    self.signing_keypair.clone(),
+                    encrypt_key.map(Arc::new),
+                    decrypt_key.map(Arc::new),
                 )
                 .into_inner()
             })
@@ -365,11 +463,55 @@ impl MeridianClient {
             .pr_handles
             .entry(crdt_id.to_owned())
             .or_insert_with(|| {
-                PresenceHandle::<serde_json::Value>::new(
+                #[cfg(feature = "crypto")]
+                {
+                    PresenceHandle::<serde_json::Value>::new_with_crypto(
+                        crdt_id.to_owned(),
+                        self.client_id,
+                        Arc::clone(&self.transport),
+                        Arc::clone(&self.op_queue),
+                        self.signing_keypair.clone(),
+                        None,
+                        None,
+                    )
+                    .into_inner()
+                }
+                #[cfg(not(feature = "crypto"))]
+                {
+                    PresenceHandle::<serde_json::Value>::new(
+                        crdt_id.to_owned(),
+                        self.client_id,
+                        Arc::clone(&self.transport),
+                        Arc::clone(&self.op_queue),
+                    )
+                    .into_inner()
+                }
+            })
+            .clone();
+        self.subscribe_crdt(crdt_id);
+        PresenceHandle::from_inner(inner)
+    }
+
+    /// Get or create an encrypted Presence handle.
+    #[cfg(feature = "crypto")]
+    pub fn presence_encrypted<T: DeserializeOwned + Serialize + Send + Sync + 'static>(
+        &self,
+        crdt_id: &str,
+        encrypt_key: Option<AesGcmKey>,
+        decrypt_key: Option<AesGcmKey>,
+    ) -> PresenceHandle<T> {
+        let inner = self
+            .pr_handles
+            .entry(crdt_id.to_owned())
+            .or_insert_with(|| {
+                PresenceHandle::<serde_json::Value>::new_with_crypto(
                     crdt_id.to_owned(),
                     self.client_id,
                     Arc::clone(&self.transport),
                     Arc::clone(&self.op_queue),
+                    self.signing_keypair.clone(),
+                    encrypt_key.map(Arc::new),
+                    decrypt_key.map(Arc::new),
                 )
                 .into_inner()
             })
