@@ -47,7 +47,10 @@ pub trait WalBackend: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = Result<Vec<WalEntry>>> + Send {
         async move {
             let entries = self.replay_from(from_seq).await?;
-            Ok(entries.into_iter().filter(|e| e.timestamp_ms <= until_ms).collect())
+            Ok(entries
+                .into_iter()
+                .filter(|e| e.timestamp_ms <= until_ms)
+                .collect())
         }
     }
 
@@ -64,8 +67,5 @@ pub trait WalBackend: Send + Sync + 'static {
     fn checkpoint_seq(&self) -> u64;
 
     /// Persist the new checkpoint sequence number.
-    fn set_checkpoint_seq(
-        &self,
-        seq: u64,
-    ) -> impl std::future::Future<Output = Result<()>> + Send;
+    fn set_checkpoint_seq(&self, seq: u64) -> impl std::future::Future<Output = Result<()>> + Send;
 }

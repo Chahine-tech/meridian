@@ -38,22 +38,20 @@ pub struct PgWal {
 impl PgWal {
     pub async fn new(pool: PgPool) -> Result<Self> {
         // Read current max seq and checkpoint from DB to resume after restart.
-        let last: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(seq), 0) FROM wal_entries",
-        )
-        .fetch_one(&pool)
-        .await?;
+        let last: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(seq), 0) FROM wal_entries")
+            .fetch_one(&pool)
+            .await?;
 
-        let checkpoint: i64 =
-            sqlx::query_scalar("SELECT seq FROM wal_checkpoint WHERE id = 1")
-                .fetch_optional(&pool)
-                .await?
-                .unwrap_or(0);
+        let checkpoint: i64 = sqlx::query_scalar("SELECT seq FROM wal_checkpoint WHERE id = 1")
+            .fetch_optional(&pool)
+            .await?
+            .unwrap_or(0);
 
         let last_seq = u64::try_from(last)
             .map_err(|_| StorageError::InvalidKey(format!("corrupt WAL seq in DB: {last}")))?;
-        let checkpoint_seq = u64::try_from(checkpoint)
-            .map_err(|_| StorageError::InvalidKey(format!("corrupt checkpoint seq in DB: {checkpoint}")))?;
+        let checkpoint_seq = u64::try_from(checkpoint).map_err(|_| {
+            StorageError::InvalidKey(format!("corrupt checkpoint seq in DB: {checkpoint}"))
+        })?;
 
         Ok(Self {
             pool,
@@ -93,11 +91,9 @@ impl PgWal {
         )
         .execute(pool)
         .await?;
-        sqlx::query(
-            "INSERT INTO wal_checkpoint (id, seq) VALUES (1, 0) ON CONFLICT DO NOTHING",
-        )
-        .execute(pool)
-        .await?;
+        sqlx::query("INSERT INTO wal_checkpoint (id, seq) VALUES (1, 0) ON CONFLICT DO NOTHING")
+            .execute(pool)
+            .await?;
         Ok(())
     }
 }
@@ -121,8 +117,9 @@ impl WalBackend for PgWal {
         .fetch_one(&self.pool)
         .await?;
 
-        let seq = u64::try_from(seq)
-            .map_err(|_| StorageError::InvalidKey(format!("corrupt WAL seq returned by DB: {seq}")))?;
+        let seq = u64::try_from(seq).map_err(|_| {
+            StorageError::InvalidKey(format!("corrupt WAL seq returned by DB: {seq}"))
+        })?;
         self.last_seq.fetch_max(seq, Ordering::Relaxed);
         Ok(seq)
     }
@@ -193,14 +190,11 @@ impl WalBackend for PgWal {
     }
 
     async fn set_checkpoint_seq(&self, seq: u64) -> Result<()> {
-        sqlx::query(
-            "UPDATE wal_checkpoint SET seq = $1 WHERE id = 1",
-        )
-        .bind(seq as i64)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("UPDATE wal_checkpoint SET seq = $1 WHERE id = 1")
+            .bind(seq as i64)
+            .execute(&self.pool)
+            .await?;
         self.checkpoint_seq.store(seq, Ordering::Relaxed);
         Ok(())
     }
 }
-

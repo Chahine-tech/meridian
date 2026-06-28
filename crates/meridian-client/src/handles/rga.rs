@@ -1,12 +1,12 @@
 use std::sync::{Arc, Mutex};
 
 use meridian_core::{
-    crdt::{
-        clock::{now_ms, HybridLogicalClock},
-        rga::{Rga, RgaDelta, RgaOp},
-        Crdt,
-    },
     crdt::registry::{CrdtOp, VersionedOp},
+    crdt::{
+        Crdt,
+        clock::{HybridLogicalClock, now_ms},
+        rga::{Rga, RgaDelta, RgaOp},
+    },
     protocol::ClientMsg,
 };
 use tokio::sync::watch;
@@ -15,12 +15,12 @@ use crate::{codec, error::ClientError, op_queue::OpQueue, transport::Transport};
 
 #[allow(dead_code)]
 pub(crate) struct RgaInner {
-    state:     Mutex<Rga>,
-    watch_tx:  watch::Sender<String>,
-    crdt_id:   String,
+    state: Mutex<Rga>,
+    watch_tx: watch::Sender<String>,
+    crdt_id: String,
     client_id: u64,
     transport: Arc<dyn Transport>,
-    op_queue:  Arc<OpQueue>,
+    op_queue: Arc<OpQueue>,
 }
 
 /// Live handle to an RGA collaborative text CRDT.
@@ -89,7 +89,11 @@ impl RgaHandle {
                     logical: i as u16,
                     node_id: self.0.client_id,
                 };
-                ops.push(RgaOp::Insert { id, origin_id: prev_origin, content: ch });
+                ops.push(RgaOp::Insert {
+                    id,
+                    origin_id: prev_origin,
+                    content: ch,
+                });
                 prev_origin = Some(id);
             }
             ops
@@ -102,7 +106,12 @@ impl RgaHandle {
             }
             let new_text = state.value().text;
             let _ = self.0.watch_tx.send_if_modified(|v| {
-                if *v != new_text { *v = new_text; true } else { false }
+                if *v != new_text {
+                    *v = new_text;
+                    true
+                } else {
+                    false
+                }
             });
         }
 
@@ -110,12 +119,16 @@ impl RgaHandle {
         for op in ops {
             let versioned = VersionedOp::new(CrdtOp::RGA(op));
             let op_bytes = codec::encode_op(&versioned)?;
-            self.0.transport.send(ClientMsg::Op {
-                crdt_id: self.0.crdt_id.clone(),
-                op_bytes,
-                ttl_ms: None,
-                client_seq: None,
-            }).await?;
+            self.0
+                .transport
+                .send(ClientMsg::Op {
+                    crdt_id: self.0.crdt_id.clone(),
+                    op_bytes,
+                    ttl_ms: None,
+                    client_seq: None,
+                    sig: None,
+                })
+                .await?;
         }
         Ok(())
     }
@@ -125,7 +138,10 @@ impl RgaHandle {
         let ops: Vec<RgaOp> = {
             let state = self.0.state.lock().expect("rga lock poisoned");
             let visible: Vec<_> = state.nodes.iter().filter(|n| !n.deleted).collect();
-            visible.iter().skip(pos).take(len)
+            visible
+                .iter()
+                .skip(pos)
+                .take(len)
                 .map(|n| RgaOp::Delete { id: n.id })
                 .collect()
         };
@@ -137,19 +153,28 @@ impl RgaHandle {
             }
             let new_text = state.value().text;
             let _ = self.0.watch_tx.send_if_modified(|v| {
-                if *v != new_text { *v = new_text; true } else { false }
+                if *v != new_text {
+                    *v = new_text;
+                    true
+                } else {
+                    false
+                }
             });
         }
 
         for op in ops {
             let versioned = VersionedOp::new(CrdtOp::RGA(op));
             let op_bytes = codec::encode_op(&versioned)?;
-            self.0.transport.send(ClientMsg::Op {
-                crdt_id: self.0.crdt_id.clone(),
-                op_bytes,
-                ttl_ms: None,
-                client_seq: None,
-            }).await?;
+            self.0
+                .transport
+                .send(ClientMsg::Op {
+                    crdt_id: self.0.crdt_id.clone(),
+                    op_bytes,
+                    ttl_ms: None,
+                    client_seq: None,
+                    sig: None,
+                })
+                .await?;
         }
         Ok(())
     }
@@ -160,7 +185,12 @@ impl RgaHandle {
         state.merge_delta(delta);
         let new_text = state.value().text;
         let _ = self.0.watch_tx.send_if_modified(|v| {
-            if *v != new_text { *v = new_text; true } else { false }
+            if *v != new_text {
+                *v = new_text;
+                true
+            } else {
+                false
+            }
         });
         Ok(())
     }

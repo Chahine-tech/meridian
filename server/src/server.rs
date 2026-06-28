@@ -7,15 +7,15 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
+    AppState,
     api::build_router,
     api::ws::SubscriptionManager,
     auth::{AuthState, TokenSigner},
     crdt::registry::CrdtValue,
     rate_limit::RateLimiter,
     storage::{CrdtStore, Store, WalBackend},
-    tasks::{run_presence_gc, run_snapshot_flusher, run_wal_compactor},
+    tasks::{run_crdt_compactor, run_presence_gc, run_snapshot_flusher, run_wal_compactor},
     webhooks::{WebhookConfig, WebhookDispatcher},
-    AppState,
 };
 
 // Config
@@ -63,8 +63,7 @@ impl Config {
 // run — wire all services and start the HTTP server
 
 pub async fn run<S, W>(
-    #[cfg_attr(not(feature = "pg-sync"), allow(unused_mut))]
-    mut config: Config,
+    #[cfg_attr(not(feature = "pg-sync"), allow(unused_mut))] mut config: Config,
     prometheus_handle: PrometheusHandle,
     store: Arc<S>,
     wal: Arc<W>,
@@ -105,27 +104,36 @@ where
     // pg-sync transport: PostgreSQL NOTIFY/LISTEN + optional WAL replication.
     // Activates when `--features pg-sync` is compiled and DATABASE_URL is set.
     // Independent of MERIDIAN_PEERS / REDIS_URL — works as a single node.
-    #[cfg(all(feature = "pg-sync", not(feature = "cluster"), not(feature = "cluster-http")))]
+    #[cfg(all(
+        feature = "pg-sync",
+        not(feature = "cluster"),
+        not(feature = "cluster-http")
+    ))]
     {
         use crate::cluster::pg_transport::{PostgresNotifyTransport, StorePgApplier};
         use meridian_cluster::NodeId;
         use sqlx::postgres::PgPoolOptions;
 
-        let pg_url = config.database_url.clone()
+        let pg_url = config
+            .database_url
+            .clone()
             .or_else(|| std::env::var("DATABASE_URL").ok())
             .or_else(|| std::env::var("PG_SYNC_DATABASE_URL").ok());
 
         if let Some(pg_url) = pg_url {
             let pg_pool = match config.pg_pool.take() {
                 Some(pool) => pool,
-                None => PgPoolOptions::new().max_connections(4).connect(&pg_url).await?,
+                None => {
+                    PgPoolOptions::new()
+                        .max_connections(4)
+                        .connect(&pg_url)
+                        .await?
+                }
             };
 
             let node_id = NodeId::from_env_or_hostname(config.bind_port());
             info!(node_id = %node_id, "pg-sync: PostgreSQL NOTIFY/LISTEN transport active");
-            let pg_transport = Arc::new(
-                PostgresNotifyTransport::new(pg_pool, node_id).await?
-            );
+            let pg_transport = Arc::new(PostgresNotifyTransport::new(pg_pool, node_id).await?);
 
             let applier = Arc::new(StorePgApplier::new(
                 Arc::clone(&store),
@@ -134,10 +142,10 @@ where
             pg_transport.spawn_listener(Arc::clone(&applier));
 
             if let Ok(wal_connstr) = std::env::var("MERIDIAN_WAL_CONNSTR") {
-                let slot = std::env::var("MERIDIAN_WAL_SLOT")
-                    .unwrap_or_else(|_| "meridian_wal".into());
-                let pub_ = std::env::var("MERIDIAN_WAL_PUB")
-                    .unwrap_or_else(|_| "meridian_pub".into());
+                let slot =
+                    std::env::var("MERIDIAN_WAL_SLOT").unwrap_or_else(|_| "meridian_wal".into());
+                let pub_ =
+                    std::env::var("MERIDIAN_WAL_PUB").unwrap_or_else(|_| "meridian_pub".into());
                 info!(slot = %slot, publication = %pub_, "WAL replication consumer starting");
                 pg_transport.spawn_wal_replication(wal_connstr, slot, pub_, applier);
             } else {
@@ -153,13 +161,16 @@ where
     //   `--features cluster-http` → HTTP push (PostgreSQL-only deployments)
     #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
     let cluster = {
+        use crate::cluster::anti_entropy::StoreApplier;
         use meridian_cluster::ClusterConfig;
         #[cfg(any(feature = "cluster", feature = "cluster-http"))]
         use meridian_cluster::{ClusterHandle, ClusterTransport};
-        use crate::cluster::anti_entropy::StoreApplier;
 
         #[cfg(not(any(feature = "cluster", feature = "cluster-http")))]
-        let _ = (ClusterConfig::from_env(config.bind_port()), StoreApplier::new(Arc::clone(&store)));
+        let _ = (
+            ClusterConfig::from_env(config.bind_port()),
+            StoreApplier::new(Arc::clone(&store)),
+        );
 
         #[cfg(any(feature = "cluster", feature = "cluster-http"))]
         let cluster_handle = if let Some(cfg) = ClusterConfig::from_env(config.bind_port()) {
@@ -171,7 +182,8 @@ where
                 match &cfg.redis_url {
                     Some(url) => {
                         info!(node_id = %node_id, "cluster enabled — Redis Pub/Sub transport");
-                        let t: Arc<dyn ClusterTransport> = Arc::new(RedisTransport::new(url, node_id).await?);
+                        let t: Arc<dyn ClusterTransport> =
+                            Arc::new(RedisTransport::new(url, node_id).await?);
                         (t, cfg)
                     }
                     None => anyhow::bail!("--features cluster requires REDIS_URL"),
@@ -183,16 +195,19 @@ where
                 use meridian_cluster::HttpPushTransport;
                 info!(node_id = %node_id, peers = cfg.peers.len(), "cluster enabled — HTTP push transport");
 
-                let t = Arc::new(
-                    HttpPushTransport::with_wal(cfg.peers.clone(), node_id, Arc::clone(&wal))
-                );
+                let t = Arc::new(HttpPushTransport::with_wal(
+                    cfg.peers.clone(),
+                    node_id,
+                    Arc::clone(&wal),
+                ));
 
                 let internal_bind = std::env::var("MERIDIAN_INTERNAL_BIND")
                     .unwrap_or_else(|_| "0.0.0.0:3001".into());
                 let internal_router = t.router();
                 let cancel_clone = cancel.clone();
-                let internal_listener = TcpListener::bind(&internal_bind).await
-                    .map_err(|e| anyhow::anyhow!("failed to bind internal cluster port {internal_bind}: {e}"))?;
+                let internal_listener = TcpListener::bind(&internal_bind).await.map_err(|e| {
+                    anyhow::anyhow!("failed to bind internal cluster port {internal_bind}: {e}")
+                })?;
                 info!(addr = internal_bind, "cluster internal API listening");
                 tokio::spawn(async move {
                     if let Err(e) = axum::serve(internal_listener, internal_router)
@@ -235,9 +250,13 @@ where
         };
 
         #[cfg(any(feature = "cluster", feature = "cluster-http"))]
-        { cluster_handle }
+        {
+            cluster_handle
+        }
         #[cfg(not(any(feature = "cluster", feature = "cluster-http")))]
-        { None::<std::sync::Arc<meridian_cluster::ClusterHandle>> }
+        {
+            None::<std::sync::Arc<meridian_cluster::ClusterHandle>>
+        }
     };
 
     #[cfg(not(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync")))]
@@ -267,6 +286,8 @@ where
         cancel.clone(),
     ));
 
+    let crdt_compact_handle = tokio::spawn(run_crdt_compactor(Arc::clone(&store), cancel.clone()));
+
     let router = build_router(state, auth_state).layer(Extension(prometheus_handle));
 
     let listener = TcpListener::bind(&config.bind).await?;
@@ -284,10 +305,20 @@ where
         })
         .await?;
 
-    let (gc, flush, compact) = tokio::join!(gc_handle, flush_handle, compact_handle);
-    if let Err(e) = gc      { tracing::error!(error = %e, "presence GC task panicked"); }
-    if let Err(e) = flush   { tracing::error!(error = %e, "snapshot flusher task panicked"); }
-    if let Err(e) = compact { tracing::error!(error = %e, "WAL compactor task panicked"); }
+    let (gc, flush, compact, crdt_compact) =
+        tokio::join!(gc_handle, flush_handle, compact_handle, crdt_compact_handle);
+    if let Err(e) = gc {
+        tracing::error!(error = %e, "presence GC task panicked");
+    }
+    if let Err(e) = flush {
+        tracing::error!(error = %e, "snapshot flusher task panicked");
+    }
+    if let Err(e) = compact {
+        tracing::error!(error = %e, "WAL compactor task panicked");
+    }
+    if let Err(e) = crdt_compact {
+        tracing::error!(error = %e, "CRDT compactor task panicked");
+    }
 
     info!("Meridian stopped cleanly");
     Ok(())

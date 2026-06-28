@@ -7,9 +7,8 @@
 #[cfg(feature = "transport-http")]
 mod tests {
     use std::sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
-        Mutex,
     };
     use std::time::Duration;
 
@@ -18,8 +17,8 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use meridian_cluster::{
-        AntiEntropyApplier, ClusterConfig, ClusterTransport, DeltaEnvelope,
-        LocalBroadcast, NodeId, Result as ClusterResult, run_anti_entropy,
+        AntiEntropyApplier, ClusterConfig, ClusterTransport, DeltaEnvelope, LocalBroadcast, NodeId,
+        Result as ClusterResult, run_anti_entropy,
     };
     use meridian_storage::{WalBackend, WalEntry};
 
@@ -35,11 +34,17 @@ mod tests {
     impl FakeWal {
         fn new(entries: Vec<WalEntry>) -> Self {
             let last = entries.last().map(|e| e.seq).unwrap_or(0);
-            Self { entries, last: AtomicU64::new(last) }
+            Self {
+                entries,
+                last: AtomicU64::new(last),
+            }
         }
 
         fn with_last_zero(entries: Vec<WalEntry>) -> Self {
-            Self { entries, last: AtomicU64::new(0) }
+            Self {
+                entries,
+                last: AtomicU64::new(0),
+            }
         }
     }
 
@@ -48,12 +53,25 @@ mod tests {
             unimplemented!()
         }
         async fn replay_from(&self, from_seq: u64) -> meridian_storage::Result<Vec<WalEntry>> {
-            Ok(self.entries.iter().filter(|e| e.seq >= from_seq).cloned().collect())
+            Ok(self
+                .entries
+                .iter()
+                .filter(|e| e.seq >= from_seq)
+                .cloned()
+                .collect())
         }
-        async fn truncate_before(&self, _: u64) -> meridian_storage::Result<()> { Ok(()) }
-        fn last_seq(&self) -> u64 { self.last.load(Ordering::Relaxed) }
-        fn checkpoint_seq(&self) -> u64 { 0 }
-        async fn set_checkpoint_seq(&self, _: u64) -> meridian_storage::Result<()> { Ok(()) }
+        async fn truncate_before(&self, _: u64) -> meridian_storage::Result<()> {
+            Ok(())
+        }
+        fn last_seq(&self) -> u64 {
+            self.last.load(Ordering::Relaxed)
+        }
+        fn checkpoint_seq(&self) -> u64 {
+            0
+        }
+        async fn set_checkpoint_seq(&self, _: u64) -> meridian_storage::Result<()> {
+            Ok(())
+        }
     }
 
     struct EchoApplier {
@@ -64,19 +82,33 @@ mod tests {
 
     impl EchoApplier {
         fn returning(delta: &[u8]) -> Self {
-            Self { calls: Mutex::new(vec![]), response: Some(delta.to_vec()) }
+            Self {
+                calls: Mutex::new(vec![]),
+                response: Some(delta.to_vec()),
+            }
         }
         fn noop() -> Self {
-            Self { calls: Mutex::new(vec![]), response: None }
+            Self {
+                calls: Mutex::new(vec![]),
+                response: None,
+            }
         }
-        fn call_count(&self) -> usize { self.calls.lock().unwrap().len() }
+        fn call_count(&self) -> usize {
+            self.calls.lock().unwrap().len()
+        }
     }
 
     impl AntiEntropyApplier for EchoApplier {
         async fn apply_wal_op(
-            &self, namespace: &str, crdt_id: &str, _op_bytes: Vec<u8>,
+            &self,
+            namespace: &str,
+            crdt_id: &str,
+            _op_bytes: Vec<u8>,
         ) -> Result<Option<Vec<u8>>, String> {
-            self.calls.lock().unwrap().push((namespace.to_owned(), crdt_id.to_owned()));
+            self.calls
+                .lock()
+                .unwrap()
+                .push((namespace.to_owned(), crdt_id.to_owned()));
             Ok(self.response.clone())
         }
     }
@@ -87,8 +119,14 @@ mod tests {
     }
 
     impl RecordingBroadcast {
-        fn new() -> Self { Self { published: Mutex::new(vec![]) } }
-        fn count(&self) -> usize { self.published.lock().unwrap().len() }
+        fn new() -> Self {
+            Self {
+                published: Mutex::new(vec![]),
+            }
+        }
+        fn count(&self) -> usize {
+            self.published.lock().unwrap().len()
+        }
     }
 
     impl LocalBroadcast for RecordingBroadcast {
@@ -106,8 +144,14 @@ mod tests {
     }
 
     impl RecordingTransport {
-        fn new() -> Arc<Self> { Arc::new(Self { sent: Mutex::new(vec![]) }) }
-        fn count(&self) -> usize { self.sent.lock().unwrap().len() }
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                sent: Mutex::new(vec![]),
+            })
+        }
+        fn count(&self) -> usize {
+            self.sent.lock().unwrap().len()
+        }
     }
 
     #[async_trait::async_trait]
@@ -151,7 +195,16 @@ mod tests {
         let cancel_clone = cancel.clone();
         let transport_dyn: Arc<dyn ClusterTransport> = transport;
         tokio::spawn(async move {
-            run_anti_entropy(wal, applier, broadcast, transport_dyn, NodeId(1), cfg, cancel_clone).await;
+            run_anti_entropy(
+                wal,
+                applier,
+                broadcast,
+                transport_dyn,
+                NodeId(1),
+                cfg,
+                cancel_clone,
+            )
+            .await;
         });
         cancel
     }

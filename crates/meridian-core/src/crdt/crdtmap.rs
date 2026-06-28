@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
+    Crdt, CrdtError, VectorClock,
     gcounter::{GCounter, GCounterDelta, GCounterOp},
     lwwregister::{LwwDelta, LwwOp, LwwRegister},
     orset::{ORSet, ORSetDelta, ORSetOp},
@@ -11,7 +12,6 @@ use super::{
     registry::CrdtType,
     rga::{Rga, RgaDelta, RgaOp},
     tree::{TreeCrdt, TreeDelta, TreeOp},
-    Crdt, CrdtError, VectorClock,
 };
 
 //
@@ -75,38 +75,38 @@ pub enum CrdtMapInnerValue {
 impl CrdtMapInnerValue {
     pub fn new(crdt_type: CrdtType) -> Self {
         match crdt_type {
-            CrdtType::GCounter    => Self::GCounter(GCounter::default()),
-            CrdtType::PNCounter   => Self::PNCounter(PNCounter::default()),
-            CrdtType::ORSet       => Self::ORSet(ORSet::default()),
+            CrdtType::GCounter => Self::GCounter(GCounter::default()),
+            CrdtType::PNCounter => Self::PNCounter(PNCounter::default()),
+            CrdtType::ORSet => Self::ORSet(ORSet::default()),
             CrdtType::LwwRegister => Self::LwwRegister(LwwRegister::default()),
-            CrdtType::Presence    => Self::Presence(Presence::default()),
-            CrdtType::Rga         => Self::RGA(Rga::default()),
-            CrdtType::Tree        => Self::Tree(TreeCrdt::default()),
-            CrdtType::CRDTMap     => unreachable!("CRDTMap cannot be nested"),
+            CrdtType::Presence => Self::Presence(Presence::default()),
+            CrdtType::Rga => Self::RGA(Rga::default()),
+            CrdtType::Tree => Self::Tree(TreeCrdt::default()),
+            CrdtType::CRDTMap => unreachable!("CRDTMap cannot be nested"),
         }
     }
 
     pub fn crdt_type(&self) -> CrdtType {
         match self {
-            Self::GCounter(_)    => CrdtType::GCounter,
-            Self::PNCounter(_)   => CrdtType::PNCounter,
-            Self::ORSet(_)       => CrdtType::ORSet,
+            Self::GCounter(_) => CrdtType::GCounter,
+            Self::PNCounter(_) => CrdtType::PNCounter,
+            Self::ORSet(_) => CrdtType::ORSet,
             Self::LwwRegister(_) => CrdtType::LwwRegister,
-            Self::Presence(_)    => CrdtType::Presence,
-            Self::RGA(_)         => CrdtType::Rga,
-            Self::Tree(_)        => CrdtType::Tree,
+            Self::Presence(_) => CrdtType::Presence,
+            Self::RGA(_) => CrdtType::Rga,
+            Self::Tree(_) => CrdtType::Tree,
         }
     }
 
     pub fn to_json_value(&self) -> serde_json::Value {
         match self {
-            Self::GCounter(v)    => serde_json::to_value(v.value()).unwrap_or_default(),
-            Self::PNCounter(v)   => serde_json::to_value(v.value()).unwrap_or_default(),
-            Self::ORSet(v)       => serde_json::to_value(v.value()).unwrap_or_default(),
+            Self::GCounter(v) => serde_json::to_value(v.value()).unwrap_or_default(),
+            Self::PNCounter(v) => serde_json::to_value(v.value()).unwrap_or_default(),
+            Self::ORSet(v) => serde_json::to_value(v.value()).unwrap_or_default(),
             Self::LwwRegister(v) => serde_json::to_value(v.value()).unwrap_or_default(),
-            Self::Presence(v)    => serde_json::to_value(v.value()).unwrap_or_default(),
-            Self::RGA(v)         => serde_json::to_value(v.value()).unwrap_or_default(),
-            Self::Tree(v)        => serde_json::to_value(v.value()).unwrap_or_default(),
+            Self::Presence(v) => serde_json::to_value(v.value()).unwrap_or_default(),
+            Self::RGA(v) => serde_json::to_value(v.value()).unwrap_or_default(),
+            Self::Tree(v) => serde_json::to_value(v.value()).unwrap_or_default(),
         }
     }
 }
@@ -121,39 +121,55 @@ fn apply_inner(
     op: CrdtInnerOp,
 ) -> Result<Option<CrdtValueDelta>, CrdtError> {
     match (inner, op) {
-        (CrdtMapInnerValue::GCounter(v),    CrdtInnerOp::GCounter(o))    => Ok(v.apply(o)?.map(CrdtValueDelta::GCounter)),
-        (CrdtMapInnerValue::PNCounter(v),   CrdtInnerOp::PNCounter(o))   => Ok(v.apply(o)?.map(CrdtValueDelta::PNCounter)),
-        (CrdtMapInnerValue::ORSet(v),       CrdtInnerOp::ORSet(o))       => Ok(v.apply(o)?.map(CrdtValueDelta::ORSet)),
-        (CrdtMapInnerValue::LwwRegister(v), CrdtInnerOp::LwwRegister(o)) => Ok(v.apply(o)?.map(CrdtValueDelta::LwwRegister)),
-        (CrdtMapInnerValue::Presence(v),    CrdtInnerOp::Presence(o))    => Ok(v.apply(o)?.map(CrdtValueDelta::Presence)),
-        (CrdtMapInnerValue::RGA(v),         CrdtInnerOp::RGA(o))         => Ok(v.apply(o)?.map(CrdtValueDelta::RGA)),
-        (CrdtMapInnerValue::Tree(v),        CrdtInnerOp::Tree(o))        => Ok(v.apply(o)?.map(CrdtValueDelta::Tree)),
-        _ => Err(CrdtError::InvalidOp("inner op type does not match inner crdt type".into())),
+        (CrdtMapInnerValue::GCounter(v), CrdtInnerOp::GCounter(o)) => {
+            Ok(v.apply(o)?.map(CrdtValueDelta::GCounter))
+        }
+        (CrdtMapInnerValue::PNCounter(v), CrdtInnerOp::PNCounter(o)) => {
+            Ok(v.apply(o)?.map(CrdtValueDelta::PNCounter))
+        }
+        (CrdtMapInnerValue::ORSet(v), CrdtInnerOp::ORSet(o)) => {
+            Ok(v.apply(o)?.map(CrdtValueDelta::ORSet))
+        }
+        (CrdtMapInnerValue::LwwRegister(v), CrdtInnerOp::LwwRegister(o)) => {
+            Ok(v.apply(o)?.map(CrdtValueDelta::LwwRegister))
+        }
+        (CrdtMapInnerValue::Presence(v), CrdtInnerOp::Presence(o)) => {
+            Ok(v.apply(o)?.map(CrdtValueDelta::Presence))
+        }
+        (CrdtMapInnerValue::RGA(v), CrdtInnerOp::RGA(o)) => {
+            Ok(v.apply(o)?.map(CrdtValueDelta::RGA))
+        }
+        (CrdtMapInnerValue::Tree(v), CrdtInnerOp::Tree(o)) => {
+            Ok(v.apply(o)?.map(CrdtValueDelta::Tree))
+        }
+        _ => Err(CrdtError::InvalidOp(
+            "inner op type does not match inner crdt type".into(),
+        )),
     }
 }
 
 fn merge_inner(a: &mut CrdtMapInnerValue, b: &CrdtMapInnerValue) {
     match (a, b) {
-        (CrdtMapInnerValue::GCounter(x),    CrdtMapInnerValue::GCounter(y))    => x.merge(y),
-        (CrdtMapInnerValue::PNCounter(x),   CrdtMapInnerValue::PNCounter(y))   => x.merge(y),
-        (CrdtMapInnerValue::ORSet(x),       CrdtMapInnerValue::ORSet(y))       => x.merge(y),
+        (CrdtMapInnerValue::GCounter(x), CrdtMapInnerValue::GCounter(y)) => x.merge(y),
+        (CrdtMapInnerValue::PNCounter(x), CrdtMapInnerValue::PNCounter(y)) => x.merge(y),
+        (CrdtMapInnerValue::ORSet(x), CrdtMapInnerValue::ORSet(y)) => x.merge(y),
         (CrdtMapInnerValue::LwwRegister(x), CrdtMapInnerValue::LwwRegister(y)) => x.merge(y),
-        (CrdtMapInnerValue::Presence(x),    CrdtMapInnerValue::Presence(y))    => x.merge(y),
-        (CrdtMapInnerValue::RGA(x),         CrdtMapInnerValue::RGA(y))         => x.merge(y),
-        (CrdtMapInnerValue::Tree(x),        CrdtMapInnerValue::Tree(y))        => x.merge(y),
+        (CrdtMapInnerValue::Presence(x), CrdtMapInnerValue::Presence(y)) => x.merge(y),
+        (CrdtMapInnerValue::RGA(x), CrdtMapInnerValue::RGA(y)) => x.merge(y),
+        (CrdtMapInnerValue::Tree(x), CrdtMapInnerValue::Tree(y)) => x.merge(y),
         _ => {} // type mismatch — self wins
     }
 }
 
 fn merge_delta_inner(inner: &mut CrdtMapInnerValue, delta: CrdtValueDelta) {
     match (inner, delta) {
-        (CrdtMapInnerValue::GCounter(v),    CrdtValueDelta::GCounter(d))    => v.merge_delta(d),
-        (CrdtMapInnerValue::PNCounter(v),   CrdtValueDelta::PNCounter(d))   => v.merge_delta(d),
-        (CrdtMapInnerValue::ORSet(v),       CrdtValueDelta::ORSet(d))       => v.merge_delta(d),
+        (CrdtMapInnerValue::GCounter(v), CrdtValueDelta::GCounter(d)) => v.merge_delta(d),
+        (CrdtMapInnerValue::PNCounter(v), CrdtValueDelta::PNCounter(d)) => v.merge_delta(d),
+        (CrdtMapInnerValue::ORSet(v), CrdtValueDelta::ORSet(d)) => v.merge_delta(d),
         (CrdtMapInnerValue::LwwRegister(v), CrdtValueDelta::LwwRegister(d)) => v.merge_delta(d),
-        (CrdtMapInnerValue::Presence(v),    CrdtValueDelta::Presence(d))    => v.merge_delta(d),
-        (CrdtMapInnerValue::RGA(v),         CrdtValueDelta::RGA(d))         => v.merge_delta(d),
-        (CrdtMapInnerValue::Tree(v),        CrdtValueDelta::Tree(d))        => v.merge_delta(d),
+        (CrdtMapInnerValue::Presence(v), CrdtValueDelta::Presence(d)) => v.merge_delta(d),
+        (CrdtMapInnerValue::RGA(v), CrdtValueDelta::RGA(d)) => v.merge_delta(d),
+        (CrdtMapInnerValue::Tree(v), CrdtValueDelta::Tree(d)) => v.merge_delta(d),
         _ => {} // type mismatch — no-op
     }
 }
@@ -200,20 +216,20 @@ fn inner_from_delta(delta: CrdtValueDelta) -> CrdtMapInnerValue {
 
 fn delta_since_inner(inner: &CrdtMapInnerValue, since: &VectorClock) -> Option<CrdtValueDelta> {
     match inner {
-        CrdtMapInnerValue::GCounter(v)    => v.delta_since(since).map(CrdtValueDelta::GCounter),
-        CrdtMapInnerValue::PNCounter(v)   => v.delta_since(since).map(CrdtValueDelta::PNCounter),
-        CrdtMapInnerValue::ORSet(v)       => v.delta_since(since).map(CrdtValueDelta::ORSet),
+        CrdtMapInnerValue::GCounter(v) => v.delta_since(since).map(CrdtValueDelta::GCounter),
+        CrdtMapInnerValue::PNCounter(v) => v.delta_since(since).map(CrdtValueDelta::PNCounter),
+        CrdtMapInnerValue::ORSet(v) => v.delta_since(since).map(CrdtValueDelta::ORSet),
         CrdtMapInnerValue::LwwRegister(v) => v.delta_since(since).map(CrdtValueDelta::LwwRegister),
-        CrdtMapInnerValue::Presence(v)    => v.delta_since(since).map(CrdtValueDelta::Presence),
-        CrdtMapInnerValue::RGA(v)         => v.delta_since(since).map(CrdtValueDelta::RGA),
-        CrdtMapInnerValue::Tree(v)        => v.delta_since(since).map(CrdtValueDelta::Tree),
+        CrdtMapInnerValue::Presence(v) => v.delta_since(since).map(CrdtValueDelta::Presence),
+        CrdtMapInnerValue::RGA(v) => v.delta_since(since).map(CrdtValueDelta::RGA),
+        CrdtMapInnerValue::Tree(v) => v.delta_since(since).map(CrdtValueDelta::Tree),
     }
 }
 
 pub type CrdtMapValue = HashMap<String, serde_json::Value>;
 
 impl Crdt for CRDTMap {
-    type Op    = CRDTMapOp;
+    type Op = CRDTMapOp;
     type Delta = CRDTMapDelta;
     type Value = CrdtMapValue;
 
@@ -229,16 +245,16 @@ impl Crdt for CRDTMap {
                     )));
                 }
                 let maybe_delta = apply_inner(inner, op.op)?;
-                Ok(maybe_delta.map(|d| {
-                    CRDTMapDelta { deltas: [(op.key, d)].into_iter().collect() }
+                Ok(maybe_delta.map(|d| CRDTMapDelta {
+                    deltas: [(op.key, d)].into_iter().collect(),
                 }))
             }
             None => {
                 let mut inner = CrdtMapInnerValue::new(op.crdt_type);
                 let maybe_delta = apply_inner(&mut inner, op.op)?;
                 self.entries.insert(op.key.clone(), inner);
-                Ok(maybe_delta.map(|d| {
-                    CRDTMapDelta { deltas: [(op.key, d)].into_iter().collect() }
+                Ok(maybe_delta.map(|d| CRDTMapDelta {
+                    deltas: [(op.key, d)].into_iter().collect(),
                 }))
             }
         }
@@ -275,9 +291,7 @@ impl Crdt for CRDTMap {
         let deltas: HashMap<String, CrdtValueDelta> = self
             .entries
             .iter()
-            .filter_map(|(key, inner)| {
-                delta_since_inner(inner, since).map(|d| (key.clone(), d))
-            })
+            .filter_map(|(key, inner)| delta_since_inner(inner, since).map(|d| (key.clone(), d)))
             .collect();
 
         if deltas.is_empty() {

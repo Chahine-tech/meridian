@@ -36,6 +36,9 @@ pub struct BatchItem {
     /// Optional TTL in milliseconds for this specific CRDT entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl_ms: Option<u64>,
+    /// 64-byte Ed25519 signature over `op_bytes`. Present when BFT signing is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sig: Option<ByteBuf>,
 }
 
 /// Messages sent by the client over the WebSocket connection.
@@ -59,6 +62,9 @@ pub enum ClientMsg {
         ttl_ms: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         client_seq: Option<u64>,
+        /// 64-byte Ed25519 signature over `op_bytes`. Present when BFT signing is enabled.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sig: Option<ByteBuf>,
     },
 
     /// Apply multiple operations atomically.
@@ -92,7 +98,10 @@ pub enum ClientMsg {
     /// `ServerMsg::QueryResult` frames to this connection.
     ///
     /// `query_id` — client-assigned identifier; echoed back in each `QueryResult`.
-    SubscribeQuery { query_id: String, query: LiveQueryPayload },
+    SubscribeQuery {
+        query_id: String,
+        query: LiveQueryPayload,
+    },
 
     /// Cancel a previously registered live query subscription.
     UnsubscribeQuery { query_id: String },
@@ -104,7 +113,10 @@ pub enum ClientMsg {
 pub enum ServerMsg {
     /// A CRDT delta for a subscribed CRDT.
     /// `delta_bytes` is msgpack-encoded delta type for the CRDT kind.
-    Delta { crdt_id: String, delta_bytes: ByteBuf },
+    Delta {
+        crdt_id: String,
+        delta_bytes: ByteBuf,
+    },
 
     /// Acknowledgement of a successfully applied `Op`.
     /// `seq` is the WAL sequence number assigned by the server.
@@ -136,14 +148,22 @@ pub enum ServerMsg {
     /// `client_id` — the sender's client ID (from their token).
     /// `key`       — the awareness channel name forwarded verbatim.
     /// `data`      — the raw payload forwarded verbatim.
-    AwarenessBroadcast { client_id: u64, key: String, data: ByteBuf },
+    AwarenessBroadcast {
+        client_id: u64,
+        key: String,
+        data: ByteBuf,
+    },
 
     /// Result of a live query execution, pushed whenever the underlying data changes.
     ///
     /// `query_id` — echoed from `ClientMsg::SubscribeQuery`.
     /// `value`    — aggregated JSON result (same shape as the HTTP query endpoint).
     /// `matched`  — number of CRDTs that contributed to this result.
-    QueryResult { query_id: String, value: serde_json::Value, matched: usize },
+    QueryResult {
+        query_id: String,
+        value: serde_json::Value,
+        matched: usize,
+    },
 }
 
 impl ServerMsg {
@@ -174,7 +194,9 @@ mod tests {
 
     #[test]
     fn client_msg_subscribe_roundtrip() {
-        let msg = ClientMsg::Subscribe { crdt_id: "counter".into() };
+        let msg = ClientMsg::Subscribe {
+            crdt_id: "counter".into(),
+        };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ClientMsg::from_msgpack(&bytes).unwrap();
         assert!(matches!(decoded, ClientMsg::Subscribe { crdt_id } if crdt_id == "counter"));
@@ -182,26 +204,52 @@ mod tests {
 
     #[test]
     fn client_msg_op_roundtrip() {
-        let msg = ClientMsg::Op { crdt_id: "set".into(), op_bytes: ByteBuf::from(vec![1, 2, 3]), ttl_ms: None, client_seq: None };
+        let msg = ClientMsg::Op {
+            crdt_id: "set".into(),
+            op_bytes: ByteBuf::from(vec![1, 2, 3]),
+            ttl_ms: None,
+            client_seq: None,
+            sig: None,
+        };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ClientMsg::from_msgpack(&bytes).unwrap();
-        assert!(matches!(decoded, ClientMsg::Op { op_bytes, .. } if op_bytes.as_ref() == [1, 2, 3]));
+        assert!(
+            matches!(decoded, ClientMsg::Op { op_bytes, .. } if op_bytes.as_ref() == [1, 2, 3])
+        );
     }
 
     #[test]
     fn server_msg_ack_roundtrip() {
-        let msg = ServerMsg::Ack { seq: 99, client_seq: Some(7) };
+        let msg = ServerMsg::Ack {
+            seq: 99,
+            client_seq: Some(7),
+        };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ServerMsg::from_msgpack(&bytes).unwrap();
-        assert!(matches!(decoded, ServerMsg::Ack { seq: 99, client_seq: Some(7) }));
+        assert!(matches!(
+            decoded,
+            ServerMsg::Ack {
+                seq: 99,
+                client_seq: Some(7)
+            }
+        ));
     }
 
     #[test]
     fn server_msg_ack_no_client_seq_roundtrip() {
-        let msg = ServerMsg::Ack { seq: 42, client_seq: None };
+        let msg = ServerMsg::Ack {
+            seq: 42,
+            client_seq: None,
+        };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ServerMsg::from_msgpack(&bytes).unwrap();
-        assert!(matches!(decoded, ServerMsg::Ack { seq: 42, client_seq: None }));
+        assert!(matches!(
+            decoded,
+            ServerMsg::Ack {
+                seq: 42,
+                client_seq: None
+            }
+        ));
     }
 
     #[test]
@@ -211,26 +259,37 @@ mod tests {
             op_bytes: ByteBuf::from(vec![1, 2, 3]),
             ttl_ms: None,
             client_seq: Some(5),
+            sig: None,
         };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ClientMsg::from_msgpack(&bytes).unwrap();
-        assert!(matches!(decoded, ClientMsg::Op { client_seq: Some(5), .. }));
+        assert!(matches!(
+            decoded,
+            ClientMsg::Op {
+                client_seq: Some(5),
+                ..
+            }
+        ));
     }
 
     #[test]
     fn server_msg_delta_roundtrip() {
-        let msg = ServerMsg::Delta { crdt_id: "x".into(), delta_bytes: ByteBuf::from(vec![0xde, 0xad]) };
+        let msg = ServerMsg::Delta {
+            crdt_id: "x".into(),
+            delta_bytes: ByteBuf::from(vec![0xde, 0xad]),
+        };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ServerMsg::from_msgpack(&bytes).unwrap();
-        assert!(
-            matches!(decoded, ServerMsg::Delta { crdt_id, delta_bytes }
-                if crdt_id == "x" && delta_bytes.as_ref() == [0xde, 0xad])
-        );
+        assert!(matches!(decoded, ServerMsg::Delta { crdt_id, delta_bytes }
+                if crdt_id == "x" && delta_bytes.as_ref() == [0xde, 0xad]));
     }
 
     #[test]
     fn server_msg_error_roundtrip() {
-        let msg = ServerMsg::Error { code: 403, message: "forbidden".into() };
+        let msg = ServerMsg::Error {
+            code: 403,
+            message: "forbidden".into(),
+        };
         let bytes = msg.to_msgpack().unwrap();
         let decoded = ServerMsg::from_msgpack(&bytes).unwrap();
         assert!(matches!(decoded, ServerMsg::Error { code: 403, .. }));

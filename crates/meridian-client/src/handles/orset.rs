@@ -4,14 +4,14 @@ use std::{
 };
 
 use meridian_core::{
-    crdt::{
-        orset::{ORSet, ORSetDelta, ORSetOp},
-        Crdt,
-    },
     crdt::registry::{CrdtOp, VersionedOp},
+    crdt::{
+        Crdt,
+        orset::{ORSet, ORSetDelta, ORSetOp},
+    },
     protocol::ClientMsg,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -19,25 +19,28 @@ use crate::{codec, error::ClientError, op_queue::OpQueue, transport::Transport};
 
 #[allow(dead_code)]
 pub(crate) struct ORSetInner {
-    state:     Mutex<ORSet>,
-    watch_tx:  watch::Sender<Vec<serde_json::Value>>,
-    crdt_id:   String,
+    state: Mutex<ORSet>,
+    watch_tx: watch::Sender<Vec<serde_json::Value>>,
+    crdt_id: String,
     client_id: u64,
     local_seq: std::sync::atomic::AtomicU32,
     transport: Arc<dyn Transport>,
-    op_queue:  Arc<OpQueue>,
+    op_queue: Arc<OpQueue>,
 }
 
 /// Live handle to an ORSet CRDT. Generic over the element type `T`.
 #[derive(Clone)]
 pub struct ORSetHandle<T> {
-    inner:   Arc<ORSetInner>,
+    inner: Arc<ORSetInner>,
     _marker: PhantomData<T>,
 }
 
 impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> ORSetHandle<T> {
     pub(crate) fn from_inner(inner: Arc<ORSetInner>) -> Self {
-        Self { inner, _marker: PhantomData }
+        Self {
+            inner,
+            _marker: PhantomData,
+        }
     }
 
     pub(crate) fn into_inner(self) -> Arc<ORSetInner> {
@@ -97,7 +100,10 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> ORSetHandle<T> {
     {
         let json_val = serde_json::to_value(&value)?;
         let tag = Uuid::new_v4();
-        let seq = self.inner.local_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let seq = self
+            .inner
+            .local_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let op = ORSetOp::Add {
             element: json_val,
             tag,
@@ -118,7 +124,10 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> ORSetHandle<T> {
             let state = self.inner.state.lock().expect("orset lock poisoned");
             state.entries.get(&element_key).cloned().unwrap_or_default()
         };
-        let op = ORSetOp::Remove { element: json_val, known_tags };
+        let op = ORSetOp::Remove {
+            element: json_val,
+            known_tags,
+        };
         self.apply_and_send(op).await
     }
 
@@ -128,17 +137,26 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> ORSetHandle<T> {
             state.apply(op.clone())?;
             let new_elements = state.value().elements;
             let _ = self.inner.watch_tx.send_if_modified(|v| {
-                if *v != new_elements { *v = new_elements; true } else { false }
+                if *v != new_elements {
+                    *v = new_elements;
+                    true
+                } else {
+                    false
+                }
             });
         }
         let versioned = VersionedOp::new(CrdtOp::ORSet(op));
         let op_bytes = codec::encode_op(&versioned)?;
-        self.inner.transport.send(ClientMsg::Op {
-            crdt_id: self.inner.crdt_id.clone(),
-            op_bytes,
-            ttl_ms: None,
-            client_seq: None,
-        }).await
+        self.inner
+            .transport
+            .send(ClientMsg::Op {
+                crdt_id: self.inner.crdt_id.clone(),
+                op_bytes,
+                ttl_ms: None,
+                client_seq: None,
+                sig: None,
+            })
+            .await
     }
 
     pub(crate) fn apply_delta(&self, delta_bytes: &[u8]) -> Result<(), ClientError> {
@@ -147,7 +165,12 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> ORSetHandle<T> {
         state.merge_delta(delta);
         let new_elements = state.value().elements;
         let _ = self.inner.watch_tx.send_if_modified(|v| {
-            if *v != new_elements { *v = new_elements; true } else { false }
+            if *v != new_elements {
+                *v = new_elements;
+                true
+            } else {
+                false
+            }
         });
         Ok(())
     }

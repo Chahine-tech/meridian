@@ -31,6 +31,12 @@ export interface WsTransportConfig {
   onMessage: (msg: ServerMsg) => void;
   onStateChange?: (state: WsState) => void;
   maxBackoffMs?: number;
+  /**
+   * If provided, every outgoing `Op` message is signed before sending.
+   * The function receives `op_bytes` and must return a 64-byte Ed25519 signature.
+   * Enables BFT: cluster nodes can verify that ops came from a legitimate client.
+   */
+  signFn?: (opBytes: Uint8Array) => Promise<Uint8Array>;
 }
 
 type ClientMsg = Parameters<typeof encodeClientMsg>[0];
@@ -53,6 +59,7 @@ export class WsTransport {
   private readonly reconnectListeners = new Set<() => void>();
 
   private readonly subscriptions = new Map<string, VectorClock>();
+  private readonly signFn: ((opBytes: Uint8Array) => Promise<Uint8Array>) | undefined;
 
   // Effect sliding queue — drops oldest when full (same behaviour as previous array)
   private readonly pendingQueue: Queue.Queue<ClientMsg>;
@@ -67,6 +74,7 @@ export class WsTransport {
   constructor(config: WsTransportConfig) {
     this.config = config;
     this.maxBackoffMs = config.maxBackoffMs ?? BACKOFF_MAX_MS;
+    this.signFn = config.signFn;
 
     // Queue creation is synchronous
     this.pendingQueue = Effect.runSync(Queue.sliding<ClientMsg>(OFFLINE_QUEUE_MAX));
@@ -127,9 +135,21 @@ export class WsTransport {
   }
 
   send(msg: ClientMsg): void {
+    if (this.signFn !== undefined && "Op" in msg && msg.Op.sig === undefined) {
+      const signFn = this.signFn;
+      const opBytes = msg.Op.op_bytes;
+      void (async () => {
+        const sig = await signFn(opBytes);
+        this._dispatch({ Op: { ...msg.Op, sig } });
+      })();
+    } else {
+      this._dispatch(msg);
+    }
+  }
+
+  private _dispatch(msg: ClientMsg): void {
     const tagged = this.tagOp(msg);
     if (this.state !== "CONNECTED" || this.ws === null) {
-      // sliding queue drops oldest automatically if full
       this.runtime.runFork(Queue.offer(this.pendingQueue, tagged));
       return;
     }
@@ -368,10 +388,18 @@ export class WsTransport {
             yield* Queue.offer(this.pendingQueue, next.value);
             break;
           }
+          let msg = next.value;
+          // Sign unsigned ops when signing is configured.
+          if (this.signFn !== undefined && "Op" in msg && msg.Op.sig === undefined) {
+            const signFn = this.signFn; // capture before yield to preserve narrowing and avoid non-null assertion
+            const opBytes = msg.Op.op_bytes;
+            const sig = yield* Effect.promise(() => signFn(opBytes));
+            msg = { Op: { ...msg.Op, sig } };
+          }
           try {
-            this.ws.send(encodeClientMsg(next.value));
+            this.ws.send(encodeClientMsg(msg));
           } catch {
-            yield* Queue.offer(this.pendingQueue, next.value);
+            yield* Queue.offer(this.pendingQueue, next.value); // re-queue original (unsigned) for retry
             break;
           }
         }

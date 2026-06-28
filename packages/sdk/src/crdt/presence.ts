@@ -24,6 +24,7 @@ export class PresenceHandle<T> {
   private readonly transport: WsTransport;
   private readonly schema: Schema.Schema<T> | null;
   private readonly listeners = new Set<(entries: PresenceEntry<T>[]) => void>();
+  private readonly encryptFn: ((v: unknown) => Promise<unknown>) | null;
 
   constructor(opts: {
     ns: string;
@@ -31,11 +32,14 @@ export class PresenceHandle<T> {
     clientId: number;
     transport: WsTransport;
     schema?: Schema.Schema<T>;
+    /** AES-GCM encryption function. When set, the presence data is encrypted before sending. */
+    encryptFn?: (v: unknown) => Promise<unknown>;
   }) {
     this.crdtId = opts.crdtId;
     this.clientId = opts.clientId;
     this.transport = opts.transport;
     this.schema = opts.schema ?? null;
+    this.encryptFn = opts.encryptFn ?? null;
   }
 
   /** Returns the raw entries map for snapshot serialization. */
@@ -113,12 +117,19 @@ export class PresenceHandle<T> {
     });
     this.emit();
 
+    void this._sendHeartbeat(data, hlc, ttlMs);
+  }
+
+  private async _sendHeartbeat(
+    data: T,
+    hlc: { wall_ms: number; logical: number; node_id: number },
+    ttlMs: number,
+  ): Promise<void> {
+    const wireData = this.encryptFn !== null ? await this.encryptFn(data) : data;
     this.transport.send({
       Op: {
         crdt_id: this.crdtId,
-        op_bytes: encode({
-          Presence: { Heartbeat: { client_id: this.clientId, data, hlc, ttl_ms: ttlMs } },
-        }),
+        op_bytes: encode({ Presence: { Heartbeat: { client_id: this.clientId, data: wireData, hlc, ttl_ms: ttlMs } } }),
       },
     });
   }

@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::{
-    crdt::registry::{apply_op, CrdtOp, CrdtValue},
+    crdt::registry::{CrdtOp, CrdtValue, apply_op},
     metrics,
     storage::{CrdtStore, StorageError},
 };
@@ -48,9 +48,7 @@ pub async fn apply_op_atomic<S: CrdtStore>(
 
     // Compute expires_at_ms once so the storage layer doesn't need to know
     // about wall-clock time.
-    let expires_at_ms = ttl_ms.map(|ms| {
-        crate::crdt::clock::now_ms().saturating_add(ms)
-    });
+    let expires_at_ms = ttl_ms.map(|ms| crate::crdt::clock::now_ms().saturating_add(ms));
 
     let t = metrics::merge_start();
     let delta = store

@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use redis::{aio::MultiplexedConnection, Client};
+use redis::{Client, aio::MultiplexedConnection};
 use tracing::instrument;
 
 use crate::{
@@ -190,7 +190,13 @@ async fn xrange(conn: &mut MultiplexedConnection, start: &str, end: &str) -> Res
                 if let redis::Value::Array(fields) = &parts[1] {
                     let parsed = fields_to_wal_fields(fields);
                     if let Some((namespace, crdt_id, op_bytes, timestamp_ms)) = parsed {
-                    entries.push(WalEntry { seq, namespace, crdt_id, op_bytes, timestamp_ms });
+                        entries.push(WalEntry {
+                            seq,
+                            namespace,
+                            crdt_id,
+                            op_bytes,
+                            timestamp_ms,
+                        });
                     }
                 }
             }

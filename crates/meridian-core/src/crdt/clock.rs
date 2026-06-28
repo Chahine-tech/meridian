@@ -106,7 +106,11 @@ impl HybridLogicalClock {
 
     /// Advance the clock on receiving a message with `received` HLC.
     /// NTP-safe: handles backward clock jumps gracefully.
-    pub fn receive(&mut self, wall_now_ms: u64, received: &HybridLogicalClock) -> HybridLogicalClock {
+    pub fn receive(
+        &mut self,
+        wall_now_ms: u64,
+        received: &HybridLogicalClock,
+    ) -> HybridLogicalClock {
         let max_wall = wall_now_ms.max(received.wall_ms).max(self.wall_ms);
 
         self.logical = if max_wall == self.wall_ms && max_wall == received.wall_ms {
@@ -195,9 +199,21 @@ mod tests {
 
     #[test]
     fn hlc_ordering() {
-        let a = HybridLogicalClock { wall_ms: 100, logical: 0, node_id: 1 };
-        let b = HybridLogicalClock { wall_ms: 100, logical: 1, node_id: 1 };
-        let c = HybridLogicalClock { wall_ms: 101, logical: 0, node_id: 0 };
+        let a = HybridLogicalClock {
+            wall_ms: 100,
+            logical: 0,
+            node_id: 1,
+        };
+        let b = HybridLogicalClock {
+            wall_ms: 100,
+            logical: 1,
+            node_id: 1,
+        };
+        let c = HybridLogicalClock {
+            wall_ms: 101,
+            logical: 0,
+            node_id: 0,
+        };
         assert!(a < b);
         assert!(b < c);
         assert!(a < c);
@@ -205,7 +221,11 @@ mod tests {
 
     #[test]
     fn hlc_tick_advances() {
-        let mut hlc = HybridLogicalClock { wall_ms: 100, logical: 5, node_id: 1 };
+        let mut hlc = HybridLogicalClock {
+            wall_ms: 100,
+            logical: 5,
+            node_id: 1,
+        };
         // Same wall time → advance logical
         let ts = hlc.tick(100);
         assert_eq!(ts.wall_ms, 100);
@@ -218,9 +238,13 @@ mod tests {
 
     #[test]
     fn hlc_expiry() {
-        let hlc = HybridLogicalClock { wall_ms: 1000, logical: 0, node_id: 1 };
+        let hlc = HybridLogicalClock {
+            wall_ms: 1000,
+            logical: 0,
+            node_id: 1,
+        };
         assert!(!hlc.is_expired(1500, 1000)); // 1500 < 2000 → alive
-        assert!(hlc.is_expired(2000, 1000));  // 2000 >= 2000 → expired (ttl=0 edge case)
-        assert!(hlc.is_expired(2001, 1000));  // 2001 >= 2000 → expired
+        assert!(hlc.is_expired(2000, 1000)); // 2000 >= 2000 → expired (ttl=0 edge case)
+        assert!(hlc.is_expired(2001, 1000)); // 2001 >= 2000 → expired
     }
 }

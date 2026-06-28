@@ -6,12 +6,17 @@ pub mod query;
 pub mod sse;
 pub mod tokens;
 
-pub use query::ExecuteQueryError;
 pub use meridian_core::query::infer_crdt_type;
+pub use query::ExecuteQueryError;
 
 use std::sync::Arc;
 
-use crate::{auth::TokenSigner, storage::{CrdtStore, WalBackend}, api::ws::SubscriptionManager, webhooks::WebhookDispatcher};
+use crate::{
+    api::ws::SubscriptionManager,
+    auth::TokenSigner,
+    storage::{CrdtStore, WalBackend},
+    webhooks::WebhookDispatcher,
+};
 
 /// Trait implemented by `AppState` — gives handlers access to shared services
 /// without depending on the concrete `AppState` struct directly.

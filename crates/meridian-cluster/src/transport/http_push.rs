@@ -9,9 +9,9 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use serde::Deserialize;
 use bytes::Bytes;
 use futures::{future::BoxFuture, stream::BoxStream};
+use serde::Deserialize;
 use tokio::sync::broadcast;
 use tracing::{debug, instrument, warn};
 use url::Url;
@@ -143,10 +143,7 @@ impl HttpPushTransport {
     }
 }
 
-async fn handle_incoming_delta(
-    State(inner): State<Arc<Inner>>,
-    body: Bytes,
-) -> impl IntoResponse {
+async fn handle_incoming_delta(State(inner): State<Arc<Inner>>, body: Bytes) -> impl IntoResponse {
     let envelope: DeltaEnvelope = match rmp_serde::decode::from_slice(&body) {
         Ok(e) => e,
         Err(e) => {
@@ -204,8 +201,8 @@ async fn handle_wal_pull(
 impl ClusterTransport for HttpPushTransport {
     #[instrument(skip(self, envelope), fields(ns = %envelope.namespace, crdt_id = %envelope.crdt_id, peers = self.inner.peers.len()))]
     async fn broadcast_delta(&self, envelope: DeltaEnvelope) -> Result<()> {
-        let payload = rmp_serde::encode::to_vec_named(&envelope)
-            .map_err(ClusterError::Serialization)?;
+        let payload =
+            rmp_serde::encode::to_vec_named(&envelope).map_err(ClusterError::Serialization)?;
 
         let mut failed = 0usize;
         for peer in &self.inner.peers {

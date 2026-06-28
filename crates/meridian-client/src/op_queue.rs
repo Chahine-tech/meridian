@@ -13,7 +13,9 @@ pub struct OpQueue {
 
 impl OpQueue {
     pub fn new() -> Self {
-        Self { inner: Mutex::new(VecDeque::with_capacity(MAX_PENDING)) }
+        Self {
+            inner: Mutex::new(VecDeque::with_capacity(MAX_PENDING)),
+        }
     }
 
     /// Push an op. If the queue is at capacity, the oldest entry is dropped.
@@ -85,10 +87,13 @@ mod tests {
         q.push(sub("second"));
         q.push(sub("third"));
         let drained = q.drain();
-        let ids: Vec<&str> = drained.iter().map(|m| match m {
-            ClientMsg::Subscribe { crdt_id } => crdt_id.as_str(),
-            _ => "",
-        }).collect();
+        let ids: Vec<&str> = drained
+            .iter()
+            .map(|m| match m {
+                ClientMsg::Subscribe { crdt_id } => crdt_id.as_str(),
+                _ => "",
+            })
+            .collect();
         assert_eq!(ids, ["first", "second", "third"]);
     }
 }

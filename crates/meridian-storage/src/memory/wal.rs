@@ -13,7 +13,9 @@ pub struct NoopWal {
 
 impl NoopWal {
     pub fn new() -> Self {
-        Self { next_seq: AtomicU64::new(0) }
+        Self {
+            next_seq: AtomicU64::new(0),
+        }
     }
 }
 

@@ -11,7 +11,10 @@ pub struct SegmentKey {
 
 impl SegmentKey {
     pub fn to_object_key(&self, prefix: &str) -> String {
-        format!("{}{:020}-{:020}.msgpack", prefix, self.seq_start, self.seq_end)
+        format!(
+            "{}{:020}-{:020}.msgpack",
+            prefix, self.seq_start, self.seq_end
+        )
     }
 
     pub fn from_object_key(key: &str, prefix: &str) -> Option<Self> {
@@ -30,18 +33,36 @@ mod tests {
 
     #[test]
     fn roundtrip() {
-        let key = SegmentKey { seq_start: 1, seq_end: 500 };
+        let key = SegmentKey {
+            seq_start: 1,
+            seq_end: 500,
+        };
         let object_key = key.to_object_key("wal/");
-        assert_eq!(object_key, "wal/00000000000000000001-00000000000000000500.msgpack");
+        assert_eq!(
+            object_key,
+            "wal/00000000000000000001-00000000000000000500.msgpack"
+        );
         let parsed = SegmentKey::from_object_key(&object_key, "wal/").unwrap();
         assert_eq!(parsed, key);
     }
 
     #[test]
     fn lexicographic_ordering() {
-        let k1 = SegmentKey { seq_start: 1, seq_end: 500 }.to_object_key("wal/");
-        let k2 = SegmentKey { seq_start: 501, seq_end: 1000 }.to_object_key("wal/");
-        let k3 = SegmentKey { seq_start: 10_000, seq_end: 10_500 }.to_object_key("wal/");
+        let k1 = SegmentKey {
+            seq_start: 1,
+            seq_end: 500,
+        }
+        .to_object_key("wal/");
+        let k2 = SegmentKey {
+            seq_start: 501,
+            seq_end: 1000,
+        }
+        .to_object_key("wal/");
+        let k3 = SegmentKey {
+            seq_start: 10_000,
+            seq_end: 10_500,
+        }
+        .to_object_key("wal/");
         assert!(k1 < k2);
         assert!(k2 < k3);
     }
@@ -49,6 +70,12 @@ mod tests {
     #[test]
     fn from_object_key_invalid() {
         assert!(SegmentKey::from_object_key("wal/bad.msgpack", "wal/").is_none());
-        assert!(SegmentKey::from_object_key("other/00000000000000000001-00000000000000000500.msgpack", "wal/").is_none());
+        assert!(
+            SegmentKey::from_object_key(
+                "other/00000000000000000001-00000000000000000500.msgpack",
+                "wal/"
+            )
+            .is_none()
+        );
     }
 }

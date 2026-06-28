@@ -16,6 +16,7 @@ export class LwwRegisterHandle<T> {
   private readonly transport: WsTransport;
   private readonly schema: Schema.Schema<T> | null;
   private readonly listeners = new Set<(value: T | null) => void>();
+  private readonly encryptFn: ((v: unknown) => Promise<unknown>) | null;
 
   constructor(opts: {
     ns: string;
@@ -24,12 +25,15 @@ export class LwwRegisterHandle<T> {
     transport: WsTransport;
     schema?: Schema.Schema<T>;
     initial?: LwwEntry | null;
+    /** AES-GCM encryption function. When set, the value is encrypted before sending. */
+    encryptFn?: (v: unknown) => Promise<unknown>;
   }) {
     this.crdtId = opts.crdtId;
     this.clientId = opts.clientId;
     this.transport = opts.transport;
     this.schema = opts.schema ?? null;
     this.entry = opts.initial ?? null;
+    this.encryptFn = opts.encryptFn ?? null;
   }
 
   /** Returns the raw LwwEntry for snapshot serialization. */
@@ -88,10 +92,19 @@ export class LwwRegisterHandle<T> {
       this.emit();
     }
 
+    void this._sendSet(value, hlc, ttlMs);
+  }
+
+  private async _sendSet(
+    value: T,
+    hlc: { wall_ms: number; logical: number; node_id: number },
+    ttlMs: number | undefined,
+  ): Promise<void> {
+    const wireValue = this.encryptFn !== null ? await this.encryptFn(value) : value;
     this.transport.send({
       Op: {
         crdt_id: this.crdtId,
-        op_bytes: encode({ LwwRegister: { value, hlc: { wall_ms: wallMs, logical: 0, node_id: this.clientId }, author: this.clientId } }),
+        op_bytes: encode({ LwwRegister: { value: wireValue, hlc, author: this.clientId } }),
         ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
       },
     });

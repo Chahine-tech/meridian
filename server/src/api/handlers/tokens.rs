@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::auth::{ClaimsExt, Permissions, PermissionsV1, PermissionsV2, PermEntry, TokenClaims};
+use crate::auth::{ClaimsExt, PermEntry, Permissions, PermissionsV1, PermissionsV2, TokenClaims};
 
 use super::AppStateExt;
 
@@ -20,6 +20,10 @@ pub struct IssueTokenRequest {
     pub permissions: Option<PermissionsV1Dto>,
     /// V2 fine-grained rules. Takes precedence over `permissions` if both present.
     pub rules: Option<PermissionsV2Dto>,
+    /// Optional base64url-encoded 32-byte Ed25519 public key for BFT op signing.
+    /// When provided, the issued token embeds the key and the server will require
+    /// a valid Ed25519 signature on every op from this client.
+    pub client_pubkey: Option<String>,
 }
 
 /// V1 permission payload — glob-list style.
@@ -83,11 +87,18 @@ pub async fn token_me<S: AppStateExt>(
         )
             .into_response();
     }
+    let pubkey_b64 = claims.client_pubkey.as_ref().map(|b| {
+        let alphabet = base64::alphabet::URL_SAFE;
+        let config = base64::engine::GeneralPurposeConfig::new();
+        let engine = base64::engine::GeneralPurpose::new(&alphabet, config);
+        base64::Engine::encode(&engine, b.as_ref())
+    });
     Json(serde_json::json!({
-        "namespace":  claims.namespace,
-        "client_id":  claims.client_id,
-        "expires_at": claims.expires_at,
-        "permissions": claims.permissions,
+        "namespace":    claims.namespace,
+        "client_id":    claims.client_id,
+        "expires_at":   claims.expires_at,
+        "permissions":  claims.permissions,
+        "client_pubkey": pubkey_b64,
     }))
     .into_response()
 }
@@ -128,12 +139,38 @@ pub async fn issue_token<S: AppStateExt>(
         Permissions::read_write()
     };
 
+    // Decode the optional BFT client public key (base64url → 32 bytes).
+    let client_pubkey: Option<serde_bytes::ByteBuf> = if let Some(b64) = req.client_pubkey {
+        match base64_url_decode(&b64) {
+            Ok(bytes) if bytes.len() == 32 => Some(serde_bytes::ByteBuf::from(bytes)),
+            Ok(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(
+                        serde_json::json!({ "error": "client_pubkey must be 32 bytes (Ed25519)" }),
+                    ),
+                )
+                    .into_response();
+            }
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": "client_pubkey: invalid base64url" })),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        None
+    };
+
     let new_claims = TokenClaims::new(
         &claims.namespace,
         req.client_id,
         req.ttl_ms.unwrap_or(3_600_000),
         perms,
-    );
+    )
+    .with_pubkey(client_pubkey);
 
     match state.signer().sign(&new_claims) {
         Ok(token) => Json(serde_json::json!({ "token": token })).into_response(),
@@ -142,4 +179,13 @@ pub async fn issue_token<S: AppStateExt>(
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+fn base64_url_decode(s: &str) -> Result<Vec<u8>, ()> {
+    // Use base64 with URL-safe alphabet, no padding.
+    let alphabet = base64::alphabet::URL_SAFE;
+    let config = base64::engine::GeneralPurposeConfig::new()
+        .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent);
+    let engine = base64::engine::GeneralPurpose::new(&alphabet, config);
+    base64::Engine::decode(&engine, s).map_err(|_| ())
 }

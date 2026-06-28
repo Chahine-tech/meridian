@@ -7,10 +7,13 @@ use std::collections::HashSet;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 
 use crate::auth::glob_match;
-use crate::crdt::{Crdt, registry::{CrdtType, CrdtValue}};
+use crate::crdt::{
+    Crdt,
+    registry::{CrdtType, CrdtValue},
+};
 
 // Public types
 
@@ -34,16 +37,16 @@ impl FromStr for AggregateOp {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "sum"          => Ok(Self::Sum),
-            "max"          => Ok(Self::Max),
-            "min"          => Ok(Self::Min),
-            "count"        => Ok(Self::Count),
-            "union"        => Ok(Self::Union),
+            "sum" => Ok(Self::Sum),
+            "max" => Ok(Self::Max),
+            "min" => Ok(Self::Min),
+            "count" => Ok(Self::Count),
+            "union" => Ok(Self::Union),
             "intersection" => Ok(Self::Intersection),
-            "latest"       => Ok(Self::Latest),
-            "collect"      => Ok(Self::Collect),
-            "merge"        => Ok(Self::Merge),
-            _              => Err(()),
+            "latest" => Ok(Self::Latest),
+            "collect" => Ok(Self::Collect),
+            "merge" => Ok(Self::Merge),
+            _ => Err(()),
         }
     }
 }
@@ -70,7 +73,10 @@ pub struct QueryOutcome {
 /// Errors returned by [`execute_query_on_values`].
 pub enum QueryError {
     UnknownCrdtType(String),
-    IncompatibleAggregate { aggregate: String, crdt_type: String },
+    IncompatibleAggregate {
+        aggregate: String,
+        crdt_type: String,
+    },
 }
 
 // Helpers
@@ -81,13 +87,13 @@ pub enum QueryError {
 /// Returns `None` when the prefix is unknown or the pattern uses a leading `*`.
 pub fn infer_crdt_type(from: &str) -> Option<CrdtType> {
     const PREFIXES: &[(&str, CrdtType)] = &[
-        ("gc:",   CrdtType::GCounter),
-        ("pn:",   CrdtType::PNCounter),
-        ("or:",   CrdtType::ORSet),
-        ("lw:",   CrdtType::LwwRegister),
-        ("pr:",   CrdtType::Presence),
-        ("cm:",   CrdtType::CRDTMap),
-        ("rga:",  CrdtType::Rga),
+        ("gc:", CrdtType::GCounter),
+        ("pn:", CrdtType::PNCounter),
+        ("or:", CrdtType::ORSet),
+        ("lw:", CrdtType::LwwRegister),
+        ("pr:", CrdtType::Presence),
+        ("cm:", CrdtType::CRDTMap),
+        ("rga:", CrdtType::Rga),
         ("tree:", CrdtType::Tree),
     ];
     for (prefix, crdt_type) in PREFIXES {
@@ -149,11 +155,14 @@ pub fn execute_query_on_values(
         let matched = pairs
             .iter()
             .filter(|(crdt_id, crdt)| {
-                glob_match(from, crdt_id)
-                    && type_filter.is_none_or(|t| crdt.crdt_type() == t)
+                glob_match(from, crdt_id) && type_filter.is_none_or(|t| crdt.crdt_type() == t)
             })
             .count();
-        return Ok(QueryOutcome { value: json!(matched), matched, scanned });
+        return Ok(QueryOutcome {
+            value: json!(matched),
+            matched,
+            scanned,
+        });
     }
 
     let filtered: Vec<CrdtValue> = pairs
@@ -179,7 +188,11 @@ pub fn execute_query_on_values(
         aggregate(filtered, aggregate_op)?
     };
 
-    Ok(QueryOutcome { value, matched, scanned })
+    Ok(QueryOutcome {
+        value,
+        matched,
+        scanned,
+    })
 }
 
 // Aggregation
@@ -196,14 +209,26 @@ fn aggregate(values: Vec<CrdtValue>, op: AggregateOp) -> Result<JsonValue, Query
             if values.iter().all(|v| matches!(v, CrdtValue::ORSet(_))) {
                 let total: usize = values
                     .iter()
-                    .map(|v| if let CrdtValue::ORSet(s) = v { s.entries.len() } else { 0 })
+                    .map(|v| {
+                        if let CrdtValue::ORSet(s) = v {
+                            s.entries.len()
+                        } else {
+                            0
+                        }
+                    })
                     .sum();
                 return Ok(json!(total));
             }
             if values.iter().all(|v| matches!(v, CrdtValue::Presence(_))) {
                 let total: usize = values
                     .iter()
-                    .map(|v| if let CrdtValue::Presence(p) = v { p.value().entries.len() } else { 0 })
+                    .map(|v| {
+                        if let CrdtValue::Presence(p) = v {
+                            p.value().entries.len()
+                        } else {
+                            0
+                        }
+                    })
                     .sum();
                 return Ok(json!(total));
             }
@@ -287,7 +312,10 @@ fn aggregate(values: Vec<CrdtValue>, op: AggregateOp) -> Result<JsonValue, Query
         }
 
         AggregateOp::Latest => {
-            if values.iter().all(|v| matches!(v, CrdtValue::LwwRegister(_))) {
+            if values
+                .iter()
+                .all(|v| matches!(v, CrdtValue::LwwRegister(_)))
+            {
                 let best = values.iter().max_by_key(|v| {
                     if let CrdtValue::LwwRegister(r) = v {
                         r.entry.as_ref().map(|e| e.hlc.wall_ms).unwrap_or(0)
@@ -308,13 +336,15 @@ fn aggregate(values: Vec<CrdtValue>, op: AggregateOp) -> Result<JsonValue, Query
             Err(mk_incompatible("latest", first_type))
         }
 
-        AggregateOp::Collect => {
-            Ok(json!(values.iter().map(|v| v.to_json_value()).collect::<Vec<_>>()))
-        }
+        AggregateOp::Collect => Ok(json!(
+            values.iter().map(|v| v.to_json_value()).collect::<Vec<_>>()
+        )),
 
         AggregateOp::Merge => {
             if values.iter().all(|v| matches!(v, CrdtValue::CRDTMap(_))) {
-                return Ok(json!(values.iter().map(|v| v.to_json_value()).collect::<Vec<_>>()));
+                return Ok(json!(
+                    values.iter().map(|v| v.to_json_value()).collect::<Vec<_>>()
+                ));
             }
             Err(mk_incompatible("merge", first_type))
         }
@@ -329,7 +359,13 @@ fn aggregate_numeric(
     if values.iter().all(|v| matches!(v, CrdtValue::GCounter(_))) {
         let nums: Vec<u64> = values
             .iter()
-            .map(|v| if let CrdtValue::GCounter(g) = v { g.value().total } else { 0 })
+            .map(|v| {
+                if let CrdtValue::GCounter(g) = v {
+                    g.value().total
+                } else {
+                    0
+                }
+            })
             .collect();
         return Ok(match op {
             AggregateOp::Sum => json!(nums.iter().sum::<u64>()),
@@ -342,7 +378,13 @@ fn aggregate_numeric(
     if values.iter().all(|v| matches!(v, CrdtValue::PNCounter(_))) {
         let nums: Vec<i64> = values
             .iter()
-            .map(|v| if let CrdtValue::PNCounter(p) = v { p.value().value } else { 0 })
+            .map(|v| {
+                if let CrdtValue::PNCounter(p) = v {
+                    p.value().value
+                } else {
+                    0
+                }
+            })
             .collect();
         return Ok(match op {
             AggregateOp::Sum => json!(nums.iter().fold(0i64, |acc, &x| acc.saturating_add(x))),

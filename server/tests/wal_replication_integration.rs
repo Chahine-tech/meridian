@@ -22,12 +22,14 @@ use std::{
 // can be held across .await points without triggering clippy::await_holding_lock.
 static SERIAL: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 async fn serial_lock() -> tokio::sync::MutexGuard<'static, ()> {
-    SERIAL.get_or_init(|| tokio::sync::Mutex::new(())).lock().await
+    SERIAL
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await
 }
 
 use meridian_server::cluster::pg_transport::PgStateApplier;
 use tokio_postgres::NoTls;
-
 
 fn base_url() -> String {
     std::env::var("MERIDIAN_TEST_PG_URL").unwrap_or_else(|_| {
@@ -97,7 +99,15 @@ impl TestDb {
         let slot = format!("slot_{unique}");
         let publication = format!("pub_{unique}");
 
-        Ok(Self { base_url, db_name, test_url, client, slot, publication, consumer_task: None })
+        Ok(Self {
+            base_url,
+            db_name,
+            test_url,
+            client,
+            slot,
+            publication,
+            consumer_task: None,
+        })
     }
 
     /// Spawn the WAL consumer task for this database and store the handle.
@@ -149,12 +159,7 @@ impl TestDb {
     }
 
     /// Wait until `predicate` returns true, or panic after `timeout`.
-    async fn wait_for(
-        &self,
-        timeout: Duration,
-        mut predicate: impl FnMut() -> bool,
-        msg: &str,
-    ) {
+    async fn wait_for(&self, timeout: Duration, mut predicate: impl FnMut() -> bool, msg: &str) {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
             if predicate() {
@@ -169,7 +174,6 @@ impl TestDb {
     }
 }
 
-
 type CallLog = Arc<Mutex<Vec<(String, String, Vec<u8>)>>>;
 
 #[derive(Clone)]
@@ -179,7 +183,9 @@ struct RecordingApplier {
 
 impl RecordingApplier {
     fn new() -> Self {
-        Self { calls: Arc::new(Mutex::new(Vec::new())) }
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+        }
     }
 
     fn recorded(&self) -> Vec<(String, String, Vec<u8>)> {
@@ -204,11 +210,13 @@ impl PgStateApplier for RecordingApplier {
         crdt_id: String,
         state_bytes: Vec<u8>,
     ) -> Option<Vec<u8>> {
-        self.calls.lock().unwrap().push((namespace, crdt_id, state_bytes));
+        self.calls
+            .lock()
+            .unwrap()
+            .push((namespace, crdt_id, state_bytes));
         None
     }
 }
-
 
 #[tokio::test]
 async fn test_insert_small_bytea() {
@@ -230,7 +238,10 @@ async fn test_insert_small_bytea() {
 
     let payload: Vec<u8> = vec![0x01, 0x02, 0x03, 0x04];
     db.client
-        .execute("INSERT INTO docs (id, data) VALUES ($1, $2)", &[&"doc-1", &payload])
+        .execute(
+            "INSERT INTO docs (id, data) VALUES ($1, $2)",
+            &[&"doc-1", &payload],
+        )
         .await
         .expect("INSERT");
 
@@ -269,7 +280,10 @@ async fn test_update_delivers_new_value() {
     let v1: Vec<u8> = vec![0xAA, 0xBB];
     let v2: Vec<u8> = vec![0xCC, 0xDD, 0xEE];
     db.client
-        .execute("INSERT INTO docs (id, state) VALUES ($1, $2)", &[&"doc-1", &v1])
+        .execute(
+            "INSERT INTO docs (id, state) VALUES ($1, $2)",
+            &[&"doc-1", &v1],
+        )
         .await
         .expect("INSERT");
     db.client
@@ -313,7 +327,10 @@ async fn test_large_payload_over_8kb() {
     // 10 KB payload — well above pg_notify's 8 KB limit
     let large: Vec<u8> = (0u32..10_240).map(|i| (i % 251) as u8).collect();
     db.client
-        .execute("INSERT INTO docs (id, body) VALUES ($1, $2)", &[&"big-1", &large])
+        .execute(
+            "INSERT INTO docs (id, body) VALUES ($1, $2)",
+            &[&"big-1", &large],
+        )
         .await
         .expect("INSERT large");
 
@@ -409,8 +426,14 @@ async fn test_real_gcounter_crdt_value() {
 
     // Build a real GCounter and msgpack-encode it
     let mut counter = CrdtValue::new(meridian_server::crdt::registry::CrdtType::GCounter);
-    let op1 = GCounterOp { client_id: 1, amount: 5 };
-    let op2 = GCounterOp { client_id: 2, amount: 3 };
+    let op1 = GCounterOp {
+        client_id: 1,
+        amount: 5,
+    };
+    let op2 = GCounterOp {
+        client_id: 2,
+        amount: 3,
+    };
     if let CrdtValue::GCounter(ref mut g) = counter {
         g.apply(op1).unwrap();
         g.apply(op2).unwrap();
@@ -469,7 +492,10 @@ async fn test_consumer_reconnects_after_disconnect() {
     // First write — confirms the consumer is alive
     let v1: Vec<u8> = vec![0x01];
     db.client
-        .execute("INSERT INTO docs (id, data) VALUES ($1, $2)", &[&"doc-1", &v1])
+        .execute(
+            "INSERT INTO docs (id, data) VALUES ($1, $2)",
+            &[&"doc-1", &v1],
+        )
         .await
         .expect("INSERT 1");
 
@@ -482,7 +508,9 @@ async fn test_consumer_reconnects_after_disconnect() {
     .await;
 
     // Kill all replication connections to simulate a network drop
-    let (admin, conn) = tokio_postgres::connect(&url, NoTls).await.expect("admin connect");
+    let (admin, conn) = tokio_postgres::connect(&url, NoTls)
+        .await
+        .expect("admin connect");
     tokio::spawn(conn);
     admin
         .simple_query(
@@ -537,14 +565,20 @@ async fn test_null_bytea_not_delivered() {
 
     // Insert with NULL BYTEA — should not trigger applier
     db.client
-        .execute("INSERT INTO docs (id, data) VALUES ($1, NULL)", &[&"null-1"])
+        .execute(
+            "INSERT INTO docs (id, data) VALUES ($1, NULL)",
+            &[&"null-1"],
+        )
         .await
         .expect("INSERT NULL");
 
     // Insert a non-null row so we know the consumer is alive
     let marker: Vec<u8> = vec![0xFF];
     db.client
-        .execute("INSERT INTO docs (id, data) VALUES ($1, $2)", &[&"marker", &marker])
+        .execute(
+            "INSERT INTO docs (id, data) VALUES ($1, $2)",
+            &[&"marker", &marker],
+        )
         .await
         .expect("INSERT marker");
 

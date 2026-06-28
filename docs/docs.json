@@ -57,6 +57,8 @@
               "sdk/permissions",
               "sdk/ttl",
               "sdk/offline",
+              "sdk/encryption",
+              "sdk/signing",
               "sdk/postgres",
               "sdk/devtools",
               "sdk/cli",

@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use async_trait::async_trait;
-use futures::stream::BoxStream;
 use futures::StreamExt;
-use redis::{aio::MultiplexedConnection, Client};
+use futures::stream::BoxStream;
+use redis::{Client, aio::MultiplexedConnection};
 use tokio::sync::broadcast;
 use tracing::{debug, instrument, warn};
 
@@ -49,7 +49,11 @@ impl RedisTransport {
         let (tx, _) = broadcast::channel(1024);
 
         let transport = Self {
-            inner: Arc::new(Inner { client, node_id, tx }),
+            inner: Arc::new(Inner {
+                client,
+                node_id,
+                tx,
+            }),
         };
 
         transport.spawn_subscriber_loop();
@@ -120,8 +124,8 @@ impl ClusterTransport for RedisTransport {
     #[instrument(skip(self, envelope), fields(ns = %envelope.namespace, crdt_id = %envelope.crdt_id))]
     async fn broadcast_delta(&self, envelope: DeltaEnvelope) -> Result<()> {
         let channel = format!("{CHANNEL_PREFIX}{}", envelope.namespace);
-        let payload = rmp_serde::encode::to_vec_named(&envelope)
-            .map_err(ClusterError::Serialization)?;
+        let payload =
+            rmp_serde::encode::to_vec_named(&envelope).map_err(ClusterError::Serialization)?;
 
         let mut conn: MultiplexedConnection =
             self.inner.client.get_multiplexed_tokio_connection().await?;

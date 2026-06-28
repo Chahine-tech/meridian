@@ -1,6 +1,6 @@
 // Re-export the storage abstraction layer from the dedicated crate.
 // Server-internal code uses `crate::storage::*` unchanged.
-pub use meridian_storage::{Result, Store, StorageError, WalBackend, WalEntry};
+pub use meridian_storage::{Result, StorageError, Store, WalBackend, WalEntry};
 
 #[cfg(feature = "storage-sled")]
 pub use meridian_storage::{SledStore, SledWal};

@@ -26,8 +26,7 @@ fn hostname() -> String {
     std::env::var("HOSTNAME")
         .or_else(|_| {
             // gethostname fallback via /proc/sys/kernel/hostname on Linux
-            std::fs::read_to_string("/proc/sys/kernel/hostname")
-                .map(|s| s.trim().to_owned())
+            std::fs::read_to_string("/proc/sys/kernel/hostname").map(|s| s.trim().to_owned())
         })
         .unwrap_or_else(|_| "localhost".to_owned())
 }

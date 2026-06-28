@@ -4,7 +4,7 @@ mod http;
 mod wal;
 mod ws;
 
-use worker::{event, Context, Env, Request, Response, Router};
+use worker::{Context, Env, Request, Response, Router, event};
 
 pub use durable_object::NsObject;
 

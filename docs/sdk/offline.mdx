@@ -43,10 +43,12 @@ console.log(views.value()); // e.g. 42
 | What | Storage | When saved | When loaded |
 |------|---------|------------|-------------|
 | CRDT snapshots | IndexedDB | After every server delta | On handle creation (lazy, async) |
-| Pending op queue | localStorage | On `close()` and `beforeunload` | On `MeridianClient.create()` |
+| Pending op queue | localStorage | On `close()`, `beforeunload`, and tab hidden (`visibilitychange`) | On `MeridianClient.create()` |
 | Vector clocks | localStorage (opt-in) | On every observed op | On `VectorClockTracker` construction |
 
 On reconnect the server sends a `Sync` delta that merges authoritatively on top of the cached state — the cache is never stale for long.
+
+The `visibilitychange` flush covers most crash and background-kill scenarios: when the browser moves a tab to the background (mobile app switch, tab minimise) the queue is persisted immediately, before the process may be suspended or killed.
 
 ## Offline mode
 
@@ -94,8 +96,36 @@ const myStorage: StateStorage = {
 | `localStorageSyncOpsAdapter(prefix?)` | `SyncStateStorage` (sync) | Pending op queue — must be sync for `beforeunload` safety |
 | `memoryStateStorage` | `StateStorage` (async) | Testing — in-memory, not persisted |
 
+## Multi-tab sync
+
+Pass `tabSync: true` to keep all open tabs in the same namespace in sync instantly — without each tab waiting for its own server round-trip:
+
+```ts
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "http://localhost:3000",
+    namespace: "my-room",
+    token,
+    tabSync: true,
+    persistence: {
+      state: indexedDbStateStorage(),
+      ops:   localStorageSyncOpsAdapter(),
+    },
+  })
+);
+```
+
+When Tab A receives a server delta it broadcasts the raw delta bytes to every other tab sharing the same namespace via the [BroadcastChannel API](https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel). Tab B applies the delta immediately to its local CRDT handles — the same delta will also arrive via Tab B's own WebSocket subscription, but re-applying it is safe because all CRDTs are convergent.
+
+This is especially useful when Tab B is temporarily disconnected or backgrounded: it receives updates from Tab A without needing connectivity of its own.
+
+<Note>
+`BroadcastChannel` is available in all modern browsers and in Node.js 18+. The SDK checks `typeof BroadcastChannel !== "undefined"` at construction time and silently skips tab sync if the API is absent.
+</Note>
+
 ## Caveats
 
 - **Awareness** — ephemeral by design. Offline updates are dropped silently since awareness data is time-sensitive and not persisted.
 - **SSR / Node** — `indexedDbStateStorage` rejects gracefully if `indexedDB` is not available. `localStorageSyncOpsAdapter` is a no-op if `localStorage` is unavailable.
 - **Token rotation** — snapshot keys include the `client_id` from the token. If you issue a new token with a different `client_id`, the previous cache is ignored (not deleted automatically).
+- **Long offline sessions** — the server GCs RGA and Tree tombstones after 24 hours (configurable via `MERIDIAN_CRDT_GC_GRACE_MS`). Clients offline longer than this grace period may not receive delete deltas for GC'd tombstones on reconnect.

@@ -62,14 +62,11 @@ impl PgStore {
         )
         .execute(pool)
         .await?;
-        sqlx::query(
-            "ALTER TABLE crdt_snapshots ADD COLUMN IF NOT EXISTS expires_at_ms BIGINT",
-        )
-        .execute(pool)
-        .await?;
+        sqlx::query("ALTER TABLE crdt_snapshots ADD COLUMN IF NOT EXISTS expires_at_ms BIGINT")
+            .execute(pool)
+            .await?;
         Ok(())
     }
-
 }
 
 impl<V> Store<V> for PgStore
@@ -78,13 +75,12 @@ where
 {
     #[instrument(skip(self), fields(ns, id))]
     async fn get(&self, ns: &str, id: &str) -> Result<Option<V>> {
-        let row: Option<(Vec<u8>,)> = sqlx::query_as(
-            "SELECT data FROM crdt_snapshots WHERE namespace = $1 AND crdt_id = $2",
-        )
-        .bind(ns)
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row: Option<(Vec<u8>,)> =
+            sqlx::query_as("SELECT data FROM crdt_snapshots WHERE namespace = $1 AND crdt_id = $2")
+                .bind(ns)
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
 
         match row {
             None => Ok(None),
@@ -98,8 +94,7 @@ where
 
     #[instrument(skip(self, value), fields(ns, id))]
     async fn put(&self, ns: &str, id: &str, value: &V) -> Result<()> {
-        let bytes =
-            rmp_serde::encode::to_vec_named(value).map_err(StorageError::Serialization)?;
+        let bytes = rmp_serde::encode::to_vec_named(value).map_err(StorageError::Serialization)?;
 
         sqlx::query(
             r#"
@@ -136,13 +131,7 @@ where
 
     /// Atomic read-merge-write with side-output, using `SELECT FOR UPDATE`.
     #[instrument(skip(self, new_value, merge_fn), fields(ns, id))]
-    async fn merge_put_with<F, R>(
-        &self,
-        ns: &str,
-        id: &str,
-        new_value: V,
-        merge_fn: F,
-    ) -> Result<R>
+    async fn merge_put_with<F, R>(&self, ns: &str, id: &str, new_value: V, merge_fn: F) -> Result<R>
     where
         F: FnOnce(Option<V>, V) -> (V, R) + Send,
         R: Send,
@@ -272,13 +261,11 @@ where
 
     #[instrument(skip(self), fields(ns, id))]
     async fn delete(&self, ns: &str, id: &str) -> Result<()> {
-        sqlx::query(
-            "DELETE FROM crdt_snapshots WHERE namespace = $1 AND crdt_id = $2",
-        )
-        .bind(ns)
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("DELETE FROM crdt_snapshots WHERE namespace = $1 AND crdt_id = $2")
+            .bind(ns)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

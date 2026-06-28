@@ -48,10 +48,7 @@ pub async fn run_presence_gc<S: CrdtStore>(
     }
 }
 
-async fn gc_tick<S: CrdtStore>(
-    store: &S,
-    subscriptions: &SubscriptionManager,
-) -> Result<()> {
+async fn gc_tick<S: CrdtStore>(store: &S, subscriptions: &SubscriptionManager) -> Result<()> {
     let now = now_ms();
 
     // --- Pass 1: Presence CRDT entry expiry (removes individual entries) ----
@@ -76,10 +73,13 @@ async fn gc_tick<S: CrdtStore>(
         }
 
         if let Ok(delta_bytes) = rmp_serde::encode::to_vec_named(&gc_delta) {
-            subscriptions.publish(ns, Arc::new(crate::api::ws::ServerMsg::Delta {
-                crdt_id: crdt_id.to_owned(),
-                delta_bytes: delta_bytes.into(),
-            }));
+            subscriptions.publish(
+                ns,
+                Arc::new(crate::api::ws::ServerMsg::Delta {
+                    crdt_id: crdt_id.to_owned(),
+                    delta_bytes: delta_bytes.into(),
+                }),
+            );
         }
 
         debug!(key, "gc: pruned expired presence entries");

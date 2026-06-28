@@ -1,11 +1,11 @@
 use std::sync::{Arc, Mutex};
 
 use meridian_core::{
-    crdt::{
-        pncounter::{PNCounter, PNCounterDelta, PNCounterOp},
-        Crdt,
-    },
     crdt::registry::{CrdtOp, VersionedOp},
+    crdt::{
+        Crdt,
+        pncounter::{PNCounter, PNCounterDelta, PNCounterOp},
+    },
     protocol::ClientMsg,
 };
 use tokio::sync::watch;
@@ -14,12 +14,12 @@ use crate::{codec, error::ClientError, op_queue::OpQueue, transport::Transport};
 
 #[allow(dead_code)]
 pub(crate) struct PNCounterInner {
-    state:     Mutex<PNCounter>,
-    watch_tx:  watch::Sender<i64>,
-    crdt_id:   String,
+    state: Mutex<PNCounter>,
+    watch_tx: watch::Sender<i64>,
+    crdt_id: String,
     client_id: u64,
     transport: Arc<dyn Transport>,
-    op_queue:  Arc<OpQueue>,
+    op_queue: Arc<OpQueue>,
 }
 
 #[derive(Clone)]
@@ -67,11 +67,19 @@ impl PNCounterHandle {
     }
 
     pub async fn increment(&self, amount: u64) -> Result<(), ClientError> {
-        self.apply_and_send(PNCounterOp::Increment { client_id: self.0.client_id, amount }).await
+        self.apply_and_send(PNCounterOp::Increment {
+            client_id: self.0.client_id,
+            amount,
+        })
+        .await
     }
 
     pub async fn decrement(&self, amount: u64) -> Result<(), ClientError> {
-        self.apply_and_send(PNCounterOp::Decrement { client_id: self.0.client_id, amount }).await
+        self.apply_and_send(PNCounterOp::Decrement {
+            client_id: self.0.client_id,
+            amount,
+        })
+        .await
     }
 
     async fn apply_and_send(&self, op: PNCounterOp) -> Result<(), ClientError> {
@@ -80,18 +88,27 @@ impl PNCounterHandle {
             if state.apply(op.clone())?.is_some() {
                 let new_val = state.value().value;
                 let _ = self.0.watch_tx.send_if_modified(|v| {
-                    if *v != new_val { *v = new_val; true } else { false }
+                    if *v != new_val {
+                        *v = new_val;
+                        true
+                    } else {
+                        false
+                    }
                 });
             }
         }
         let versioned = VersionedOp::new(CrdtOp::PNCounter(op));
         let op_bytes = codec::encode_op(&versioned)?;
-        self.0.transport.send(ClientMsg::Op {
-            crdt_id: self.0.crdt_id.clone(),
-            op_bytes,
-            ttl_ms: None,
-            client_seq: None,
-        }).await
+        self.0
+            .transport
+            .send(ClientMsg::Op {
+                crdt_id: self.0.crdt_id.clone(),
+                op_bytes,
+                ttl_ms: None,
+                client_seq: None,
+                sig: None,
+            })
+            .await
     }
 
     pub(crate) fn apply_delta(&self, delta_bytes: &[u8]) -> Result<(), ClientError> {
@@ -100,7 +117,12 @@ impl PNCounterHandle {
         state.merge_delta(delta);
         let new_val = state.value().value;
         let _ = self.0.watch_tx.send_if_modified(|v| {
-            if *v != new_val { *v = new_val; true } else { false }
+            if *v != new_val {
+                *v = new_val;
+                true
+            } else {
+                false
+            }
         });
         Ok(())
     }

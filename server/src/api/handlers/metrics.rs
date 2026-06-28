@@ -12,7 +12,10 @@ pub async fn get_metrics(
     let output = handle.render();
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
         output,
     )
         .into_response()

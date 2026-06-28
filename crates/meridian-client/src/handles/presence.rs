@@ -4,39 +4,42 @@ use std::{
 };
 
 use meridian_core::{
-    crdt::{
-        clock::{now_ms, HybridLogicalClock},
-        presence::{Presence, PresenceDelta, PresenceOp},
-        Crdt,
-    },
     crdt::registry::{CrdtOp, VersionedOp},
+    crdt::{
+        Crdt,
+        clock::{HybridLogicalClock, now_ms},
+        presence::{Presence, PresenceDelta, PresenceOp},
+    },
     protocol::ClientMsg,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tokio::sync::watch;
 
 use crate::{codec, error::ClientError, op_queue::OpQueue, transport::Transport};
 
 #[allow(dead_code)]
 pub(crate) struct PresenceInner {
-    state:     Mutex<Presence>,
-    watch_tx:  watch::Sender<Vec<(u64, serde_json::Value)>>,
-    crdt_id:   String,
+    state: Mutex<Presence>,
+    watch_tx: watch::Sender<Vec<(u64, serde_json::Value)>>,
+    crdt_id: String,
     client_id: u64,
     transport: Arc<dyn Transport>,
-    op_queue:  Arc<OpQueue>,
+    op_queue: Arc<OpQueue>,
 }
 
 /// Live handle to a Presence CRDT. Generic over the data type `T`.
 #[derive(Clone)]
 pub struct PresenceHandle<T> {
-    inner:   Arc<PresenceInner>,
+    inner: Arc<PresenceInner>,
     _marker: PhantomData<T>,
 }
 
 impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> PresenceHandle<T> {
     pub(crate) fn from_inner(inner: Arc<PresenceInner>) -> Self {
-        Self { inner, _marker: PhantomData }
+        Self {
+            inner,
+            _marker: PhantomData,
+        }
     }
 
     pub(crate) fn into_inner(self) -> Arc<PresenceInner> {
@@ -117,7 +120,10 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> PresenceHandle<T> 
             logical: 0,
             node_id: self.inner.client_id,
         };
-        let op = PresenceOp::Leave { client_id: self.inner.client_id, hlc };
+        let op = PresenceOp::Leave {
+            client_id: self.inner.client_id,
+            hlc,
+        };
         self.apply_and_send(op).await
     }
 
@@ -129,22 +135,33 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> PresenceHandle<T> 
         }
         let versioned = VersionedOp::new(CrdtOp::Presence(op));
         let op_bytes = codec::encode_op(&versioned)?;
-        self.inner.transport.send(ClientMsg::Op {
-            crdt_id: self.inner.crdt_id.clone(),
-            op_bytes,
-            ttl_ms: None,
-            client_seq: None,
-        }).await
+        self.inner
+            .transport
+            .send(ClientMsg::Op {
+                crdt_id: self.inner.crdt_id.clone(),
+                op_bytes,
+                ttl_ms: None,
+                client_seq: None,
+                sig: None,
+            })
+            .await
     }
 
     fn notify_change(&self, state: &Presence) {
         let now = now_ms();
-        let new_val: Vec<(u64, serde_json::Value)> = state.entries.iter()
+        let new_val: Vec<(u64, serde_json::Value)> = state
+            .entries
+            .iter()
             .filter(|(_, e)| e.is_alive(now))
             .map(|(&id, e)| (id, (*e.data).clone()))
             .collect();
         let _ = self.inner.watch_tx.send_if_modified(|v| {
-            if *v != new_val { *v = new_val; true } else { false }
+            if *v != new_val {
+                *v = new_val;
+                true
+            } else {
+                false
+            }
         });
     }
 

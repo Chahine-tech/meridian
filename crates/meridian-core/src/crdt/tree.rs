@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{Crdt, CrdtError, HybridLogicalClock, VectorClock};
+use super::{Crdt, CrdtError, HybridLogicalClock, VectorClock, clock::now_ms};
 
 //
 // TreeCRDT — hierarchical tree with convergent move semantics.
@@ -21,7 +21,7 @@ use super::{Crdt, CrdtError, HybridLogicalClock, VectorClock};
 // - Sibling order: lexicographic on position string, ties broken by id descending
 //   (higher HLC = leftmost), matching the RGA tiebreak convention.
 
-/// A single tree node. Tombstones are kept forever.
+/// A single tree node. Tombstones are GC'd after a configurable grace period.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TreeNode {
     pub id: HybridLogicalClock,
@@ -34,6 +34,10 @@ pub struct TreeNode {
     pub deleted: bool,
     /// HLC of the last accepted UpdateNode op. Used for LWW on value.
     pub updated_at: HybridLogicalClock,
+    /// Wall-clock ms when the tombstone was created on this replica.
+    /// 0 = unknown (deserialized from pre-GC data — never GC'd for safety).
+    #[serde(default)]
+    pub deleted_at_ms: u64,
 }
 
 /// One entry in the ordered move log — needed to detect cycles during merge.
@@ -127,7 +131,11 @@ impl TreeCrdt {
     /// Returns true if `ancestor_id` is an ancestor of `node_id` in the
     /// current (possibly partially updated) parent-pointer state.
     /// Cycles in the parent graph are guarded against with a visited set.
-    fn is_ancestor(&self, mut node_id: HybridLogicalClock, ancestor_id: HybridLogicalClock) -> bool {
+    fn is_ancestor(
+        &self,
+        mut node_id: HybridLogicalClock,
+        ancestor_id: HybridLogicalClock,
+    ) -> bool {
         let mut visited = std::collections::BTreeSet::new();
         loop {
             if node_id == ancestor_id {
@@ -162,11 +170,7 @@ impl TreeCrdt {
             .collect();
 
         // Sort by (position asc, id desc) — lexicographic position, ties broken by HLC descending.
-        children.sort_by(|a, b| {
-            a.position
-                .cmp(&b.position)
-                .then_with(|| b.id.cmp(&a.id))
-        });
+        children.sort_by(|a, b| a.position.cmp(&b.position).then_with(|| b.id.cmp(&a.id)));
 
         TreeNodeValue {
             id: Self::hlc_to_str(node.id),
@@ -188,11 +192,18 @@ impl TreeCrdt {
     ///    the same node serve no purpose.
     ///
     /// Returns `(nodes_removed, move_records_removed)`.
-    pub fn compact(&mut self) -> (usize, usize) {
+    /// Remove tombstoned nodes and stale move-log entries.
+    ///
+    /// A tombstone node is removed when it is structurally safe (no live node
+    /// uses it as parent) AND old enough (`deleted_at_ms > 0` and
+    /// `deleted_at_ms < threshold_wall_ms`). Nodes with `deleted_at_ms == 0`
+    /// are never removed — their age is unknown.
+    ///
+    /// Move-log compaction retains only the latest move record per node and is
+    /// always safe (the current parent state is already stored on the node itself).
+    pub fn compact_before(&mut self, threshold_wall_ms: u64) -> (usize, usize) {
         // Step 1: remove tombstoned nodes whose children have all been deleted
-        // or moved away. A deleted node is safe to drop when:
-        //   - It is itself deleted (tombstone), AND
-        //   - No live node has it as a parent (so removing it won't orphan children).
+        // or moved away, and that are old enough to be safe.
         let live_parent_ids: std::collections::BTreeSet<Option<HybridLogicalClock>> = self
             .nodes
             .iter()
@@ -202,8 +213,13 @@ impl TreeCrdt {
 
         let nodes_before = self.nodes.len();
         self.nodes.retain(|n| {
-            // Keep if: live, OR if any live node uses it as parent.
-            !n.deleted || live_parent_ids.contains(&Some(n.id))
+            if !n.deleted {
+                return true;
+            }
+            // Keep tombstone if structurally referenced, age unknown, or not old enough.
+            live_parent_ids.contains(&Some(n.id))
+                || n.deleted_at_ms == 0
+                || n.deleted_at_ms >= threshold_wall_ms
         });
         let nodes_removed = nodes_before - self.nodes.len();
 
@@ -244,7 +260,12 @@ impl Crdt for TreeCrdt {
 
     fn apply(&mut self, op: TreeOp) -> Result<Option<TreeDelta>, CrdtError> {
         match op {
-            TreeOp::AddNode { id, parent_id, ref position, ref value } => {
+            TreeOp::AddNode {
+                id,
+                parent_id,
+                ref position,
+                ref value,
+            } => {
                 // Idempotent: skip if already present.
                 if self.nodes.iter().any(|n| n.id == id) {
                     return Ok(None);
@@ -256,11 +277,20 @@ impl Crdt for TreeCrdt {
                     value: value.clone(),
                     deleted: false,
                     updated_at: id,
+                    deleted_at_ms: 0,
                 });
-                Ok(Some(TreeDelta { ops: vec![op], ..Default::default() }))
+                Ok(Some(TreeDelta {
+                    ops: vec![op],
+                    ..Default::default()
+                }))
             }
 
-            TreeOp::MoveNode { op_id, node_id, new_parent_id, ref new_position } => {
+            TreeOp::MoveNode {
+                op_id,
+                node_id,
+                new_parent_id,
+                ref new_position,
+            } => {
                 // Idempotent: skip if this exact move op was already applied.
                 if self.move_log.iter().any(|r| r.op_id == op_id) {
                     return Ok(None);
@@ -271,7 +301,9 @@ impl Crdt for TreeCrdt {
                     None => return Ok(None),
                 };
                 // Cycle prevention: refuse if new_parent is a descendant of node_id.
-                if new_parent_id.is_some_and(|new_pid| new_pid == node_id || self.is_ancestor(new_pid, node_id)) {
+                if new_parent_id
+                    .is_some_and(|new_pid| new_pid == node_id || self.is_ancestor(new_pid, node_id))
+                {
                     let discarded = DiscardedMove {
                         node_id,
                         attempted_parent_id: new_parent_id,
@@ -279,7 +311,10 @@ impl Crdt for TreeCrdt {
                         actual_parent_id: self.nodes[node_idx].parent_id,
                         actual_position: self.nodes[node_idx].position.clone(),
                     };
-                    return Ok(Some(TreeDelta { ops: vec![], discarded_moves: vec![discarded] }));
+                    return Ok(Some(TreeDelta {
+                        ops: vec![],
+                        discarded_moves: vec![discarded],
+                    }));
                 }
                 let old_parent_id = self.nodes[node_idx].parent_id;
                 let old_position = self.nodes[node_idx].position.clone();
@@ -296,10 +331,17 @@ impl Crdt for TreeCrdt {
                     old_position,
                 });
 
-                Ok(Some(TreeDelta { ops: vec![op], ..Default::default() }))
+                Ok(Some(TreeDelta {
+                    ops: vec![op],
+                    ..Default::default()
+                }))
             }
 
-            TreeOp::UpdateNode { id, ref value, updated_at } => {
+            TreeOp::UpdateNode {
+                id,
+                ref value,
+                updated_at,
+            } => {
                 match self.nodes.iter_mut().find(|n| n.id == id) {
                     None => Ok(None),
                     Some(node) => {
@@ -309,21 +351,26 @@ impl Crdt for TreeCrdt {
                         }
                         node.value = value.clone();
                         node.updated_at = updated_at;
-                        Ok(Some(TreeDelta { ops: vec![op], ..Default::default() }))
+                        Ok(Some(TreeDelta {
+                            ops: vec![op],
+                            ..Default::default()
+                        }))
                     }
                 }
             }
 
-            TreeOp::DeleteNode { id } => {
-                match self.nodes.iter_mut().find(|n| n.id == id) {
-                    None => Ok(None),
-                    Some(node) if node.deleted => Ok(None),
-                    Some(node) => {
-                        node.deleted = true;
-                        Ok(Some(TreeDelta { ops: vec![TreeOp::DeleteNode { id }], ..Default::default() }))
-                    }
+            TreeOp::DeleteNode { id } => match self.nodes.iter_mut().find(|n| n.id == id) {
+                None => Ok(None),
+                Some(node) if node.deleted => Ok(None),
+                Some(node) => {
+                    node.deleted = true;
+                    node.deleted_at_ms = now_ms();
+                    Ok(Some(TreeDelta {
+                        ops: vec![TreeOp::DeleteNode { id }],
+                        ..Default::default()
+                    }))
                 }
-            }
+            },
         }
     }
 
@@ -379,13 +426,17 @@ impl Crdt for TreeCrdt {
         // then replaying from there.
 
         // Build a map: node_id -> original parent_id (before any moves).
-        let mut original_parents: std::collections::BTreeMap<HybridLogicalClock, Option<HybridLogicalClock>> = std::collections::BTreeMap::new();
+        let mut original_parents: std::collections::BTreeMap<
+            HybridLogicalClock,
+            Option<HybridLogicalClock>,
+        > = std::collections::BTreeMap::new();
         for node in &self.nodes {
             original_parents.insert(node.id, node.parent_id);
         }
         // Walk the combined log forward to find the oldest record per node.
         // The old_parent_id of the first move on each node is the AddNode parent.
-        let mut first_move_seen: std::collections::BTreeSet<HybridLogicalClock> = std::collections::BTreeSet::new();
+        let mut first_move_seen: std::collections::BTreeSet<HybridLogicalClock> =
+            std::collections::BTreeSet::new();
         for record in &combined_log {
             if first_move_seen.insert(record.node_id) {
                 original_parents.insert(record.node_id, record.old_parent_id);
@@ -467,7 +518,14 @@ impl Crdt for TreeCrdt {
             }
         }
 
-        if ops.is_empty() { None } else { Some(TreeDelta { ops, ..Default::default() }) }
+        if ops.is_empty() {
+            None
+        } else {
+            Some(TreeDelta {
+                ops,
+                ..Default::default()
+            })
+        }
     }
 
     fn value(&self) -> TreeValue {
@@ -478,11 +536,7 @@ impl Crdt for TreeCrdt {
             .filter(|n| !n.deleted && n.parent_id.is_none())
             .collect();
 
-        roots.sort_by(|a, b| {
-            a.position
-                .cmp(&b.position)
-                .then_with(|| b.id.cmp(&a.id))
-        });
+        roots.sort_by(|a, b| a.position.cmp(&b.position).then_with(|| b.id.cmp(&a.id)));
 
         TreeValue {
             roots: roots.iter().map(|n| self.build_node_value(n)).collect(),
@@ -499,10 +553,20 @@ mod tests {
     use super::*;
 
     fn hlc(wall_ms: u64, logical: u16, node_id: u64) -> HybridLogicalClock {
-        HybridLogicalClock { wall_ms, logical, node_id }
+        HybridLogicalClock {
+            wall_ms,
+            logical,
+            node_id,
+        }
     }
 
-    fn add(tree: &mut TreeCrdt, id: HybridLogicalClock, parent_id: Option<HybridLogicalClock>, pos: &str, val: &str) {
+    fn add(
+        tree: &mut TreeCrdt,
+        id: HybridLogicalClock,
+        parent_id: Option<HybridLogicalClock>,
+        pos: &str,
+        val: &str,
+    ) {
         tree.apply(TreeOp::AddNode {
             id,
             parent_id,
@@ -522,12 +586,14 @@ mod tests {
         let mut t = TreeCrdt::default();
         let id = hlc(1, 1, 1);
         add(&mut t, id, None, "a0", "Root");
-        let delta = t.apply(TreeOp::AddNode {
-            id,
-            parent_id: None,
-            position: "a0".into(),
-            value: "Root".into(),
-        }).unwrap();
+        let delta = t
+            .apply(TreeOp::AddNode {
+                id,
+                parent_id: None,
+                position: "a0".into(),
+                value: "Root".into(),
+            })
+            .unwrap();
         assert!(delta.is_none(), "duplicate add must be a no-op");
         assert_eq!(t.nodes.len(), 1);
     }
@@ -617,19 +683,24 @@ mod tests {
 
         // Try to move root under grandchild — would create a cycle.
         let op_id = hlc(2, 1, 1);
-        let delta = t.apply(TreeOp::MoveNode {
-            op_id,
-            node_id: root,
-            new_parent_id: Some(grandchild),
-            new_position: "a0".into(),
-        }).unwrap();
+        let delta = t
+            .apply(TreeOp::MoveNode {
+                op_id,
+                node_id: root,
+                new_parent_id: Some(grandchild),
+                new_position: "a0".into(),
+            })
+            .unwrap();
 
         // cycle-creating move returns a delta with one discarded_move entry (no ops)
         let delta = delta.expect("cycle move must return a delta with discarded_moves");
         assert!(delta.ops.is_empty(), "discarded move must have no ops");
         assert_eq!(delta.discarded_moves.len(), 1);
         assert_eq!(delta.discarded_moves[0].node_id, root);
-        assert_eq!(delta.discarded_moves[0].attempted_parent_id, Some(grandchild));
+        assert_eq!(
+            delta.discarded_moves[0].attempted_parent_id,
+            Some(grandchild)
+        );
         // root is still at the top level
         assert_eq!(t.value().roots.len(), 1);
         assert_eq!(t.value().roots[0].value, "Root");
@@ -641,12 +712,14 @@ mod tests {
         let id = hlc(1, 1, 1);
         add(&mut t, id, None, "a0", "Node");
 
-        let delta = t.apply(TreeOp::MoveNode {
-            op_id: hlc(2, 1, 1),
-            node_id: id,
-            new_parent_id: Some(id), // move under itself
-            new_position: "a0".into(),
-        }).unwrap();
+        let delta = t
+            .apply(TreeOp::MoveNode {
+                op_id: hlc(2, 1, 1),
+                node_id: id,
+                new_parent_id: Some(id), // move under itself
+                new_position: "a0".into(),
+            })
+            .unwrap();
         let delta = delta.expect("self-cycle move must return a delta with discarded_moves");
         assert!(delta.ops.is_empty());
         assert_eq!(delta.discarded_moves.len(), 1);
@@ -678,7 +751,8 @@ mod tests {
             node_id: child,
             new_parent_id: Some(r2),
             new_position: "a0".into(),
-        }).unwrap();
+        })
+        .unwrap();
 
         // op2 (node 2, lower HLC) moves child to r3
         t2.apply(TreeOp::MoveNode {
@@ -686,7 +760,8 @@ mod tests {
             node_id: child,
             new_parent_id: Some(r3),
             new_position: "a0".into(),
-        }).unwrap();
+        })
+        .unwrap();
 
         let mut m1 = t1.clone();
         m1.merge(&t2);
@@ -696,7 +771,10 @@ mod tests {
         // Both replicas must agree on where child ended up.
         let child_parent_m1 = m1.nodes.iter().find(|n| n.id == child).unwrap().parent_id;
         let child_parent_m2 = m2.nodes.iter().find(|n| n.id == child).unwrap().parent_id;
-        assert_eq!(child_parent_m1, child_parent_m2, "concurrent moves must converge");
+        assert_eq!(
+            child_parent_m1, child_parent_m2,
+            "concurrent moves must converge"
+        );
     }
 
     #[test]
@@ -710,15 +788,18 @@ mod tests {
             id,
             value: "Updated".into(),
             updated_at: hlc(2, 1, 1),
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(t.value().roots[0].value, "Updated");
 
         // Older update is ignored.
-        let delta = t.apply(TreeOp::UpdateNode {
-            id,
-            value: "Stale".into(),
-            updated_at: hlc(1, 2, 1),
-        }).unwrap();
+        let delta = t
+            .apply(TreeOp::UpdateNode {
+                id,
+                value: "Stale".into(),
+                updated_at: hlc(1, 2, 1),
+            })
+            .unwrap();
         assert!(delta.is_none(), "stale update must be ignored");
         assert_eq!(t.value().roots[0].value, "Updated");
     }
@@ -765,7 +846,8 @@ mod tests {
             node_id: child,
             new_parent_id: None,
             new_position: "b0".into(),
-        }).unwrap();
+        })
+        .unwrap();
 
         let bytes = rmp_serde::encode::to_vec_named(&t).unwrap();
         let t2: TreeCrdt = rmp_serde::decode::from_slice(&bytes).unwrap();
@@ -783,8 +865,11 @@ mod tests {
         // Delete child — it has no children of its own.
         t.apply(TreeOp::DeleteNode { id: child }).unwrap();
 
-        let (nodes_removed, _) = t.compact();
-        assert_eq!(nodes_removed, 1, "deleted leaf with no live children must be GC'd");
+        let (nodes_removed, _) = t.compact_before(u64::MAX);
+        assert_eq!(
+            nodes_removed, 1,
+            "deleted leaf with no live children must be GC'd"
+        );
         // Root is still live.
         assert_eq!(t.nodes.len(), 1);
         assert_eq!(t.value().roots[0].value, "Root");
@@ -803,7 +888,7 @@ mod tests {
         // Delete child — grandchild is still live under it.
         t.apply(TreeOp::DeleteNode { id: child }).unwrap();
 
-        let (nodes_removed, _) = t.compact();
+        let (nodes_removed, _) = t.compact_before(u64::MAX);
         // Child must be kept because grandchild.parent_id == child.
         assert_eq!(nodes_removed, 0, "tombstone with live child must be kept");
         assert_eq!(t.nodes.len(), 3);
@@ -820,14 +905,35 @@ mod tests {
         add(&mut t, child, Some(r1), "a0", "Child");
 
         // Move child three times.
-        t.apply(TreeOp::MoveNode { op_id: hlc(2, 1, 1), node_id: child, new_parent_id: Some(r2), new_position: "a0".into() }).unwrap();
-        t.apply(TreeOp::MoveNode { op_id: hlc(3, 1, 1), node_id: child, new_parent_id: None,      new_position: "c0".into() }).unwrap();
-        t.apply(TreeOp::MoveNode { op_id: hlc(4, 1, 1), node_id: child, new_parent_id: Some(r1),  new_position: "z0".into() }).unwrap();
+        t.apply(TreeOp::MoveNode {
+            op_id: hlc(2, 1, 1),
+            node_id: child,
+            new_parent_id: Some(r2),
+            new_position: "a0".into(),
+        })
+        .unwrap();
+        t.apply(TreeOp::MoveNode {
+            op_id: hlc(3, 1, 1),
+            node_id: child,
+            new_parent_id: None,
+            new_position: "c0".into(),
+        })
+        .unwrap();
+        t.apply(TreeOp::MoveNode {
+            op_id: hlc(4, 1, 1),
+            node_id: child,
+            new_parent_id: Some(r1),
+            new_position: "z0".into(),
+        })
+        .unwrap();
 
         assert_eq!(t.move_log.len(), 3);
 
-        let (_, records_removed) = t.compact();
-        assert_eq!(records_removed, 2, "only latest move per node should be kept");
+        let (_, records_removed) = t.compact_before(u64::MAX);
+        assert_eq!(
+            records_removed, 2,
+            "only latest move per node should be kept"
+        );
         assert_eq!(t.move_log.len(), 1);
         // The remaining record should be the last move (op_id = hlc(4,1,1)).
         assert_eq!(t.move_log[0].op_id, hlc(4, 1, 1));
@@ -840,7 +946,7 @@ mod tests {
         let mut t = TreeCrdt::default();
         let root = hlc(1, 1, 1);
         add(&mut t, root, None, "a0", "Root");
-        let (nodes, records) = t.compact();
+        let (nodes, records) = t.compact_before(u64::MAX);
         assert_eq!(nodes, 0);
         assert_eq!(records, 0);
     }

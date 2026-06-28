@@ -10,7 +10,7 @@
 #![cfg(feature = "wal-archive-s3")]
 
 use aws_config::BehaviorVersion;
-use aws_sdk_s3::{config::Credentials, Client};
+use aws_sdk_s3::{Client, config::Credentials};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::localstack::LocalStack;
 
@@ -119,7 +119,9 @@ async fn truncate_before_does_not_error() {
             .unwrap();
 
     wal.append("ns", "c1", vec![42]).await.unwrap();
-    wal.truncate_before(2).await.expect("truncate_before must not fail");
+    wal.truncate_before(2)
+        .await
+        .expect("truncate_before must not fail");
 }
 
 /// replay_from delegates to inner WAL — confirms the S3 wrapper is transparent.

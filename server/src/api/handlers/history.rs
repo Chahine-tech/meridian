@@ -6,11 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use crate::{
-    auth::ClaimsExt,
-    crdt::registry::CrdtOp,
-    storage::WalBackend,
-};
+use crate::{auth::ClaimsExt, crdt::registry::CrdtOp, storage::WalBackend};
 
 use super::AppStateExt;
 

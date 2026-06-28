@@ -22,6 +22,10 @@ export type {
 export type { StateStorage, SyncStateStorage } from "./persistence/storage.js";
 export { memoryStateStorage, indexedDbStateStorage, localStorageSyncOpsAdapter } from "./persistence/storage.js";
 
+// Multi-tab sync
+export { TabSync } from "./sync/tab-sync.js";
+export type { TabDeltaMsg } from "./sync/tab-sync.js";
+
 // CRDT handles
 export { GCounterHandle } from "./crdt/gcounter.js";
 export { PNCounterHandle } from "./crdt/pncounter.js";
@@ -136,3 +140,19 @@ export {
   encodeVectorClock,
   decodeVectorClock,
 } from "./codec.js";
+
+// Crypto — E2E encryption and BFT op signing
+export {
+  encryptJson,
+  decryptJson,
+  importAesGcmKey,
+  generateAesGcmKey,
+  isEncryptedValue,
+} from "./crypto/aes-gcm.js";
+export type { EncryptedValue } from "./crypto/aes-gcm.js";
+export {
+  generateClientKeypair,
+  signOp,
+  loadOrGenerateKeypair,
+} from "./crypto/ed25519.js";
+export type { ClientKeypair } from "./crypto/ed25519.js";

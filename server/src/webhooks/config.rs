@@ -16,8 +16,7 @@ impl WebhookConfig {
     /// Returns `None` if `MERIDIAN_WEBHOOK_URL` is not set (webhooks disabled).
     pub fn from_env() -> Option<Self> {
         let url = std::env::var("MERIDIAN_WEBHOOK_URL").ok()?;
-        let secret = std::env::var("MERIDIAN_WEBHOOK_SECRET")
-            .unwrap_or_else(|_| String::new());
+        let secret = std::env::var("MERIDIAN_WEBHOOK_SECRET").unwrap_or_else(|_| String::new());
         Some(Self { url, secret })
     }
 }

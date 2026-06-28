@@ -56,6 +56,8 @@ export const TokenClaims = Schema.Struct({
   client_id: ClientId,
   expires_at: TimestampMs,
   permissions: Permissions,
+  /** 32-byte Ed25519 public key, present when the token was issued with BFT op signing. */
+  client_pubkey: Schema.optional(Schema.Uint8ArrayFromSelf),
 });
 export type TokenClaims = typeof TokenClaims.Type;
 
@@ -71,6 +73,8 @@ export const ClientMsg = Schema.Union(
       op_bytes: Schema.Uint8ArrayFromSelf,
       ttl_ms: Schema.optional(Schema.Number),
       client_seq: Schema.optional(Schema.Number),
+      /** 64-byte Ed25519 signature over `op_bytes`. Present when BFT signing is enabled. */
+      sig: Schema.optional(Schema.Uint8ArrayFromSelf),
     }),
   }),
   Schema.Struct({

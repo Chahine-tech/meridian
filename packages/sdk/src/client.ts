@@ -3,6 +3,7 @@ import type { QuerySpec, QueryResult, LiveQueryResult } from "./schema.js";
 import type { WsState } from "./transport/websocket.js";
 import { WsTransport } from "./transport/websocket.js";
 import type { StateStorage, SyncStateStorage } from "./persistence/storage.js";
+import { TabSync } from "./sync/tab-sync.js";
 import {
   snapshotFromHandle,
   snapshotToBytes,
@@ -34,10 +35,12 @@ import {
 } from "./sync/delta.js";
 import type { TreeNodeValue } from "./sync/delta.js";
 import { parseAndValidateToken } from "./auth/token.js";
-import { canRead as evalCanRead, canWrite as evalCanWrite } from "./auth/permissions.js";
+import { canRead as evalCanRead, canWrite as evalCanWrite, globMatch } from "./auth/permissions.js";
 import type { OpMask } from "./auth/permissions.js";
 import type { ServerMsg, TokenClaims } from "./schema.js";
 import type { TokenParseError, TokenExpiredError } from "./errors.js";
+import { encryptJson, decryptJson, isEncryptedValue, type EncryptedValue } from "./crypto/aes-gcm.js";
+import { signOp, loadOrGenerateKeypair, type ClientKeypair } from "./crypto/ed25519.js";
 
 // --- Devtools snapshot types ---
 
@@ -134,6 +137,43 @@ export interface MeridianClientConfig {
   offline?: boolean;
   /** Persistence configuration for offline-first support. */
   persistence?: PersistenceConfig;
+  /**
+   * If `true`, broadcast CRDT deltas to other tabs in the same origin and namespace
+   * via `BroadcastChannel`. Other tabs with the same namespace apply updates instantly
+   * without a server round-trip. Safe to enable — re-applying a delta is idempotent.
+   */
+  tabSync?: boolean;
+  /**
+   * Client-side AES-256-GCM encryption keys, keyed by CRDT ID pattern (glob supported).
+   * Matching CRDTs encrypt their value fields before sending — the server stores and
+   * forwards ciphertext and never sees plaintext.
+   *
+   * Supported CRDT types: `LwwRegister`, `Presence`.
+   * Not supported: `GCounter`, `PNCounter`, `RGA` (numeric/structural merge requires plaintext).
+   *
+   * @example
+   * ```ts
+   * import { importAesGcmKey } from "meridian-sdk";
+   * const key = await importAesGcmKey(base64Key);
+   * MeridianClient.create({ ..., encryption: { "lw:profile": key, "pr:room-*": key2 } });
+   * ```
+   */
+  encryption?: Record<string, CryptoKey>;
+  /**
+   * If `true`, generate (or load from `localStorage`) a per-client Ed25519 keypair and
+   * sign every outgoing op before sending.
+   *
+   * The server verifies the signature against `client_pubkey` embedded in the token.
+   * This provides Byzantine fault tolerance in cluster mode: a compromised node cannot
+   * forge ops that appear to originate from legitimate clients.
+   *
+   * **Setup**: when issuing the token (via your app server), include `client_pubkey`
+   * (base64url-encoded 32-byte public key) in the token issuance request. Obtain the
+   * public key from `client.publicKeyBytes` after `create()` completes.
+   *
+   * Requires Chrome 113+, Firefox 130+, or Node.js 20+.
+   */
+  signing?: boolean;
 }
 
 /**
@@ -170,6 +210,13 @@ export class MeridianClient {
   private readonly transport: WsTransport;
   readonly http: HttpClient;
 
+  /**
+   * Raw 32-byte Ed25519 public key for this client, or `null` if `signing` is disabled.
+   * Pass this (base64url-encoded) to your app server when issuing tokens so the server
+   * can verify op signatures.
+   */
+  readonly publicKeyBytes: Uint8Array | null;
+
   // HACK: Generic params are erased at storage level; factories restore them via typed get+cast on retrieval.
   private readonly gcHandles = new Map<string, GCounterHandle>();
   private readonly pnHandles = new Map<string, PNCounterHandle>();
@@ -198,11 +245,15 @@ export class MeridianClient {
   private readonly snapStore: StateStorage | null;
   private readonly opsStore: SyncStateStorage | null;
   private readonly restorePromises = new Set<Promise<void>>();
+  private readonly tabSyncChannel: TabSync | null;
+  private readonly encKeys: ReadonlyMap<string, CryptoKey>;
 
-  private constructor(config: MeridianClientConfig, claims: TokenClaims) {
+  private constructor(config: MeridianClientConfig, claims: TokenClaims, keypair: ClientKeypair | null) {
     this.namespace = config.namespace;
     this.claims = claims;
     this.clientId = claims.client_id;
+    this.publicKeyBytes = keypair?.publicKeyBytes ?? null;
+    this.encKeys = new Map(Object.entries(config.encryption ?? {}));
 
     this.snapStore = config.persistence?.state ?? null;
     this.opsStore = config.persistence?.ops ?? null;
@@ -217,7 +268,18 @@ export class MeridianClient {
       url: wsUrl,
       token: config.token,
       onMessage: (msg) => { this.handleServerMsg(msg); },
+      ...(keypair !== null && { signFn: (opBytes) => signOp(keypair.privateKey, opBytes) }),
     });
+
+    this.tabSyncChannel = (config.tabSync === true && typeof BroadcastChannel !== "undefined")
+      ? new TabSync(config.namespace)
+      : null;
+
+    if (this.tabSyncChannel !== null) {
+      this.tabSyncChannel.onDelta(({ crdtId, deltaBytes }) => {
+        void this.applyDelta(crdtId, deltaBytes, false);
+      });
+    }
 
     // Restore persisted op queue before connecting.
     if (this.opsStore !== null) {
@@ -232,6 +294,10 @@ export class MeridianClient {
         this.opsStore.delete(`ops:${this.namespace}`);
       }
       globalThis.addEventListener("beforeunload", this.flushOpsToStorage);
+      // Flush when tab is hidden (covers most crash/kill scenarios without IDB complexity).
+      if (typeof document !== "undefined") {
+        document.addEventListener("visibilitychange", this.onVisibilityChange);
+      }
     }
 
     if (config.autoConnect !== false && config.offline !== true) {
@@ -299,6 +365,12 @@ export class MeridianClient {
     this.opsStore.save(key, encode(msgs));
   };
 
+  private readonly onVisibilityChange = (): void => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      this.flushOpsToStorage();
+    }
+  };
+
   /**
    * Creates and validates a new `MeridianClient` from the supplied configuration.
    *
@@ -323,9 +395,26 @@ export class MeridianClient {
   static create(
     config: MeridianClientConfig,
   ): Effect.Effect<MeridianClient, TokenParseError | TokenExpiredError> {
-    return parseAndValidateToken(config.token).pipe(
-      Effect.map((claims) => new MeridianClient(config, claims)),
-    );
+    return Effect.gen(function* () {
+      const claims = yield* parseAndValidateToken(config.token);
+      const keypair = config.signing === true
+        ? yield* Effect.promise(() => loadOrGenerateKeypair())
+        : null;
+      return new MeridianClient(config, claims, keypair);
+    });
+  }
+
+  private resolveEncKey(crdtId: string): CryptoKey | null {
+    if (this.encKeys.size === 0) return null;
+    for (const [pattern, key] of this.encKeys) {
+      if (globMatch(pattern, crdtId)) return key;
+    }
+    return null;
+  }
+
+  private encryptFnFor(crdtId: string): ((v: unknown) => Promise<unknown>) | undefined {
+    const key = this.resolveEncKey(crdtId);
+    return key !== null ? (v) => encryptJson(key, v) : undefined;
   }
 
   /**
@@ -435,7 +524,8 @@ export class MeridianClient {
   lwwregister<T>(crdtId: string, schema?: Schema.Schema<T>): LwwRegisterHandle<T> {
     let handle = this.lwHandles.get(crdtId) as LwwRegisterHandle<T> | undefined;
     if (!handle) {
-      const base = { ns: this.namespace, crdtId, clientId: this.clientId, transport: this.transport };
+      const encryptFn = this.encryptFnFor(crdtId);
+      const base = { ns: this.namespace, crdtId, clientId: this.clientId, transport: this.transport, ...(encryptFn !== undefined && { encryptFn }) };
       handle = schema ? new LwwRegisterHandle<T>({ ...base, schema }) : new LwwRegisterHandle<T>(base);
       this.lwHandles.set(crdtId, handle as LwwRegisterHandle<unknown>);
       this.transport.subscribe(crdtId);
@@ -467,7 +557,8 @@ export class MeridianClient {
   presence<T>(crdtId: string, schema?: Schema.Schema<T>): PresenceHandle<T> {
     let handle = this.prHandles.get(crdtId) as PresenceHandle<T> | undefined;
     if (!handle) {
-      const base = { ns: this.namespace, crdtId, clientId: this.clientId, transport: this.transport };
+      const encryptFn = this.encryptFnFor(crdtId);
+      const base = { ns: this.namespace, crdtId, clientId: this.clientId, transport: this.transport, ...(encryptFn !== undefined && { encryptFn }) };
       handle = schema ? new PresenceHandle<T>({ ...base, schema }) : new PresenceHandle<T>(base);
       this.prHandles.set(crdtId, handle as PresenceHandle<unknown>);
       this.transport.subscribe(crdtId);
@@ -733,7 +824,11 @@ export class MeridianClient {
     this.flushOpsToStorage();
     if (this.opsStore !== null) {
       globalThis.removeEventListener("beforeunload", this.flushOpsToStorage);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", this.onVisibilityChange);
+      }
     }
+    this.tabSyncChannel?.close();
     for (const unsub of this.handleUnsubs) unsub();
     this.handleUnsubs.length = 0;
     this.anyListeners.clear();
@@ -846,63 +941,107 @@ export class MeridianClient {
       return;
     }
 
-    if (!("Delta" in msg)) return;
-    const { crdt_id, delta_bytes } = msg.Delta;
+    if ("Delta" in msg) {
+      const { crdt_id, delta_bytes } = msg.Delta;
+      void this.applyDelta(crdt_id, delta_bytes, true);
+    }
+  }
 
-    const gcHandle = this.gcHandles.get(crdt_id);
+  /**
+   * Apply a CRDT delta to the appropriate local handle.
+   * Called from the server message handler and from tab-sync broadcasts.
+   * When `broadcast` is true, the delta is forwarded to other tabs via BroadcastChannel.
+   */
+  private async applyDelta(crdtId: string, deltaBytes: Uint8Array, broadcast: boolean): Promise<void> {
+    const gcHandle = this.gcHandles.get(crdtId);
     if (gcHandle) {
-      try { gcHandle.applyDelta(decodeGCounterDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:gc:${this.namespace}:${this.clientId}:${crdt_id}`, gcHandle);
-      this.notifyDelta(crdt_id, "gcounter");
+      try { gcHandle.applyDelta(decodeGCounterDelta(deltaBytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:gc:${this.namespace}:${this.clientId}:${crdtId}`, gcHandle);
+      this.notifyDelta(crdtId, "gcounter");
+      if (broadcast) this.tabSyncChannel?.broadcast(crdtId, deltaBytes);
       return;
     }
-    const pnHandle = this.pnHandles.get(crdt_id);
+    const pnHandle = this.pnHandles.get(crdtId);
     if (pnHandle) {
-      try { pnHandle.applyDelta(decodePNCounterDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:pn:${this.namespace}:${this.clientId}:${crdt_id}`, pnHandle);
-      this.notifyDelta(crdt_id, "pncounter");
+      try { pnHandle.applyDelta(decodePNCounterDelta(deltaBytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:pn:${this.namespace}:${this.clientId}:${crdtId}`, pnHandle);
+      this.notifyDelta(crdtId, "pncounter");
+      if (broadcast) this.tabSyncChannel?.broadcast(crdtId, deltaBytes);
       return;
     }
-    const orHandle = this.orHandles.get(crdt_id);
+    const orHandle = this.orHandles.get(crdtId);
     if (orHandle) {
-      try { orHandle.applyDelta(decodeORSetDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:or:${this.namespace}:${this.clientId}:${crdt_id}`, orHandle);
-      this.notifyDelta(crdt_id, "orset");
+      try { orHandle.applyDelta(decodeORSetDelta(deltaBytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:or:${this.namespace}:${this.clientId}:${crdtId}`, orHandle);
+      this.notifyDelta(crdtId, "orset");
+      if (broadcast) this.tabSyncChannel?.broadcast(crdtId, deltaBytes);
       return;
     }
-    const lwHandle = this.lwHandles.get(crdt_id);
+    const lwHandle = this.lwHandles.get(crdtId);
     if (lwHandle) {
-      try { lwHandle.applyDelta(decodeLwwDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:lw:${this.namespace}:${this.clientId}:${crdt_id}`, lwHandle);
-      this.notifyDelta(crdt_id, "lwwregister");
+      try {
+        let delta = decodeLwwDelta(deltaBytes);
+        if (delta.entry !== null && isEncryptedValue(delta.entry.value)) {
+          const key = this.resolveEncKey(crdtId);
+          if (key !== null) {
+            const plain = await decryptJson(key, delta.entry.value as EncryptedValue);
+            delta = { entry: { ...delta.entry, value: plain } };
+          }
+        }
+        lwHandle.applyDelta(delta);
+      } catch { /* stale or decrypt failure */ }
+      this.saveSnap(`snap:lw:${this.namespace}:${this.clientId}:${crdtId}`, lwHandle);
+      this.notifyDelta(crdtId, "lwwregister");
+      if (broadcast) this.tabSyncChannel?.broadcast(crdtId, deltaBytes);
       return;
     }
-    const prHandle = this.prHandles.get(crdt_id);
+    const prHandle = this.prHandles.get(crdtId);
     if (prHandle) {
-      try { prHandle.applyDelta(decodePresenceDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:pr:${this.namespace}:${this.clientId}:${crdt_id}`, prHandle);
-      this.notifyDelta(crdt_id, "presence");
+      try {
+        const delta = decodePresenceDelta(deltaBytes);
+        const key = this.resolveEncKey(crdtId);
+        if (key !== null) {
+          const decrypted: typeof delta.changes = {};
+          for (const [clientIdStr, entry] of Object.entries(delta.changes)) {
+            if (entry !== null && isEncryptedValue(entry.data)) {
+              const plain = await decryptJson(key, entry.data as EncryptedValue);
+              decrypted[clientIdStr] = { ...entry, data: plain };
+            } else {
+              decrypted[clientIdStr] = entry;
+            }
+          }
+          prHandle.applyDelta({ changes: decrypted });
+        } else {
+          prHandle.applyDelta(delta);
+        }
+      } catch { /* stale or decrypt failure */ }
+      this.saveSnap(`snap:pr:${this.namespace}:${this.clientId}:${crdtId}`, prHandle);
+      this.notifyDelta(crdtId, "presence");
+      if (broadcast) this.tabSyncChannel?.broadcast(crdtId, deltaBytes);
       return;
     }
-    const cmHandle = this.cmHandles.get(crdt_id);
+    const cmHandle = this.cmHandles.get(crdtId);
     if (cmHandle) {
-      try { cmHandle.applyDelta(decodeCRDTMapDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:cm:${this.namespace}:${this.clientId}:${crdt_id}`, cmHandle);
-      this.notifyDelta(crdt_id, "crdtmap");
+      try { cmHandle.applyDelta(decodeCRDTMapDelta(deltaBytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:cm:${this.namespace}:${this.clientId}:${crdtId}`, cmHandle);
+      this.notifyDelta(crdtId, "crdtmap");
+      if (broadcast) this.tabSyncChannel?.broadcast(crdtId, deltaBytes);
       return;
     }
-    const rgaHandle = this.rgaHandles.get(crdt_id);
+    const rgaHandle = this.rgaHandles.get(crdtId);
     if (rgaHandle) {
-      try { rgaHandle.applyDelta(decodeRGADelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:rg:${this.namespace}:${this.clientId}:${crdt_id}`, rgaHandle);
-      this.notifyDelta(crdt_id, "rga");
+      try { rgaHandle.applyDelta(decodeRGADelta(deltaBytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:rg:${this.namespace}:${this.clientId}:${crdtId}`, rgaHandle);
+      this.notifyDelta(crdtId, "rga");
+      if (broadcast) this.tabSyncChannel?.broadcast(crdtId, deltaBytes);
       return;
     }
-    const treeHandle = this.treeHandles.get(crdt_id);
+    const treeHandle = this.treeHandles.get(crdtId);
     if (treeHandle) {
-      try { treeHandle.applyDelta(decodeTreeDelta(delta_bytes)); } catch { /* stale */ }
-      this.saveSnap(`snap:tr:${this.namespace}:${this.clientId}:${crdt_id}`, treeHandle);
-      this.notifyDelta(crdt_id, "tree");
+      try { treeHandle.applyDelta(decodeTreeDelta(deltaBytes)); } catch { /* stale */ }
+      this.saveSnap(`snap:tr:${this.namespace}:${this.clientId}:${crdtId}`, treeHandle);
+      this.notifyDelta(crdtId, "tree");
+      if (broadcast) this.tabSyncChannel?.broadcast(crdtId, deltaBytes);
     }
   }
 

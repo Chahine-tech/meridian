@@ -1,12 +1,12 @@
 use std::sync::{Arc, Mutex};
 
 use meridian_core::{
+    crdt::registry::{CrdtOp, VersionedOp},
     crdt::{
-        gcounter::{GCounter, GCounterDelta, GCounterOp},
         Crdt,
+        gcounter::{GCounter, GCounterDelta, GCounterOp},
     },
     protocol::ClientMsg,
-    crdt::registry::{CrdtOp, VersionedOp},
 };
 use tokio::sync::watch;
 
@@ -14,12 +14,12 @@ use crate::{codec, error::ClientError, op_queue::OpQueue, transport::Transport};
 
 #[allow(dead_code)]
 pub(crate) struct GCounterInner {
-    state:     Mutex<GCounter>,
-    watch_tx:  watch::Sender<u64>,
-    crdt_id:   String,
+    state: Mutex<GCounter>,
+    watch_tx: watch::Sender<u64>,
+    crdt_id: String,
     client_id: u64,
     transport: Arc<dyn Transport>,
-    op_queue:  Arc<OpQueue>,
+    op_queue: Arc<OpQueue>,
 }
 
 /// Live handle to a GCounter CRDT. Cloneable and `Send + Sync`.
@@ -76,7 +76,10 @@ impl GCounterHandle {
 
     /// Increment the counter by `amount`. Applies optimistically and sends to server.
     pub async fn increment(&self, amount: u64) -> Result<(), ClientError> {
-        let op = GCounterOp { client_id: self.0.client_id, amount };
+        let op = GCounterOp {
+            client_id: self.0.client_id,
+            amount,
+        };
 
         // Optimistic local apply
         {
@@ -84,7 +87,12 @@ impl GCounterHandle {
             if let Some(_delta) = state.apply(op.clone())? {
                 let new_total = state.value().total;
                 let _ = self.0.watch_tx.send_if_modified(|v| {
-                    if *v != new_total { *v = new_total; true } else { false }
+                    if *v != new_total {
+                        *v = new_total;
+                        true
+                    } else {
+                        false
+                    }
                 });
             }
         }
@@ -96,6 +104,7 @@ impl GCounterHandle {
             op_bytes,
             ttl_ms: None,
             client_seq: None,
+            sig: None,
         };
         self.0.transport.send(msg).await
     }
@@ -107,7 +116,12 @@ impl GCounterHandle {
         state.merge_delta(delta);
         let new_total = state.value().total;
         let _ = self.0.watch_tx.send_if_modified(|v| {
-            if *v != new_total { *v = new_total; true } else { false }
+            if *v != new_total {
+                *v = new_total;
+                true
+            } else {
+                false
+            }
         });
         Ok(())
     }
@@ -170,10 +184,10 @@ mod tests {
             }
         });
         h.increment(7).await.unwrap();
-        let received = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            async { rx.await.ok() }
-        ).await;
+        let received = tokio::time::timeout(std::time::Duration::from_millis(100), async {
+            rx.await.ok()
+        })
+        .await;
         assert!(matches!(received, Ok(Some(7))));
     }
 }

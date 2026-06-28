@@ -83,6 +83,9 @@ await Effect.runPromise(
 | `namespace` | `string` | Namespace to connect to |
 | `token` | `string` | Meridian token |
 | `autoConnect` | `boolean?` | Open WebSocket immediately (default: `true`) |
+| `offline` | `boolean?` | Start without connecting — operate from cache, call `client.connect()` later |
+| `persistence` | `PersistenceConfig?` | Persist CRDT snapshots and the pending op queue across page loads |
+| `tabSync` | `boolean?` | Broadcast deltas to other tabs in the same namespace via `BroadcastChannel` |
 
 ### CRDT handles
 
@@ -202,6 +205,55 @@ unsubDelta();
 ```
 
 The queue holds up to 500 ops. If the limit is reached, the oldest op is dropped to make room for the newest.
+
+### Persistence (offline-first)
+
+Enable persistence to cache CRDT state across page loads and survive disconnections:
+
+```ts
+import {
+  MeridianClient,
+  indexedDbStateStorage,
+  localStorageSyncOpsAdapter,
+} from "meridian-sdk";
+
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "http://localhost:3000",
+    namespace: "my-room",
+    token,
+    persistence: {
+      state: indexedDbStateStorage(),      // CRDT snapshots → IndexedDB
+      ops:   localStorageSyncOpsAdapter(), // pending op queue → localStorage (sync, survives tab close)
+    },
+  })
+);
+
+const views = client.gcounter("gc:views");
+const cart  = client.orset("or:cart");
+await client.waitForRestore(); // wait for IndexedDB reads to complete
+
+console.log(views.value()); // populated from cache before the WebSocket connects
+```
+
+The pending op queue is also flushed when the tab becomes hidden (`visibilitychange`), covering most crash and background-kill scenarios.
+
+### Multi-tab sync
+
+Pass `tabSync: true` to broadcast CRDT deltas to other open tabs in the same origin and namespace via the [BroadcastChannel API](https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel):
+
+```ts
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "http://localhost:3000",
+    namespace: "my-room",
+    token,
+    tabSync: true,
+  })
+);
+```
+
+When Tab A receives a delta from the server it immediately forwards it to Tab B — Tab B applies it without waiting for its own server round-trip. All CRDTs are convergent so applying the same delta twice is safe.
 
 ### Op latency
 

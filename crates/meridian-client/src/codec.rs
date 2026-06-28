@@ -32,7 +32,9 @@ mod tests {
 
     #[test]
     fn subscribe_roundtrip() {
-        let msg = ClientMsg::Subscribe { crdt_id: "gc:score".into() };
+        let msg = ClientMsg::Subscribe {
+            crdt_id: "gc:score".into(),
+        };
         let bytes = encode(&msg).unwrap();
         let decoded = decode(&bytes);
         // ClientMsg and ServerMsg are different enums — encode/decode are directional.
@@ -52,10 +54,17 @@ mod tests {
             op_bytes,
             ttl_ms: None,
             client_seq: Some(42),
+            sig: None,
         };
         let bytes = encode(&msg).unwrap();
         let back = ClientMsg::from_msgpack(&bytes).unwrap();
-        assert!(matches!(back, ClientMsg::Op { client_seq: Some(42), .. }));
+        assert!(matches!(
+            back,
+            ClientMsg::Op {
+                client_seq: Some(42),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -71,7 +80,10 @@ mod tests {
 
     #[test]
     fn server_ack_roundtrip() {
-        let msg = meridian_core::protocol::ServerMsg::Ack { seq: 99, client_seq: Some(1) };
+        let msg = meridian_core::protocol::ServerMsg::Ack {
+            seq: 99,
+            client_seq: Some(1),
+        };
         let bytes = msg.to_msgpack().unwrap();
         let back = decode(&bytes).unwrap();
         assert!(matches!(back, ServerMsg::Ack { seq: 99, .. }));

@@ -21,7 +21,10 @@ struct TestValue {
 }
 
 async fn setup() -> (String, testcontainers::ContainerAsync<Redis>) {
-    let container = Redis::default().start().await.expect("docker must be running");
+    let container = Redis::default()
+        .start()
+        .await
+        .expect("docker must be running");
     let port = container.get_host_port_ipv4(6379).await.unwrap();
     let url = format!("redis://127.0.0.1:{port}");
     (url, container)
@@ -40,7 +43,10 @@ async fn redis_store_put_and_get_roundtrip() {
     let (url, _container) = setup().await;
     let store = RedisStore::new(&url).await.unwrap();
 
-    let value = TestValue { data: "hello".into(), count: 42 };
+    let value = TestValue {
+        data: "hello".into(),
+        count: 42,
+    };
     store.put("ns", "id1", &value).await.unwrap();
     let retrieved: Option<TestValue> = store.get("ns", "id1").await.unwrap();
     assert_eq!(retrieved, Some(value));
@@ -51,8 +57,14 @@ async fn redis_store_put_overwrites() {
     let (url, _container) = setup().await;
     let store = RedisStore::new(&url).await.unwrap();
 
-    let v1 = TestValue { data: "first".into(), count: 1 };
-    let v2 = TestValue { data: "second".into(), count: 2 };
+    let v1 = TestValue {
+        data: "first".into(),
+        count: 1,
+    };
+    let v2 = TestValue {
+        data: "second".into(),
+        count: 2,
+    };
     store.put("ns", "id1", &v1).await.unwrap();
     store.put("ns", "id1", &v2).await.unwrap();
     let retrieved: Option<TestValue> = store.get("ns", "id1").await.unwrap();
@@ -64,9 +76,14 @@ async fn redis_store_delete_removes_entry() {
     let (url, _container) = setup().await;
     let store = RedisStore::new(&url).await.unwrap();
 
-    let value = TestValue { data: "to delete".into(), count: 0 };
+    let value = TestValue {
+        data: "to delete".into(),
+        count: 0,
+    };
     store.put("ns", "id1", &value).await.unwrap();
-    Store::<TestValue>::delete(&store, "ns", "id1").await.unwrap();
+    Store::<TestValue>::delete(&store, "ns", "id1")
+        .await
+        .unwrap();
     let result: Option<TestValue> = store.get("ns", "id1").await.unwrap();
     assert!(result.is_none());
 }
@@ -76,9 +93,18 @@ async fn redis_store_scan_prefix_returns_namespace_entries() {
     let (url, _container) = setup().await;
     let store = RedisStore::new(&url).await.unwrap();
 
-    let v1 = TestValue { data: "a".into(), count: 1 };
-    let v2 = TestValue { data: "b".into(), count: 2 };
-    let other = TestValue { data: "other".into(), count: 3 };
+    let v1 = TestValue {
+        data: "a".into(),
+        count: 1,
+    };
+    let v2 = TestValue {
+        data: "b".into(),
+        count: 2,
+    };
+    let other = TestValue {
+        data: "other".into(),
+        count: 3,
+    };
     store.put("ns1", "id1", &v1).await.unwrap();
     store.put("ns1", "id2", &v2).await.unwrap();
     store.put("ns2", "id3", &other).await.unwrap();

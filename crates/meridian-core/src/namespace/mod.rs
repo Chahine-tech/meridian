@@ -71,7 +71,10 @@ mod tests {
     #[test]
     fn rejects_too_long() {
         let s = "a".repeat(65);
-        assert!(matches!(NamespaceId::new(&s), Err(NamespaceError::TooLong(65))));
+        assert!(matches!(
+            NamespaceId::new(&s),
+            Err(NamespaceError::TooLong(65))
+        ));
     }
 
     #[test]

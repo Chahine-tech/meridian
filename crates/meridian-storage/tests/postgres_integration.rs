@@ -22,11 +22,11 @@ struct TestValue {
     count: u32,
 }
 
-async fn setup() -> (
-    sqlx::PgPool,
-    testcontainers::ContainerAsync<Postgres>,
-) {
-    let container = Postgres::default().start().await.expect("docker must be running");
+async fn setup() -> (sqlx::PgPool, testcontainers::ContainerAsync<Postgres>) {
+    let container = Postgres::default()
+        .start()
+        .await
+        .expect("docker must be running");
     let port = container.get_host_port_ipv4(5432).await.unwrap();
     let url = format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres");
     let pool = PgPoolOptions::new()
@@ -52,7 +52,10 @@ async fn pg_store_put_and_get_roundtrip() {
     PgStore::migrate(&pool).await.unwrap();
     let store = PgStore::new(pool);
 
-    let value = TestValue { data: "hello".into(), count: 42 };
+    let value = TestValue {
+        data: "hello".into(),
+        count: 42,
+    };
     store.put("ns", "id1", &value).await.unwrap();
     let retrieved: Option<TestValue> = store.get("ns", "id1").await.unwrap();
     assert_eq!(retrieved, Some(value));
@@ -64,8 +67,14 @@ async fn pg_store_put_overwrites() {
     PgStore::migrate(&pool).await.unwrap();
     let store = PgStore::new(pool);
 
-    let v1 = TestValue { data: "first".into(), count: 1 };
-    let v2 = TestValue { data: "second".into(), count: 2 };
+    let v1 = TestValue {
+        data: "first".into(),
+        count: 1,
+    };
+    let v2 = TestValue {
+        data: "second".into(),
+        count: 2,
+    };
     store.put("ns", "id1", &v1).await.unwrap();
     store.put("ns", "id1", &v2).await.unwrap();
     let retrieved: Option<TestValue> = store.get("ns", "id1").await.unwrap();
@@ -78,9 +87,14 @@ async fn pg_store_delete_removes_entry() {
     PgStore::migrate(&pool).await.unwrap();
     let store = PgStore::new(pool);
 
-    let value = TestValue { data: "to delete".into(), count: 0 };
+    let value = TestValue {
+        data: "to delete".into(),
+        count: 0,
+    };
     store.put("ns", "id1", &value).await.unwrap();
-    Store::<TestValue>::delete(&store, "ns", "id1").await.unwrap();
+    Store::<TestValue>::delete(&store, "ns", "id1")
+        .await
+        .unwrap();
     let retrieved: Option<TestValue> = store.get("ns", "id1").await.unwrap();
     assert!(retrieved.is_none());
 }
@@ -91,9 +105,18 @@ async fn pg_store_scan_prefix_returns_namespace_entries() {
     PgStore::migrate(&pool).await.unwrap();
     let store = PgStore::new(pool);
 
-    let v1 = TestValue { data: "a".into(), count: 1 };
-    let v2 = TestValue { data: "b".into(), count: 2 };
-    let other = TestValue { data: "other".into(), count: 3 };
+    let v1 = TestValue {
+        data: "a".into(),
+        count: 1,
+    };
+    let v2 = TestValue {
+        data: "b".into(),
+        count: 2,
+    };
+    let other = TestValue {
+        data: "other".into(),
+        count: 3,
+    };
     store.put("ns1", "id1", &v1).await.unwrap();
     store.put("ns1", "id2", &v2).await.unwrap();
     store.put("ns2", "id3", &other).await.unwrap();
@@ -110,8 +133,14 @@ async fn pg_store_delete_expired_removes_expired_rows() {
     PgStore::migrate(&pool).await.unwrap();
     let store = PgStore::new(pool);
 
-    let v = TestValue { data: "expires".into(), count: 1 };
-    let keep = TestValue { data: "keep".into(), count: 2 };
+    let v = TestValue {
+        data: "expires".into(),
+        count: 1,
+    };
+    let keep = TestValue {
+        data: "keep".into(),
+        count: 2,
+    };
 
     // Insert one row with expires_at_ms in the past and one without expiry.
     store
@@ -121,7 +150,9 @@ async fn pg_store_delete_expired_removes_expired_rows() {
     store.put("ns", "permanent", &keep).await.unwrap();
 
     // Delete everything expired before a timestamp well in the future.
-    let deleted = Store::<TestValue>::delete_expired(&store, u64::MAX).await.unwrap();
+    let deleted = Store::<TestValue>::delete_expired(&store, u64::MAX)
+        .await
+        .unwrap();
 
     assert_eq!(deleted.len(), 1);
     assert_eq!(deleted[0], ("ns".to_string(), "expired".to_string()));
@@ -140,11 +171,16 @@ async fn pg_store_delete_expired_does_not_remove_future_expiry() {
     PgStore::migrate(&pool).await.unwrap();
     let store = PgStore::new(pool);
 
-    let v = TestValue { data: "future".into(), count: 1 };
+    let v = TestValue {
+        data: "future".into(),
+        count: 1,
+    };
 
     // expires_at_ms = u64::MAX — far future.
     store
-        .merge_put_with_expiry("ns", "future", v.clone(), Some(u64::MAX), |_, new| (new, ()))
+        .merge_put_with_expiry("ns", "future", v.clone(), Some(u64::MAX), |_, new| {
+            (new, ())
+        })
         .await
         .unwrap();
 

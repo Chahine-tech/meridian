@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Request, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Json, Response},
 };
@@ -16,11 +16,17 @@ fn auth_error_response(err: AuthError) -> Response {
     let (status, code, message) = match &err {
         AuthError::MissingToken => (StatusCode::UNAUTHORIZED, "missing_token", err.to_string()),
         AuthError::InvalidFormat => (StatusCode::UNAUTHORIZED, "invalid_format", err.to_string()),
-        AuthError::SignatureInvalid => (StatusCode::UNAUTHORIZED, "invalid_signature", err.to_string()),
+        AuthError::SignatureInvalid => (
+            StatusCode::UNAUTHORIZED,
+            "invalid_signature",
+            err.to_string(),
+        ),
         AuthError::Expired { .. } => (StatusCode::UNAUTHORIZED, "token_expired", err.to_string()),
-        AuthError::InsufficientPermissions { .. } => {
-            (StatusCode::FORBIDDEN, "insufficient_permissions", err.to_string())
-        }
+        AuthError::InsufficientPermissions { .. } => (
+            StatusCode::FORBIDDEN,
+            "insufficient_permissions",
+            err.to_string(),
+        ),
         _ => (StatusCode::UNAUTHORIZED, "auth_error", err.to_string()),
     };
 

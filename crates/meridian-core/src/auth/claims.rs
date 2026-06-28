@@ -61,7 +61,7 @@ pub mod op_masks {
     pub const PN_DECREMENT: OpMask = 0b0000_0010;
 
     // ORSet
-    pub const OR_ADD:    OpMask = 0b0000_0001;
+    pub const OR_ADD: OpMask = 0b0000_0001;
     pub const OR_REMOVE: OpMask = 0b0000_0010;
 
     // LWW Register
@@ -75,8 +75,8 @@ pub mod op_masks {
     pub const RGA_DELETE: OpMask = 0b0000_0010;
 
     // Tree
-    pub const TREE_ADD:    OpMask = 0b0000_0001;
-    pub const TREE_MOVE:   OpMask = 0b0000_0010;
+    pub const TREE_ADD: OpMask = 0b0000_0001;
+    pub const TREE_MOVE: OpMask = 0b0000_0010;
     pub const TREE_UPDATE: OpMask = 0b0000_0100;
     pub const TREE_DELETE: OpMask = 0b0000_1000;
 
@@ -113,7 +113,11 @@ fn is_all_mask(mask: &OpMask) -> bool {
 
 impl PermEntry {
     pub fn new(pattern: impl Into<String>) -> Self {
-        Self { p: pattern.into(), o: op_masks::ALL, e: None }
+        Self {
+            p: pattern.into(),
+            o: op_masks::ALL,
+            e: None,
+        }
     }
 
     pub fn with_mask(mut self, mask: OpMask) -> Self {
@@ -210,18 +214,24 @@ pub struct PermissionsV2 {
 impl PermissionsV2 {
     pub fn can_read_key(&self, crdt_id: &str, client_id: u64) -> bool {
         let now = now_ms();
-        self.r.iter().any(|rule| rule.matches(crdt_id, op_masks::ALL, now, client_id))
+        self.r
+            .iter()
+            .any(|rule| rule.matches(crdt_id, op_masks::ALL, now, client_id))
     }
 
     /// Check write access with op-level granularity.
     pub fn can_write_key_op(&self, crdt_id: &str, op_mask: OpMask, client_id: u64) -> bool {
         let now = now_ms();
-        self.w.iter().any(|rule| rule.matches(crdt_id, op_mask, now, client_id))
+        self.w
+            .iter()
+            .any(|rule| rule.matches(crdt_id, op_mask, now, client_id))
     }
 
     pub fn can_write_key(&self, crdt_id: &str, client_id: u64) -> bool {
         let now = now_ms();
-        self.w.iter().any(|rule| rule.matches(crdt_id, op_masks::ALL, now, client_id))
+        self.w
+            .iter()
+            .any(|rule| rule.matches(crdt_id, op_masks::ALL, now, client_id))
     }
 
     pub fn rate_limit(&self) -> Option<u32> {
@@ -246,15 +256,27 @@ impl Permissions {
     // --- Convenience constructors (V1) ---
 
     pub fn read_only() -> Self {
-        Self::V1(PermissionsV1 { read: vec!["*".into()], write: vec![], admin: false })
+        Self::V1(PermissionsV1 {
+            read: vec!["*".into()],
+            write: vec![],
+            admin: false,
+        })
     }
 
     pub fn read_write() -> Self {
-        Self::V1(PermissionsV1 { read: vec!["*".into()], write: vec!["*".into()], admin: false })
+        Self::V1(PermissionsV1 {
+            read: vec!["*".into()],
+            write: vec!["*".into()],
+            admin: false,
+        })
     }
 
     pub fn admin() -> Self {
-        Self::V1(PermissionsV1 { read: vec!["*".into()], write: vec!["*".into()], admin: true })
+        Self::V1(PermissionsV1 {
+            read: vec!["*".into()],
+            write: vec!["*".into()],
+            admin: true,
+        })
     }
 
     // --- Capability checks ---
@@ -302,9 +324,15 @@ impl std::fmt::Display for Permissions {
         match self {
             Self::V1(p) => {
                 let mut parts = Vec::new();
-                if !p.read.is_empty()  { parts.push(format!("read:{}", p.read.join(","))); }
-                if !p.write.is_empty() { parts.push(format!("write:{}", p.write.join(","))); }
-                if p.admin { parts.push("admin".into()); }
+                if !p.read.is_empty() {
+                    parts.push(format!("read:{}", p.read.join(",")));
+                }
+                if !p.write.is_empty() {
+                    parts.push(format!("write:{}", p.write.join(",")));
+                }
+                if p.admin {
+                    parts.push("admin".into());
+                }
                 f.write_str(&parts.join("+"))
             }
             Self::V2(p) => {
@@ -327,6 +355,36 @@ pub struct TokenClaims {
     /// Expiry: Unix timestamp in milliseconds.
     pub expires_at: u64,
     pub permissions: Permissions,
+    /// Optional 32-byte Ed25519 public key for BFT op signing.
+    /// When present, the server verifies that every op from this client carries
+    /// a valid Ed25519 signature over `op_bytes`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub client_pubkey: Option<serde_bytes::ByteBuf>,
+}
+
+mod serde_bytes_opt {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        v: &Option<serde_bytes::ByteBuf>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(b) => serde_bytes::serialize(b.as_ref(), s),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Option<serde_bytes::ByteBuf>, D::Error> {
+        let opt: Option<serde_bytes::ByteBuf> = Option::deserialize(d)?;
+        Ok(opt)
+    }
 }
 
 impl TokenClaims {
@@ -341,7 +399,14 @@ impl TokenClaims {
             client_id,
             expires_at: now_ms().saturating_add(ttl_ms),
             permissions,
+            client_pubkey: None,
         }
+    }
+
+    /// Attach a 32-byte Ed25519 public key to the claims (BFT op signing).
+    pub fn with_pubkey(mut self, pubkey: Option<serde_bytes::ByteBuf>) -> Self {
+        self.client_pubkey = pubkey;
+        self
     }
 
     pub fn is_expired(&self) -> bool {
@@ -376,7 +441,8 @@ impl TokenClaims {
 
     /// Returns true if the token may apply the specific op to `crdt_id`.
     pub fn can_write_key_op(&self, crdt_id: &str, op_mask: OpMask) -> bool {
-        self.permissions.can_write_key_op(crdt_id, op_mask, self.client_id)
+        self.permissions
+            .can_write_key_op(crdt_id, op_mask, self.client_id)
     }
 
     pub fn is_admin(&self) -> bool {
@@ -458,6 +524,7 @@ mod tests {
             client_id: 1,
             expires_at: 1, // epoch + 1ms — definitely expired
             permissions: Permissions::read_write(),
+            client_pubkey: None,
         };
         assert!(claims.is_expired());
     }
@@ -523,7 +590,10 @@ mod tests {
         let perms = Permissions::V2(PermissionsV2 {
             v: 2,
             r: vec![PermEntry::new("or:cart-user-{clientId}")],
-            w: vec![PermEntry::new("or:cart-user-{clientId}").with_mask(op_masks::OR_ADD | op_masks::OR_REMOVE)],
+            w: vec![
+                PermEntry::new("or:cart-user-{clientId}")
+                    .with_mask(op_masks::OR_ADD | op_masks::OR_REMOVE),
+            ],
             admin: false,
             rl: None,
         });
@@ -570,6 +640,7 @@ mod tests {
                 write: vec!["*".into()],
                 admin: false,
             }),
+            client_pubkey: None,
         };
         let bytes = rmp_serde::encode::to_vec_named(&old).unwrap();
         let decoded: TokenClaims = rmp_serde::decode::from_slice(&bytes).unwrap();

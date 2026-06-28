@@ -20,11 +20,7 @@ pub async fn health_live() -> impl IntoResponse {
 /// checks the WAL last_seq (in-memory, no I/O).
 pub async fn health_ready<S: AppStateExt>(State(state): State<S>) -> impl IntoResponse {
     // Probe store: attempt a get on a well-known sentinel key.
-    let store_ok = state
-        .store()
-        .get("__health__", "__probe__")
-        .await
-        .is_ok();
+    let store_ok = state.store().get("__health__", "__probe__").await.is_ok();
 
     // WAL: last_seq is an in-memory atomic — if it's accessible the WAL thread is alive.
     let wal_last_seq = state.wal().last_seq();

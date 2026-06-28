@@ -4,39 +4,42 @@ use std::{
 };
 
 use meridian_core::{
-    crdt::{
-        clock::{now_ms, HybridLogicalClock},
-        lwwregister::{LwwDelta, LwwOp, LwwRegister},
-        Crdt,
-    },
     crdt::registry::{CrdtOp, VersionedOp},
+    crdt::{
+        Crdt,
+        clock::{HybridLogicalClock, now_ms},
+        lwwregister::{LwwDelta, LwwOp, LwwRegister},
+    },
     protocol::ClientMsg,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tokio::sync::watch;
 
 use crate::{codec, error::ClientError, op_queue::OpQueue, transport::Transport};
 
 #[allow(dead_code)]
 pub(crate) struct LwwRegisterInner {
-    state:     Mutex<LwwRegister>,
-    watch_tx:  watch::Sender<Option<serde_json::Value>>,
-    crdt_id:   String,
+    state: Mutex<LwwRegister>,
+    watch_tx: watch::Sender<Option<serde_json::Value>>,
+    crdt_id: String,
     client_id: u64,
     transport: Arc<dyn Transport>,
-    op_queue:  Arc<OpQueue>,
+    op_queue: Arc<OpQueue>,
 }
 
 /// Live handle to a LwwRegister CRDT. Generic over the stored value type `T`.
 #[derive(Clone)]
 pub struct LwwRegisterHandle<T> {
-    inner:   Arc<LwwRegisterInner>,
+    inner: Arc<LwwRegisterInner>,
     _marker: PhantomData<T>,
 }
 
 impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> LwwRegisterHandle<T> {
     pub(crate) fn from_inner(inner: Arc<LwwRegisterInner>) -> Self {
-        Self { inner, _marker: PhantomData }
+        Self {
+            inner,
+            _marker: PhantomData,
+        }
     }
 
     pub(crate) fn into_inner(self) -> Arc<LwwRegisterInner> {
@@ -68,7 +71,9 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> LwwRegisterHandle<
         let raw = self.inner.watch_tx.borrow().clone();
         match raw {
             None => Ok(None),
-            Some(v) => serde_json::from_value(v).map(Some).map_err(ClientError::Json),
+            Some(v) => serde_json::from_value(v)
+                .map(Some)
+                .map_err(ClientError::Json),
         }
     }
 
@@ -99,25 +104,38 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> LwwRegisterHandle<
             logical: 0,
             node_id: self.inner.client_id,
         };
-        let op = LwwOp { value: json_val, hlc, author: self.inner.client_id };
+        let op = LwwOp {
+            value: json_val,
+            hlc,
+            author: self.inner.client_id,
+        };
 
         {
             let mut state = self.inner.state.lock().expect("lww lock poisoned");
             state.apply(op.clone())?;
             let new_val = state.value().value;
             let _ = self.inner.watch_tx.send_if_modified(|v| {
-                if *v != new_val { *v = new_val; true } else { false }
+                if *v != new_val {
+                    *v = new_val;
+                    true
+                } else {
+                    false
+                }
             });
         }
 
         let versioned = VersionedOp::new(CrdtOp::LwwRegister(op));
         let op_bytes = codec::encode_op(&versioned)?;
-        self.inner.transport.send(ClientMsg::Op {
-            crdt_id: self.inner.crdt_id.clone(),
-            op_bytes,
-            ttl_ms: None,
-            client_seq: None,
-        }).await
+        self.inner
+            .transport
+            .send(ClientMsg::Op {
+                crdt_id: self.inner.crdt_id.clone(),
+                op_bytes,
+                ttl_ms: None,
+                client_seq: None,
+                sig: None,
+            })
+            .await
     }
 
     pub(crate) fn apply_delta(&self, delta_bytes: &[u8]) -> Result<(), ClientError> {
@@ -126,7 +144,12 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> LwwRegisterHandle<
         state.merge_delta(delta);
         let new_val = state.value().value;
         let _ = self.inner.watch_tx.send_if_modified(|v| {
-            if *v != new_val { *v = new_val; true } else { false }
+            if *v != new_val {
+                *v = new_val;
+                true
+            } else {
+                false
+            }
         });
         Ok(())
     }

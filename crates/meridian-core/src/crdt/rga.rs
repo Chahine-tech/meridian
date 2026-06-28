@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{Crdt, CrdtError, HybridLogicalClock, VectorClock};
+use super::{Crdt, CrdtError, HybridLogicalClock, VectorClock, clock::now_ms};
 
 //
 // RGA (Replicated Growable Array) — collaborative text editing.
@@ -24,6 +24,10 @@ pub struct RgaNode {
     pub origin_id: Option<HybridLogicalClock>,
     pub content: char,
     pub deleted: bool,
+    /// Wall-clock ms when the tombstone was created on this replica.
+    /// 0 = unknown (deserialized from pre-GC data — never GC'd for safety).
+    #[serde(default)]
+    pub deleted_at_ms: u64,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,26 +61,26 @@ pub struct RgaValue {
 }
 
 impl Rga {
-    /// Remove tombstoned nodes that are safe to garbage-collect.
+    /// Remove tombstoned nodes that are both structurally safe and old enough to GC.
     ///
-    /// A tombstone is safe to remove when no live node references it as its
-    /// `origin_id` (i.e. no future insert can land "after" the deleted node).
-    /// Removing tombstones that are still referenced as origins would break
-    /// the insertion position algorithm for clients that haven't yet received
-    /// concurrent inserts anchored to those origins.
+    /// A tombstone is structurally safe to remove when no live node references it
+    /// as its `origin_id`. It is time-safe when `deleted_at_ms > 0` and
+    /// `deleted_at_ms < threshold_wall_ms`, meaning the deletion is older than the
+    /// caller's chosen offline-client grace period (e.g. `now_ms() - 86_400_000`
+    /// for a 24-hour window).
     ///
-    /// This should only be called after confirming that all connected clients
-    /// have acknowledged the corresponding WAL entries (i.e. after WAL
-    /// compaction, when `checkpoint_seq` covers the tombstone's seq).
+    /// Tombstones with `deleted_at_ms == 0` are never GC'd — they were created
+    /// before this field existed and their age is unknown.
+    ///
+    /// ## Safety
+    ///
+    /// GC'd tombstones are absent from `delta_since`, so a client reconnecting
+    /// after `threshold_wall_ms` ms of offline time may not receive the delete
+    /// delta and will see a stale character. Choose a threshold larger than your
+    /// maximum expected client offline duration (default: 24 h).
     ///
     /// Returns the number of tombstones removed.
-    pub fn compact(&mut self) -> usize {
-        // A tombstone is safe to GC when no *live* node uses its id as an
-        // `origin_id`. The `origin_id` field is only consulted when placing a
-        // *new* insert — tombstoned nodes can never serve as the origin of a
-        // future insert, so their own origin_id chains do not matter.
-        //
-        // Rule: keep a tombstone iff some live node has `origin_id == tombstone.id`.
+    pub fn compact_before(&mut self, threshold_wall_ms: u64) -> usize {
         let live_origin_ids: std::collections::BTreeSet<HybridLogicalClock> = self
             .nodes
             .iter()
@@ -86,8 +90,13 @@ impl Rga {
 
         let before = self.nodes.len();
         self.nodes.retain(|n| {
-            // Keep if: live, OR a live node references it as its origin.
-            !n.deleted || live_origin_ids.contains(&n.id)
+            if !n.deleted {
+                return true; // live node — always keep
+            }
+            // Tombstone: keep if structurally referenced, or age is unknown, or not old enough.
+            live_origin_ids.contains(&n.id)
+                || n.deleted_at_ms == 0
+                || n.deleted_at_ms >= threshold_wall_ms
         });
         before - self.nodes.len()
     }
@@ -100,7 +109,11 @@ impl Rga {
     ///    us: a sibling comes before us if it shares the same origin AND has
     ///    a strictly greater ID (higher HLC wins → placed leftmost).
     /// 3. Insert at the first position that is not such a sibling.
-    fn insert_position(&self, origin_id: Option<HybridLogicalClock>, id: HybridLogicalClock) -> usize {
+    fn insert_position(
+        &self,
+        origin_id: Option<HybridLogicalClock>,
+        id: HybridLogicalClock,
+    ) -> usize {
         // Start scanning after the origin node (or from the beginning).
         let start = match origin_id {
             None => 0,
@@ -135,23 +148,45 @@ impl Crdt for Rga {
 
     fn apply(&mut self, op: RgaOp) -> Result<Option<RgaDelta>, CrdtError> {
         match op {
-            RgaOp::Insert { id, origin_id, content } => {
+            RgaOp::Insert {
+                id,
+                origin_id,
+                content,
+            } => {
                 // Idempotency: skip if we already have this node.
                 if self.nodes.iter().any(|n| n.id == id) {
                     return Ok(None);
                 }
                 let pos = self.insert_position(origin_id, id);
-                self.nodes.insert(pos, RgaNode { id, origin_id, content, deleted: false });
-                Ok(Some(RgaDelta { ops: vec![RgaOp::Insert { id, origin_id, content }] }))
+                self.nodes.insert(
+                    pos,
+                    RgaNode {
+                        id,
+                        origin_id,
+                        content,
+                        deleted: false,
+                        deleted_at_ms: 0,
+                    },
+                );
+                Ok(Some(RgaDelta {
+                    ops: vec![RgaOp::Insert {
+                        id,
+                        origin_id,
+                        content,
+                    }],
+                }))
             }
 
             RgaOp::Delete { id } => {
                 match self.nodes.iter_mut().find(|n| n.id == id) {
-                    None => Ok(None), // unknown node — no-op
+                    None => Ok(None),                       // unknown node — no-op
                     Some(node) if node.deleted => Ok(None), // already deleted — idempotent
                     Some(node) => {
                         node.deleted = true;
-                        Ok(Some(RgaDelta { ops: vec![RgaOp::Delete { id }] }))
+                        node.deleted_at_ms = now_ms();
+                        Ok(Some(RgaDelta {
+                            ops: vec![RgaOp::Delete { id }],
+                        }))
                     }
                 }
             }
@@ -163,8 +198,9 @@ impl Crdt for Rga {
             match self.nodes.iter_mut().find(|n| n.id == node.id) {
                 Some(existing) => {
                     // Propagate tombstone: delete wins.
-                    if node.deleted {
+                    if node.deleted && !existing.deleted {
                         existing.deleted = true;
+                        existing.deleted_at_ms = node.deleted_at_ms;
                     }
                 }
                 None => {
@@ -221,7 +257,11 @@ impl Crdt for Rga {
             })
             .collect();
 
-        if ops.is_empty() { None } else { Some(RgaDelta { ops }) }
+        if ops.is_empty() {
+            None
+        } else {
+            Some(RgaDelta { ops })
+        }
     }
 
     fn value(&self) -> RgaValue {
@@ -245,11 +285,25 @@ mod tests {
     use super::*;
 
     fn hlc(wall_ms: u64, logical: u16, node_id: u64) -> HybridLogicalClock {
-        HybridLogicalClock { wall_ms, logical, node_id }
+        HybridLogicalClock {
+            wall_ms,
+            logical,
+            node_id,
+        }
     }
 
-    fn insert(rga: &mut Rga, id: HybridLogicalClock, origin_id: Option<HybridLogicalClock>, ch: char) {
-        rga.apply(RgaOp::Insert { id, origin_id, content: ch }).unwrap();
+    fn insert(
+        rga: &mut Rga,
+        id: HybridLogicalClock,
+        origin_id: Option<HybridLogicalClock>,
+        ch: char,
+    ) {
+        rga.apply(RgaOp::Insert {
+            id,
+            origin_id,
+            content: ch,
+        })
+        .unwrap();
     }
 
     fn delete(rga: &mut Rga, id: HybridLogicalClock) {
@@ -347,7 +401,13 @@ mod tests {
         let mut r = Rga::default();
         let id = hlc(1, 1, 1);
         insert(&mut r, id, None, 'Z');
-        let delta = r.apply(RgaOp::Insert { id, origin_id: None, content: 'Z' }).unwrap();
+        let delta = r
+            .apply(RgaOp::Insert {
+                id,
+                origin_id: None,
+                content: 'Z',
+            })
+            .unwrap();
         assert!(delta.is_none(), "re-applying same insert must be a no-op");
         assert_eq!(r.nodes.len(), 1);
     }
@@ -376,7 +436,11 @@ mod tests {
     #[test]
     fn delete_unknown_node_is_noop() {
         let mut r = Rga::default();
-        let delta = r.apply(RgaOp::Delete { id: hlc(99, 99, 99) }).unwrap();
+        let delta = r
+            .apply(RgaOp::Delete {
+                id: hlc(99, 99, 99),
+            })
+            .unwrap();
         assert!(delta.is_none());
     }
 
@@ -410,8 +474,14 @@ mod tests {
         vc.increment(1); // seen node_id=1, logical=1
 
         let delta = server.delta_since(&vc).unwrap();
-        let has_delete = delta.ops.iter().any(|op| matches!(op, RgaOp::Delete { id } if *id == id_a));
-        assert!(has_delete, "delta_since must emit Delete even when insert was already seen by client");
+        let has_delete = delta
+            .ops
+            .iter()
+            .any(|op| matches!(op, RgaOp::Delete { id } if *id == id_a));
+        assert!(
+            has_delete,
+            "delta_since must emit Delete even when insert was already seen by client"
+        );
     }
 
     #[test]
@@ -427,14 +497,14 @@ mod tests {
         // Delete A — no live node uses A as origin (B uses A, but B is live)
         // Actually B uses A as origin, so A must be kept.
         delete(&mut r, id_a);
-        let removed = r.compact();
+        let removed = r.compact_before(u64::MAX);
         // A is still referenced by B as origin — must NOT be GC'd
         assert_eq!(removed, 0, "A is still origin of B, must be kept");
         assert_eq!(r.nodes.len(), 3);
 
         // Now delete B too — B was the last node referencing A as origin.
         delete(&mut r, id_b);
-        let removed = r.compact();
+        let removed = r.compact_before(u64::MAX);
         // Now A and B are both tombstones. C uses B as origin, so B is kept.
         // A is referenced by nothing live — can be removed.
         // B is still referenced by C — must be kept.
@@ -443,7 +513,7 @@ mod tests {
 
         // Delete C — now B is referenced by nothing.
         delete(&mut r, id_c);
-        let removed = r.compact();
+        let removed = r.compact_before(u64::MAX);
         // B and C are tombstones, neither referenced.
         assert_eq!(removed, 2, "B and C (unreferenced tombstones) must be GC'd");
         assert_eq!(r.nodes.len(), 0);
@@ -465,7 +535,7 @@ mod tests {
         delete(&mut r, ids[2]);
 
         assert_eq!(text(&r), "Hlo");
-        let _ = r.compact();
+        let _ = r.compact_before(u64::MAX);
         // Text must be identical after compaction
         assert_eq!(text(&r), "Hlo");
     }
@@ -475,7 +545,7 @@ mod tests {
         let mut r = Rga::default();
         insert(&mut r, hlc(1, 1, 1), None, 'X');
         insert(&mut r, hlc(1, 2, 1), Some(hlc(1, 1, 1)), 'Y');
-        let removed = r.compact();
+        let removed = r.compact_before(u64::MAX);
         assert_eq!(removed, 0);
         assert_eq!(r.nodes.len(), 2);
     }

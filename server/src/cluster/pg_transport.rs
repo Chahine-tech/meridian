@@ -40,7 +40,7 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use async_trait::async_trait;
-use base64::{engine::general_purpose::STANDARD as B64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
@@ -49,14 +49,14 @@ use tokio::sync::broadcast;
 use tracing::{debug, error, instrument, warn};
 
 use meridian_cluster::{
+    LocalBroadcast,
     error::{ClusterError, Result},
     node_id::NodeId,
     transport::{ClusterTransport, DeltaEnvelope},
-    LocalBroadcast,
 };
 
 use crate::{
-    crdt::{Crdt, registry::CrdtValue, VectorClock},
+    crdt::{Crdt, VectorClock, registry::CrdtValue},
     storage::CrdtStore,
 };
 
@@ -84,8 +84,17 @@ enum PgPayload<'a> {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum PgPayloadOwned {
-    Delta { origin: String, ns: String, crdt_id: String, d: String },
-    State { ns: String, crdt_id: String, d: String },
+    Delta {
+        origin: String,
+        ns: String,
+        crdt_id: String,
+        d: String,
+    },
+    State {
+        ns: String,
+        crdt_id: String,
+        d: String,
+    },
 }
 
 /// Implemented by the server to merge an incoming Postgres state snapshot.
@@ -139,7 +148,8 @@ impl<S: CrdtStore> PgStateApplier for StorePgApplier<S> {
         // return the typed delta (delta_since empty vc = "everything new").
         let ns_clone = namespace.clone();
         let id_clone = crdt_id.clone();
-        let delta: Option<Vec<u8>> = self.store
+        let delta: Option<Vec<u8>> = self
+            .store
             .merge_put_with(
                 &namespace,
                 &crdt_id,
@@ -161,10 +171,7 @@ impl<S: CrdtStore> PgStateApplier for StorePgApplier<S> {
                     }
                     // merge() is defined per-variant — dispatch manually.
                     merge_crdt_value(&mut crdt, &incoming);
-                    let delta_bytes = crdt
-                        .delta_since_msgpack(&empty_vc)
-                        .ok()
-                        .flatten();
+                    let delta_bytes = crdt.delta_since_msgpack(&empty_vc).ok().flatten();
                     (crdt, delta_bytes)
                 },
             )
@@ -173,7 +180,8 @@ impl<S: CrdtStore> PgStateApplier for StorePgApplier<S> {
             .flatten();
 
         if let Some(ref bytes) = delta {
-            self.broadcast.publish_delta(&namespace, &crdt_id, Bytes::copy_from_slice(bytes));
+            self.broadcast
+                .publish_delta(&namespace, &crdt_id, Bytes::copy_from_slice(bytes));
         }
 
         delta
@@ -186,14 +194,14 @@ impl<S: CrdtStore> PgStateApplier for StorePgApplier<S> {
 fn merge_crdt_value(target: &mut CrdtValue, source: &CrdtValue) {
     use CrdtValue::*;
     match (target, source) {
-        (GCounter(a),    GCounter(b))    => a.merge(b),
-        (PNCounter(a),   PNCounter(b))   => a.merge(b),
-        (ORSet(a),       ORSet(b))       => a.merge(b),
+        (GCounter(a), GCounter(b)) => a.merge(b),
+        (PNCounter(a), PNCounter(b)) => a.merge(b),
+        (ORSet(a), ORSet(b)) => a.merge(b),
         (LwwRegister(a), LwwRegister(b)) => a.merge(b),
-        (Presence(a),    Presence(b))    => a.merge(b),
-        (CRDTMap(a),     CRDTMap(b))     => a.merge(b),
-        (RGA(a),         RGA(b))         => a.merge(b),
-        (Tree(a),        Tree(b))        => a.merge(b),
+        (Presence(a), Presence(b)) => a.merge(b),
+        (CRDTMap(a), CRDTMap(b)) => a.merge(b),
+        (RGA(a), RGA(b)) => a.merge(b),
+        (Tree(a), Tree(b)) => a.merge(b),
         // Type mismatch — skip (schema evolution / misconfiguration).
         // Logged at the call site where namespace/crdt_id are available.
         _ => {}
@@ -240,7 +248,11 @@ impl PostgresNotifyTransport {
     /// function exists) and merge all returned states.  Call this once per
     /// namespace during server startup, before `spawn_listener`.
     pub async fn register_resync_namespace(&self, namespace: impl Into<String>) {
-        self.inner.resync_namespaces.write().await.push(namespace.into());
+        self.inner
+            .resync_namespaces
+            .write()
+            .await
+            .push(namespace.into());
     }
 
     /// Start the background WAL logical replication consumer.
@@ -259,7 +271,9 @@ impl PostgresNotifyTransport {
         pub_name: String,
         applier: Arc<A>,
     ) {
-        tokio::spawn(super::wal_replication::run(connstr, slot_name, pub_name, applier));
+        tokio::spawn(super::wal_replication::run(
+            connstr, slot_name, pub_name, applier,
+        ));
     }
 
     /// Start the background LISTEN loop.
@@ -268,10 +282,10 @@ impl PostgresNotifyTransport {
     /// caller can inject the `PgStateApplier` (which depends on the store,
     /// which is constructed after the transport in `server.rs`).
     pub fn spawn_listener<A: PgStateApplier>(&self, applier: Arc<A>) {
-        let pool    = self.inner.pool.clone();
+        let pool = self.inner.pool.clone();
         let node_id = self.inner.node_id;
-        let tx      = self.inner.tx.clone();
-        let inner   = Arc::clone(&self.inner);
+        let tx = self.inner.tx.clone();
+        let inner = Arc::clone(&self.inner);
 
         tokio::spawn(async move {
             let mut backoff = std::time::Duration::from_secs(1);
@@ -311,11 +325,7 @@ impl PostgresNotifyTransport {
 /// After a listener reconnection, call `meridian.resync_fn(namespace)` for
 /// each registered namespace (if the function exists) and merge all returned
 /// states via the normal applier path.
-async fn resync_namespaces<A: PgStateApplier>(
-    pool: &PgPool,
-    namespaces: &[String],
-    applier: &A,
-) {
+async fn resync_namespaces<A: PgStateApplier>(pool: &PgPool, namespaces: &[String], applier: &A) {
     // Check once whether the resync function exists.
     let fn_exists: bool = sqlx::query_scalar(
         "SELECT EXISTS (
@@ -372,17 +382,22 @@ async fn run_listener<A: PgStateApplier>(
     tx: &broadcast::Sender<DeltaEnvelope>,
     applier: &A,
 ) -> Result<()> {
-    let mut listener = PgListener::connect_with(pool).await
+    let mut listener = PgListener::connect_with(pool)
+        .await
         .map_err(|e| ClusterError::Transport(e.to_string()))?;
 
-    listener.listen(NOTIFY_CHANNEL).await
+    listener
+        .listen(NOTIFY_CHANNEL)
+        .await
         .map_err(|e| ClusterError::Transport(e.to_string()))?;
 
     // Pre-compute once — avoids a String allocation on every received notification.
     let own_origin = node_id.to_string();
 
     loop {
-        let notif = listener.recv().await
+        let notif = listener
+            .recv()
+            .await
             .map_err(|e| ClusterError::Transport(e.to_string()))?;
 
         let parsed: PgPayloadOwned = match serde_json::from_str(notif.payload()) {
@@ -395,7 +410,12 @@ async fn run_listener<A: PgStateApplier>(
 
         match parsed {
             // Node-to-node delta — filter self, forward to local subscribers.
-            PgPayloadOwned::Delta { origin, ns, crdt_id, d } => {
+            PgPayloadOwned::Delta {
+                origin,
+                ns,
+                crdt_id,
+                d,
+            } => {
                 if origin == own_origin {
                     debug!(node_id = %node_id, "dropping self-originating delta");
                     continue;
@@ -403,7 +423,10 @@ async fn run_listener<A: PgStateApplier>(
 
                 let delta_bytes = match B64.decode(&d) {
                     Ok(b) => b,
-                    Err(e) => { warn!(error = %e, "bad base64 in delta payload"); continue; }
+                    Err(e) => {
+                        warn!(error = %e, "bad base64 in delta payload");
+                        continue;
+                    }
                 };
 
                 let origin_id = u64::from_str_radix(&origin, 16)
@@ -423,7 +446,10 @@ async fn run_listener<A: PgStateApplier>(
             PgPayloadOwned::State { ns, crdt_id, d } => {
                 let state_bytes = match B64.decode(&d) {
                     Ok(b) => b,
-                    Err(e) => { warn!(error = %e, "bad base64 in state payload"); continue; }
+                    Err(e) => {
+                        warn!(error = %e, "bad base64 in state payload");
+                        continue;
+                    }
                 };
 
                 applier.merge_pg_state(ns, crdt_id, state_bytes).await;
@@ -436,7 +462,7 @@ async fn run_listener<A: PgStateApplier>(
 impl ClusterTransport for PostgresNotifyTransport {
     #[instrument(skip(self, envelope), fields(ns = %envelope.namespace, crdt_id = %envelope.crdt_id))]
     async fn broadcast_delta(&self, envelope: DeltaEnvelope) -> Result<()> {
-        let d      = B64.encode(&envelope.delta_bytes);
+        let d = B64.encode(&envelope.delta_bytes);
         let origin = self.inner.node_id.to_string();
 
         let payload = serde_json::to_string(&PgPayload::Delta {
@@ -464,7 +490,11 @@ impl ClusterTransport for PostgresNotifyTransport {
             .await
             .map_err(|e| ClusterError::Transport(e.to_string()))?;
 
-        debug!(channel = NOTIFY_CHANNEL, size = payload.len(), "delta published via pg_notify");
+        debug!(
+            channel = NOTIFY_CHANNEL,
+            size = payload.len(),
+            "delta published via pg_notify"
+        );
         Ok(())
     }
 

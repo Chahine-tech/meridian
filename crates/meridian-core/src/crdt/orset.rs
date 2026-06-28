@@ -101,7 +101,12 @@ impl Crdt for ORSet {
 
     fn apply(&mut self, op: ORSetOp) -> Result<Option<ORSetDelta>, CrdtError> {
         match op {
-            ORSetOp::Add { element, tag, node_id, seq } => {
+            ORSetOp::Add {
+                element,
+                tag,
+                node_id,
+                seq,
+            } => {
                 if json_depth(&element) > MAX_ELEMENT_DEPTH {
                     return Err(CrdtError::InvalidOp(format!(
                         "ORSet element nesting depth {} exceeds maximum {}",
@@ -126,10 +131,17 @@ impl Crdt for ORSet {
                 let mut tag_versions = HashMap::new();
                 tag_versions.insert(tag, (node_id, seq));
 
-                Ok(Some(ORSetDelta { adds, removes: HashMap::new(), tag_versions }))
+                Ok(Some(ORSetDelta {
+                    adds,
+                    removes: HashMap::new(),
+                    tag_versions,
+                }))
             }
 
-            ORSetOp::Remove { element, known_tags } => {
+            ORSetOp::Remove {
+                element,
+                known_tags,
+            } => {
                 let key = element_key(&element);
                 let mut actually_removed = HashSet::new();
 
@@ -155,7 +167,11 @@ impl Crdt for ORSet {
 
                 let mut removes = HashMap::new();
                 removes.insert(key, actually_removed);
-                Ok(Some(ORSetDelta { adds: HashMap::new(), removes, tag_versions: HashMap::new() }))
+                Ok(Some(ORSetDelta {
+                    adds: HashMap::new(),
+                    removes,
+                    tag_versions: HashMap::new(),
+                }))
             }
         }
     }
@@ -236,7 +252,11 @@ impl Crdt for ORSet {
         if adds.is_empty() {
             None
         } else {
-            Some(ORSetDelta { adds, removes: HashMap::new(), tag_versions })
+            Some(ORSetDelta {
+                adds,
+                removes: HashMap::new(),
+                tag_versions,
+            })
         }
     }
 
@@ -369,10 +389,12 @@ mod tests {
     #[test]
     fn remove_nonexistent_is_noop() {
         let mut s = ORSet::default();
-        let delta = s.apply(ORSetOp::Remove {
-            element: JsonValue::String("ghost".into()),
-            known_tags: HashSet::new(),
-        }).unwrap();
+        let delta = s
+            .apply(ORSetOp::Remove {
+                element: JsonValue::String("ghost".into()),
+                known_tags: HashSet::new(),
+            })
+            .unwrap();
         assert!(delta.is_none());
     }
 
@@ -381,23 +403,63 @@ mod tests {
     #[test]
     fn add_scalar_accepted() {
         let mut s = ORSet::default();
-        assert!(s.apply(ORSetOp::Add { element: JsonValue::Number(42.into()), tag: Uuid::new_v4(), node_id: 1, seq: 1 }).is_ok());
-        assert!(s.apply(ORSetOp::Add { element: JsonValue::String("ok".into()), tag: Uuid::new_v4(), node_id: 1, seq: 2 }).is_ok());
-        assert!(s.apply(ORSetOp::Add { element: JsonValue::Bool(true), tag: Uuid::new_v4(), node_id: 1, seq: 3 }).is_ok());
+        assert!(
+            s.apply(ORSetOp::Add {
+                element: JsonValue::Number(42.into()),
+                tag: Uuid::new_v4(),
+                node_id: 1,
+                seq: 1
+            })
+            .is_ok()
+        );
+        assert!(
+            s.apply(ORSetOp::Add {
+                element: JsonValue::String("ok".into()),
+                tag: Uuid::new_v4(),
+                node_id: 1,
+                seq: 2
+            })
+            .is_ok()
+        );
+        assert!(
+            s.apply(ORSetOp::Add {
+                element: JsonValue::Bool(true),
+                tag: Uuid::new_v4(),
+                node_id: 1,
+                seq: 3
+            })
+            .is_ok()
+        );
     }
 
     #[test]
     fn add_shallow_array_accepted() {
         let mut s = ORSet::default();
-        let arr = JsonValue::Array(vec![JsonValue::Number(1.into()), JsonValue::String("x".into())]);
-        assert!(s.apply(ORSetOp::Add { element: arr, tag: Uuid::new_v4(), node_id: 1, seq: 1 }).is_ok());
+        let arr = JsonValue::Array(vec![
+            JsonValue::Number(1.into()),
+            JsonValue::String("x".into()),
+        ]);
+        assert!(
+            s.apply(ORSetOp::Add {
+                element: arr,
+                tag: Uuid::new_v4(),
+                node_id: 1,
+                seq: 1
+            })
+            .is_ok()
+        );
     }
 
     #[test]
     fn add_nested_array_rejected() {
         let mut s = ORSet::default();
         let nested = JsonValue::Array(vec![JsonValue::Array(vec![JsonValue::Number(1.into())])]);
-        let result = s.apply(ORSetOp::Add { element: nested, tag: Uuid::new_v4(), node_id: 1, seq: 1 });
+        let result = s.apply(ORSetOp::Add {
+            element: nested,
+            tag: Uuid::new_v4(),
+            node_id: 1,
+            seq: 1,
+        });
         assert!(result.is_err());
     }
 
@@ -408,7 +470,12 @@ mod tests {
         inner.insert("x".into(), JsonValue::Number(1.into()));
         let mut outer = serde_json::Map::new();
         outer.insert("nested".into(), JsonValue::Object(inner));
-        let result = s.apply(ORSetOp::Add { element: JsonValue::Object(outer), tag: Uuid::new_v4(), node_id: 1, seq: 1 });
+        let result = s.apply(ORSetOp::Add {
+            element: JsonValue::Object(outer),
+            tag: Uuid::new_v4(),
+            node_id: 1,
+            seq: 1,
+        });
         assert!(result.is_err());
     }
 
@@ -420,18 +487,38 @@ mod tests {
 
         let mut s = ORSet::default();
         // Node 1 adds "apple" at seq=1, "banana" at seq=2
-        s.apply(ORSetOp::Add { element: JsonValue::String("apple".into()), tag: Uuid::new_v4(), node_id: 1, seq: 1 }).unwrap();
-        s.apply(ORSetOp::Add { element: JsonValue::String("banana".into()), tag: Uuid::new_v4(), node_id: 1, seq: 2 }).unwrap();
+        s.apply(ORSetOp::Add {
+            element: JsonValue::String("apple".into()),
+            tag: Uuid::new_v4(),
+            node_id: 1,
+            seq: 1,
+        })
+        .unwrap();
+        s.apply(ORSetOp::Add {
+            element: JsonValue::String("banana".into()),
+            tag: Uuid::new_v4(),
+            node_id: 1,
+            seq: 2,
+        })
+        .unwrap();
 
         // Receiver has already seen node_id=1 up to seq=1 — only "banana" (seq=2) is new.
         let mut seen = VectorClock::new();
         seen.entries.insert(1, 1);
 
         let delta = s.delta_since(&seen).unwrap();
-        assert!(!delta.adds.contains_key(&element_key(&JsonValue::String("apple".into()))),
-            "apple was already seen — should not be in delta");
-        assert!(delta.adds.contains_key(&element_key(&JsonValue::String("banana".into()))),
-            "banana is new — must be in delta");
+        assert!(
+            !delta
+                .adds
+                .contains_key(&element_key(&JsonValue::String("apple".into()))),
+            "apple was already seen — should not be in delta"
+        );
+        assert!(
+            delta
+                .adds
+                .contains_key(&element_key(&JsonValue::String("banana".into()))),
+            "banana is new — must be in delta"
+        );
     }
 
     #[test]
@@ -439,12 +526,21 @@ mod tests {
         use crate::crdt::VectorClock;
 
         let mut s = ORSet::default();
-        s.apply(ORSetOp::Add { element: JsonValue::String("x".into()), tag: Uuid::new_v4(), node_id: 1, seq: 1 }).unwrap();
+        s.apply(ORSetOp::Add {
+            element: JsonValue::String("x".into()),
+            tag: Uuid::new_v4(),
+            node_id: 1,
+            seq: 1,
+        })
+        .unwrap();
 
         let mut seen = VectorClock::new();
         seen.entries.insert(1, 1);
 
-        assert!(s.delta_since(&seen).is_none(), "nothing new — delta should be None");
+        assert!(
+            s.delta_since(&seen).is_none(),
+            "nothing new — delta should be None"
+        );
     }
 
     #[test]
@@ -452,11 +548,27 @@ mod tests {
         use crate::crdt::VectorClock;
 
         let mut s = ORSet::default();
-        s.apply(ORSetOp::Add { element: JsonValue::String("a".into()), tag: Uuid::new_v4(), node_id: 1, seq: 1 }).unwrap();
-        s.apply(ORSetOp::Add { element: JsonValue::String("b".into()), tag: Uuid::new_v4(), node_id: 2, seq: 1 }).unwrap();
+        s.apply(ORSetOp::Add {
+            element: JsonValue::String("a".into()),
+            tag: Uuid::new_v4(),
+            node_id: 1,
+            seq: 1,
+        })
+        .unwrap();
+        s.apply(ORSetOp::Add {
+            element: JsonValue::String("b".into()),
+            tag: Uuid::new_v4(),
+            node_id: 2,
+            seq: 1,
+        })
+        .unwrap();
 
         let seen = VectorClock::new(); // empty — receiver has seen nothing
         let delta = s.delta_since(&seen).unwrap();
-        assert_eq!(delta.adds.len(), 2, "empty VC → both elements should be in delta");
+        assert_eq!(
+            delta.adds.len(),
+            2,
+            "empty VC → both elements should be in delta"
+        );
     }
 }

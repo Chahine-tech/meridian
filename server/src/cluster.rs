@@ -17,7 +17,7 @@ pub mod anti_entropy {
     use meridian_cluster::AntiEntropyApplier;
 
     use crate::{
-        crdt::registry::{apply_op, CrdtOp, CrdtValue},
+        crdt::registry::{CrdtOp, CrdtValue, apply_op},
         storage::CrdtStore,
     };
 
@@ -55,8 +55,7 @@ pub mod anti_entropy {
                 .map_err(|e| format!("store.get: {e}"))?
                 .unwrap_or_else(|| CrdtValue::new(crdt_type));
 
-            let delta_bytes = apply_op(&mut crdt, op)
-                .map_err(|e| format!("apply_op: {e}"))?;
+            let delta_bytes = apply_op(&mut crdt, op).map_err(|e| format!("apply_op: {e}"))?;
 
             if delta_bytes.is_some() {
                 self.store
