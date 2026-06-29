@@ -23,7 +23,7 @@ try:
         PublicFormat,
     )
 except ImportError as exc:
-    raise ImportError("Install meridian-sdk[crypto] for signing support") from exc
+    raise ImportError("Install meridian-crdt[crypto] for signing support") from exc
 
 
 @dataclass

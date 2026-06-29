@@ -14,7 +14,7 @@ from dataclasses import dataclass
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 except ImportError as exc:
-    raise ImportError("Install meridian-sdk[crypto] for encryption support") from exc
+    raise ImportError("Install meridian-crdt[crypto] for encryption support") from exc
 
 
 def _b64u_encode(data: bytes) -> str:

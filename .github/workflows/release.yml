@@ -210,7 +210,7 @@ jobs:
         run: uv run --extra crypto pytest packages/python/ -q
 
       - name: build
-        run: uv build --package meridian-sdk --out-dir dist/
+        run: uv build --package meridian-crdt --out-dir dist/
 
       - name: publish
         run: uv publish dist/*
