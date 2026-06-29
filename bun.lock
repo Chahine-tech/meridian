@@ -40,8 +40,8 @@
       "name": "meridian-example-collaborative-workspace",
       "version": "0.0.2",
       "dependencies": {
-        "effect": "^3.21.0",
-        "meridian-sdk": "^1.0.1",
+        "effect": "^3.21.4",
+        "meridian-sdk": "^1.7.0",
       },
       "devDependencies": {
         "typescript": "^5.8.0",
@@ -69,7 +69,7 @@
     },
     "examples/postgres-articles": {
       "name": "meridian-example-postgres-articles",
-      "version": "0.0.2",
+      "version": "0.0.4",
       "dependencies": {
         "effect": "^3.21.0",
         "meridian-sdk": "workspace:*",
@@ -82,7 +82,7 @@
     },
     "packages/cli": {
       "name": "meridian-cli",
-      "version": "1.1.6",
+      "version": "1.2.1",
       "bin": {
         "meridian": "./dist/main.js",
       },
@@ -100,7 +100,7 @@
     },
     "packages/devtools": {
       "name": "meridian-devtools",
-      "version": "1.3.1",
+      "version": "1.4.1",
       "devDependencies": {
         "@biomejs/biome": "^2.5.1",
         "@types/react": "^19.0.0",
@@ -116,7 +116,7 @@
     },
     "packages/sdk": {
       "name": "meridian-sdk",
-      "version": "1.5.0",
+      "version": "1.7.0",
       "dependencies": {
         "@msgpack/msgpack": "^3.0.0",
         "effect": "^3.21.4",
@@ -132,7 +132,7 @@
     },
     "packages/sdk-react": {
       "name": "meridian-react",
-      "version": "1.4.1",
+      "version": "1.5.1",
       "dependencies": {
         "effect": "^3.21.4",
       },
@@ -755,6 +755,8 @@
     "meridian-cli/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 
     "meridian-devtools/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
+
+    "meridian-example-collaborative-workspace/effect": ["effect@3.21.4", "", { "dependencies": { "@standard-schema/spec": "^1.0.0", "fast-check": "^3.23.1" } }, "sha512-B89v/xSgPbl1J2Ai2u18jxq3odpFauU1rC6/eSs4FeNHi72kwKdJp12VGigvRV2lK+kRnx+OOz41XV8guZd4gQ=="],
 
     "meridian-react/effect": ["effect@3.21.4", "", { "dependencies": { "@standard-schema/spec": "^1.0.0", "fast-check": "^3.23.1" } }, "sha512-B89v/xSgPbl1J2Ai2u18jxq3odpFauU1rC6/eSs4FeNHi72kwKdJp12VGigvRV2lK+kRnx+OOz41XV8guZd4gQ=="],
 

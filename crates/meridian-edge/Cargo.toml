@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 meridian-core = { path = "../meridian-core" }
 
 # Cloudflare Workers SDK (official)
-worker = { version = "0.7", features = ["http"] }
+worker = { version = "0.8", features = ["http"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

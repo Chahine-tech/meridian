@@ -9,8 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "meridian-sdk": "workspace:*",
-    "effect": "^3.21.0"
+    "meridian-sdk": "^1.7.0",
+    "effect": "^3.21.4"
   },
   "devDependencies": {
     "typescript": "^5.8.0",

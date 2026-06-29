@@ -366,22 +366,31 @@
     <!-- Connect overlay -->
     <div id="connect-overlay">
       <div id="connect-box">
-        <h2>Connect to Meridian</h2>
-        <p>Enter your server URL and token to join the workspace.</p>
+        <h2>Join the workspace</h2>
+        <p>Real-time collaborative editing — powered by CRDTs, no conflicts.</p>
         <div class="field">
-          <label>Server URL</label>
-          <input id="url-input" type="text" value="http://localhost:3000" />
+          <label>Your name</label>
+          <input id="name-input" type="text" placeholder="e.g. Alice" maxlength="32" autofocus />
         </div>
-        <div class="field">
-          <label>Namespace</label>
-          <input id="ns-input" type="text" value="workspace" />
-        </div>
-        <div class="field">
-          <label>Token</label>
-          <input id="token-input" type="text" placeholder="Your Meridian token" />
-        </div>
+        <details style="margin-top:4px">
+          <summary style="font-size:12px;color:#555;cursor:pointer;user-select:none">Advanced</summary>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+            <div class="field">
+              <label>Server URL</label>
+              <input id="url-input" type="text" value="http://localhost:3000" />
+            </div>
+            <div class="field">
+              <label>Namespace</label>
+              <input id="ns-input" type="text" value="workspace" />
+            </div>
+            <div class="field">
+              <label>Token</label>
+              <input id="token-input" type="text" placeholder="Your Meridian token" />
+            </div>
+          </div>
+        </details>
         <div id="connect-error"></div>
-        <button id="connect-btn">Connect</button>
+        <button id="connect-btn">Join</button>
       </div>
     </div>
 
@@ -393,13 +402,13 @@
 
     <div id="title-section" style="display:none">
       <input id="workspace-title" type="text" placeholder="Workspace title…" maxlength="80" />
-      <span id="title-hint">Last-Write-Wins register — edits converge automatically</span>
+      <span id="title-hint">Shared title — last write wins, synced across all clients</span>
     </div>
 
     <main id="main" style="display:none">
       <div style="display:flex;flex-direction:column;">
         <section id="tasks-section">
-          <div class="section-title">Shared Tasks — ORSet (add-wins)</div>
+          <div class="section-title">Shared Tasks</div>
           <form id="task-form">
             <input id="task-input" type="text" placeholder="Add a task…" maxlength="120" />
             <button type="submit">Add</button>
@@ -408,7 +417,7 @@
         </section>
 
         <section id="votes-section">
-          <div class="section-title">Community Vote — PNCounter</div>
+          <div class="section-title">Community Vote</div>
           <div id="vote-display">
             <div id="vote-count">0</div>
             <div id="vote-label">votes</div>
@@ -420,7 +429,7 @@
         </section>
 
         <section id="docmeta-section">
-          <div class="section-title">Doc Metadata — CRDTMap (mixed types per key)</div>
+          <div class="section-title">Doc Metadata</div>
           <div class="meta-grid">
             <div class="meta-card">
               <div class="meta-label">Last author</div>
@@ -447,7 +456,7 @@
       </div>
 
       <section id="presence-section">
-        <div class="section-title">Online — Presence (TTL 30s)</div>
+        <div class="section-title">Online now</div>
         <ul id="online-list"></ul>
       </section>
     </main>

@@ -26,14 +26,27 @@ const docStatusEl = getElement("doc-status");
 const docStatusSelect = getElement<HTMLSelectElement>("doc-status-select");
 const docVersionBtn = getElement("doc-version-btn");
 
+const urlInput = getElement<HTMLInputElement>("url-input");
+if (import.meta.env.VITE_MERIDIAN_URL) {
+  urlInput.value = import.meta.env.VITE_MERIDIAN_URL;
+}
+const tokenInput = getElement<HTMLInputElement>("token-input");
+const DEMO_TOKENS = import.meta.env.VITE_DEMO_TOKENS
+  ? (import.meta.env.VITE_DEMO_TOKENS as string).split(",")
+  : [];
+if (DEMO_TOKENS.length > 0) {
+  tokenInput.value = DEMO_TOKENS[Math.floor(Math.random() * DEMO_TOKENS.length)];
+}
+
 getElement("connect-btn").addEventListener("click", async () => {
-  const url = getElement<HTMLInputElement>("url-input").value.trim();
+  const url = urlInput.value.trim();
   const ns = getElement<HTMLInputElement>("ns-input").value.trim();
   const token = getElement<HTMLInputElement>("token-input").value.trim();
+  const name = getElement<HTMLInputElement>("name-input").value.trim() || `User ${Math.floor(Math.random() * 1000)}`;
   const errorEl = getElement("connect-error");
 
   if (!url || !ns || !token) {
-    errorEl.textContent = "All fields are required.";
+    errorEl.textContent = "Missing server configuration.";
     return;
   }
 
@@ -46,7 +59,7 @@ getElement("connect-btn").addEventListener("click", async () => {
 
   if (result._tag === "Left") {
     errorEl.textContent = String(result.left);
-    getElement<HTMLButtonElement>("connect-btn").textContent = "Connect";
+    getElement<HTMLButtonElement>("connect-btn").textContent = "Join";
     return;
   }
 
@@ -54,7 +67,7 @@ getElement("connect-btn").addEventListener("click", async () => {
   getElement("title-section").style.display = "flex";
   (getElement("main") as HTMLElement).style.display = "grid";
 
-  initWorkspace(result.right);
+  initWorkspace(result.right, name);
 });
 
 const escapeHtml = (str: string): string =>
@@ -93,8 +106,7 @@ const renderPresence = (entries: PresenceEntry<PresenceData>[], clientId: number
   }
 };
 
-const initWorkspace = (client: MeridianClient): void => {
-  const myName = `Client #${client.clientId}`;
+const initWorkspace = (client: MeridianClient, myName: string): void => {
 
   client.waitForConnected().then(() => {
     statusDot.className = "connected";
