@@ -1,0 +1,164 @@
+---
+title: BFT Op Signing
+description: Sign every CRDT op with an Ed25519 key so cluster nodes can't forge ops on behalf of legitimate clients.
+---
+
+**Byzantine Fault Tolerant (BFT) op signing** lets clients cryptographically prove that every CRDT op they send actually originated from them. The server verifies each op against the client's Ed25519 public key embedded in the token — a compromised cluster node cannot forge or replay ops without breaking the signature.
+
+## Threat model
+
+BFT signing protects against **compromised infrastructure**:
+
+| Threat | Protected? |
+|--------|-----------|
+| Compromised cluster node forging ops | ✅ |
+| Replay attacks from a compromised node | ✅ |
+| Malicious client sending invalid ops | ❌ (authentication only, not authorization) |
+| Network eavesdropping | ❌ (use TLS; combine with [E2E encryption](/sdk/encryption)) |
+
+An authenticated client can still send any op permitted by its token. BFT signing provides **origin integrity**, not access control — use [permissions](/sdk/permissions) for that.
+
+## How it works
+
+1. On `MeridianClient.create()` with `signing: true`, the SDK loads (or generates) a per-client Ed25519 keypair from `localStorage`
+2. Every outgoing op is signed over its raw msgpack bytes (`op_bytes`) before sending
+3. The server verifies the signature against `client_pubkey` embedded in the token
+4. Ops with an invalid or missing signature are rejected with HTTP 401
+
+```
+Client                              Server
+  |                                   |
+  |  loadOrGenerateKeypair()          |
+  |  publicKeyBytes ──────────────►  token issuance request
+  |                                   |  sign(claims + client_pubkey) → token
+  |  ◄──────────────────────────────  token
+  |                                   |
+  |  op_bytes = encode(CrdtOp)        |
+  |  sig = ed25519.sign(op_bytes)     |
+  |  send({ Op: { op_bytes, sig } }) ►|
+  |                                   |  verify(sig, op_bytes, claims.client_pubkey)
+  |                                   |  ✅ apply op
+```
+
+## Quick start
+
+### 1. Enable signing on the client
+
+```ts
+import { Effect } from "effect";
+import { MeridianClient } from "meridian-sdk";
+
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "wss://your-server.com",
+    namespace: "my-app",
+    token: myToken, // must embed client_pubkey — see step 2
+    signing: true,
+  })
+);
+
+// The 32-byte public key used for this session
+console.log(client.publicKeyBytes); // Uint8Array(32)
+```
+
+### 2. Register the public key when issuing a token
+
+The token must embed the client's public key before signing is enforced. This requires a two-step flow:
+
+**Step A** — get the client's public key (before or after create, but before issuing the token):
+
+```ts
+import { loadOrGenerateKeypair } from "meridian-sdk";
+
+const keypair = await loadOrGenerateKeypair();
+
+// base64url-encode for your app server
+const pubkeyB64 = btoa(String.fromCharCode(...keypair.publicKeyBytes))
+  .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+```
+
+**Step B** — pass it to your app server's token issuance endpoint:
+
+```ts
+// Your app server → Meridian POST /v1/namespaces/:ns/tokens
+const res = await fetch("/api/meridian-token", {
+  method: "POST",
+  body: JSON.stringify({ client_pubkey: pubkeyB64 }),
+});
+const { token } = await res.json();
+```
+
+**Step C** — your server forwards `client_pubkey` to Meridian:
+
+```ts
+// Server-side: POST /v1/namespaces/my-app/tokens
+// Requires admin token
+await fetch(`${MERIDIAN_URL}/v1/namespaces/my-app/tokens`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${adminToken}` },
+  body: JSON.stringify({
+    client_id: userId,
+    ttl_ms: 3_600_000,
+    client_pubkey: pubkeyB64, // 32-byte Ed25519 public key, base64url
+    permissions: { read: ["*"], write: ["*"], admin: false },
+  }),
+});
+```
+
+Once `client_pubkey` is in the token, the server will require a valid signature on every op from that client.
+
+### 3. Use the client normally
+
+Signing is fully transparent — `gcounter.increment()`, `lwwregister.set()`, etc. work identically. Every op is signed automatically before sending. Ops queued while offline are signed on reconnect.
+
+## Keypair persistence
+
+Keypairs are persisted in `localStorage` under two keys:
+
+| Key | Format |
+|-----|--------|
+| `meridian:sig_priv_v1` | PKCS8 base64url |
+| `meridian:sig_pub_v1` | Raw 32-byte base64url |
+
+On next page load, `loadOrGenerateKeypair()` reloads the same keypair — the `client_pubkey` embedded in the token remains valid across sessions.
+
+If `localStorage` is unavailable (SSR, Node.js), a fresh keypair is generated per session and `client.publicKeyBytes` will differ each time. In that case, issue a new token with the updated `client_pubkey` on each session start.
+
+## Combining with E2E encryption
+
+BFT signing and [E2E encryption](/sdk/encryption) are independent features and compose freely:
+
+```ts
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "wss://your-server.com",
+    namespace: "my-app",
+    token: myToken,
+    signing: true,                          // BFT op signing
+    encryption: { "lw:profile": profileKey }, // E2E value encryption
+  })
+);
+```
+
+Signing protects op **origin**. Encryption protects op **content**. Together they prevent both forged ops and plaintext leakage through a compromised cluster node.
+
+## API reference
+
+```ts
+// Generate a fresh Ed25519 keypair
+generateClientKeypair(): Promise<ClientKeypair>
+
+// Load from localStorage or generate if absent
+loadOrGenerateKeypair(): Promise<ClientKeypair>
+
+// Sign a raw op payload (used internally by the transport)
+signOp(privateKey: CryptoKey, opBytes: Uint8Array): Promise<Uint8Array>
+
+interface ClientKeypair {
+  publicKey: CryptoKey;
+  privateKey: CryptoKey;
+  publicKeyBytes: Uint8Array; // 32 bytes — embed in token as base64url
+}
+```
+
+`client.publicKeyBytes` exposes the raw public key bytes after `create()` resolves. This is equivalent to `keypair.publicKeyBytes` and is `null` when `signing` is not enabled.

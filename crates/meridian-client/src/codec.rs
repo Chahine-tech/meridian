@@ -25,6 +25,18 @@ pub fn decode_delta<D: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<D, C
     rmp_serde::decode::from_slice(bytes).map_err(ClientError::Decode)
 }
 
+/// Encode a vector-clock map `{client_id: seq}` as msgpack bytes (for HTTP sync endpoint).
+///
+/// Wire format mirrors the TypeScript SDK: `msgpack({ entries: vc_map })`.
+#[cfg(any(feature = "http", feature = "crypto"))]
+pub fn encode_vc_map(vc: serde_json::Value) -> Result<Vec<u8>, ClientError> {
+    #[derive(serde::Serialize)]
+    struct Wrapper {
+        entries: serde_json::Value,
+    }
+    rmp_serde::encode::to_vec_named(&Wrapper { entries: vc }).map_err(ClientError::Encode)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -32,7 +44,9 @@ mod tests {
 
     #[test]
     fn subscribe_roundtrip() {
-        let msg = ClientMsg::Subscribe { crdt_id: "gc:score".into() };
+        let msg = ClientMsg::Subscribe {
+            crdt_id: "gc:score".into(),
+        };
         let bytes = encode(&msg).unwrap();
         let decoded = decode(&bytes);
         // ClientMsg and ServerMsg are different enums — encode/decode are directional.
@@ -52,10 +66,17 @@ mod tests {
             op_bytes,
             ttl_ms: None,
             client_seq: Some(42),
+            sig: None,
         };
         let bytes = encode(&msg).unwrap();
         let back = ClientMsg::from_msgpack(&bytes).unwrap();
-        assert!(matches!(back, ClientMsg::Op { client_seq: Some(42), .. }));
+        assert!(matches!(
+            back,
+            ClientMsg::Op {
+                client_seq: Some(42),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -71,7 +92,10 @@ mod tests {
 
     #[test]
     fn server_ack_roundtrip() {
-        let msg = meridian_core::protocol::ServerMsg::Ack { seq: 99, client_seq: Some(1) };
+        let msg = meridian_core::protocol::ServerMsg::Ack {
+            seq: 99,
+            client_seq: Some(1),
+        };
         let bytes = msg.to_msgpack().unwrap();
         let back = decode(&bytes).unwrap();
         assert!(matches!(back, ServerMsg::Ack { seq: 99, .. }));

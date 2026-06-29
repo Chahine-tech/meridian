@@ -2,13 +2,16 @@ use std::collections::HashMap;
 
 use base64::Engine as _;
 use meridian_core::{
-    crdt::{registry::{apply_op, validate_clock_drift, CrdtOp, CrdtValue}, VectorClock},
+    crdt::{
+        VectorClock,
+        registry::{CrdtOp, CrdtValue, apply_op, validate_clock_drift},
+    },
     protocol::{BatchItem, ClientMsg, ServerMsg},
-    query::{execute_query_on_values, AggregateOp, WhereClause},
+    query::{AggregateOp, WhereClause, execute_query_on_values},
 };
 use serde::{Deserialize, Serialize};
-use worker::{durable_object, Env, Request, Response, Result, State, WebSocket, WebSocketPair};
 use worker::durable::DurableObject;
+use worker::{Env, Request, Response, Result, State, WebSocket, WebSocketPair, durable_object};
 
 use crate::wal::WalEntry;
 
@@ -62,11 +65,7 @@ struct WebhookDlqEntry {
 
 /// Backoff delays for webhook retries (ms).
 /// After attempt 1 fails → wait 5 min; after 2 → 30 min; after 3 → 2 h, then drop.
-const WEBHOOK_RETRY_DELAYS_MS: [u64; 3] = [
-    5 * 60 * 1000,
-    30 * 60 * 1000,
-    2 * 60 * 60 * 1000,
-];
+const WEBHOOK_RETRY_DELAYS_MS: [u64; 3] = [5 * 60 * 1000, 30 * 60 * 1000, 2 * 60 * 60 * 1000];
 const WEBHOOK_MAX_ATTEMPTS: u32 = 3;
 
 /// Newtype wrapper so `Vec<u8>` serializes as a base64 string via serde_json,
@@ -98,7 +97,15 @@ impl DurableObject for NsObject {
 
         // Persist namespace on first request so fire_webhooks can read it later.
         // Path format: /{ns}/op, /{ns}/ws, etc. — namespace is the first segment.
-        if self.state.storage().get::<String>("ns:name").await.ok().flatten().is_none() {
+        if self
+            .state
+            .storage()
+            .get::<String>("ns:name")
+            .await
+            .ok()
+            .flatten()
+            .is_none()
+        {
             let ns = path.trim_start_matches('/').split('/').next().unwrap_or("");
             if !ns.is_empty() {
                 let _ = self.state.storage().put("ns:name", ns.to_owned()).await;
@@ -158,7 +165,10 @@ impl DurableObject for NsObject {
         let client_msg = match ClientMsg::from_msgpack(&bytes) {
             Ok(m) => m,
             Err(_) => {
-                let err = ServerMsg::Error { code: 400, message: "malformed message".into() };
+                let err = ServerMsg::Error {
+                    code: 400,
+                    message: "malformed message".into(),
+                };
                 if let Ok(b) = err.to_msgpack() {
                     let _ = ws.send_with_bytes(&b);
                 }
@@ -181,10 +191,19 @@ impl DurableObject for NsObject {
                     }
                 }
             }
-            ClientMsg::Op { crdt_id, op_bytes, ttl_ms, client_seq } => {
+            ClientMsg::Op {
+                crdt_id,
+                op_bytes,
+                ttl_ms,
+                client_seq,
+                ..
+            } => {
                 // Rate limit: 500 ops per minute per namespace (WS path, higher limit)
                 if !self.check_rate_limit(500, 60_000).await {
-                    let err = ServerMsg::Error { code: 429, message: "rate limit exceeded".into() };
+                    let err = ServerMsg::Error {
+                        code: 429,
+                        message: "rate limit exceeded".into(),
+                    };
                     if let Ok(b) = err.to_msgpack() {
                         let _ = ws.send_with_bytes(&b);
                     }
@@ -199,7 +218,10 @@ impl DurableObject for NsObject {
                 // Reject ops with client HLC timestamps too far from server wall time.
                 let now_ms = js_sys::Date::now() as u64;
                 if let Err(e) = validate_clock_drift(&op, now_ms) {
-                    let err = ServerMsg::Error { code: 400, message: e.to_string() };
+                    let err = ServerMsg::Error {
+                        code: 400,
+                        message: e.to_string(),
+                    };
                     if let Ok(b) = err.to_msgpack() {
                         let _ = ws.send_with_bytes(&b);
                     }
@@ -208,8 +230,13 @@ impl DurableObject for NsObject {
 
                 // Write-ahead: persist the op before applying the snapshot.
                 if self.append_wal(&crdt_id, &op_bytes).await.is_err() {
-                    let err = ServerMsg::Error { code: 503, message: "wal write failed".into() };
-                    if let Ok(b) = err.to_msgpack() { let _ = ws.send_with_bytes(&b); }
+                    let err = ServerMsg::Error {
+                        code: 503,
+                        message: "wal write failed".into(),
+                    };
+                    if let Ok(b) = err.to_msgpack() {
+                        let _ = ws.send_with_bytes(&b);
+                    }
                     return Ok(());
                 }
                 self.touch_activity().await;
@@ -224,8 +251,13 @@ impl DurableObject for NsObject {
                 let delta_bytes = match apply_op(&mut value, op) {
                     Ok(d) => d,
                     Err(e) => {
-                        let err = ServerMsg::Error { code: 400, message: e.to_string() };
-                        if let Ok(b) = err.to_msgpack() { let _ = ws.send_with_bytes(&b); }
+                        let err = ServerMsg::Error {
+                            code: 400,
+                            message: e.to_string(),
+                        };
+                        if let Ok(b) = err.to_msgpack() {
+                            let _ = ws.send_with_bytes(&b);
+                        }
                         return Ok(());
                     }
                 };
@@ -235,7 +267,11 @@ impl DurableObject for NsObject {
                 if let Some(ms) = ttl_ms {
                     let now = js_sys::Date::now() as u64;
                     let exp_key = format!("crdt:{crdt_id}:exp");
-                    let _ = self.state.storage().put(&exp_key, now.saturating_add(ms)).await;
+                    let _ = self
+                        .state
+                        .storage()
+                        .put(&exp_key, now.saturating_add(ms))
+                        .await;
                 }
 
                 if let Some(ref delta) = delta_bytes {
@@ -251,7 +287,14 @@ impl DurableObject for NsObject {
                 }
 
                 // Fire webhooks (best-effort, non-blocking)
-                let seq: u64 = self.state.storage().get("wal:seq").await.ok().flatten().unwrap_or(0);
+                let seq: u64 = self
+                    .state
+                    .storage()
+                    .get("wal:seq")
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
                 let _ = self.fire_webhooks(&crdt_id, seq).await;
 
                 // Push live query results to all matching subscribers.
@@ -266,7 +309,10 @@ impl DurableObject for NsObject {
             ClientMsg::BatchOp { ops, client_seq } => {
                 // Rate limit: count the batch as one request.
                 if !self.check_rate_limit(500, 60_000).await {
-                    let err = ServerMsg::Error { code: 429, message: "rate limit exceeded".into() };
+                    let err = ServerMsg::Error {
+                        code: 429,
+                        message: "rate limit exceeded".into(),
+                    };
                     if let Ok(b) = err.to_msgpack() {
                         let _ = ws.send_with_bytes(&b);
                     }
@@ -274,7 +320,10 @@ impl DurableObject for NsObject {
                 }
 
                 if ops.is_empty() {
-                    let err = ServerMsg::Error { code: 400, message: "batch must not be empty".into() };
+                    let err = ServerMsg::Error {
+                        code: 400,
+                        message: "batch must not be empty".into(),
+                    };
                     if let Ok(b) = err.to_msgpack() {
                         let _ = ws.send_with_bytes(&b);
                     }
@@ -289,29 +338,59 @@ impl DurableObject for NsObject {
                     ttl_ms: Option<u64>,
                 }
                 let mut parsed: Vec<ParsedItem> = Vec::with_capacity(ops.len());
-                for BatchItem { crdt_id, op_bytes, ttl_ms } in ops {
+                for BatchItem {
+                    crdt_id,
+                    op_bytes,
+                    ttl_ms,
+                    ..
+                } in ops
+                {
                     let op: CrdtOp = match rmp_serde::decode::from_slice(&op_bytes) {
                         Ok(o) => o,
                         Err(e) => {
-                            let err = ServerMsg::Error { code: 400, message: format!("batch: decode error for {crdt_id}: {e}") };
-                            if let Ok(b) = err.to_msgpack() { let _ = ws.send_with_bytes(&b); }
+                            let err = ServerMsg::Error {
+                                code: 400,
+                                message: format!("batch: decode error for {crdt_id}: {e}"),
+                            };
+                            if let Ok(b) = err.to_msgpack() {
+                                let _ = ws.send_with_bytes(&b);
+                            }
                             return Ok(());
                         }
                     };
                     if let Err(e) = validate_clock_drift(&op, now_ms) {
-                        let err = ServerMsg::Error { code: 400, message: format!("batch: {crdt_id}: {e}") };
-                        if let Ok(b) = err.to_msgpack() { let _ = ws.send_with_bytes(&b); }
+                        let err = ServerMsg::Error {
+                            code: 400,
+                            message: format!("batch: {crdt_id}: {e}"),
+                        };
+                        if let Ok(b) = err.to_msgpack() {
+                            let _ = ws.send_with_bytes(&b);
+                        }
                         return Ok(());
                     }
-                    parsed.push(ParsedItem { crdt_id, op, op_bytes: op_bytes.into_vec(), ttl_ms });
+                    parsed.push(ParsedItem {
+                        crdt_id,
+                        op,
+                        op_bytes: op_bytes.into_vec(),
+                        ttl_ms,
+                    });
                 }
 
                 // Each op is stored individually so anti-entropy and point-in-time
                 // recovery can replay them one by one using the standard path.
                 for item in &parsed {
-                    if self.append_wal(&item.crdt_id, &item.op_bytes).await.is_err() {
-                        let err = ServerMsg::Error { code: 503, message: "wal write failed".into() };
-                        if let Ok(b) = err.to_msgpack() { let _ = ws.send_with_bytes(&b); }
+                    if self
+                        .append_wal(&item.crdt_id, &item.op_bytes)
+                        .await
+                        .is_err()
+                    {
+                        let err = ServerMsg::Error {
+                            code: 503,
+                            message: "wal write failed".into(),
+                        };
+                        if let Ok(b) = err.to_msgpack() {
+                            let _ = ws.send_with_bytes(&b);
+                        }
                         return Ok(());
                     }
                 }
@@ -343,7 +422,11 @@ impl DurableObject for NsObject {
 
                     if let Some(ms) = item.ttl_ms {
                         let exp_key = format!("crdt:{}:exp", item.crdt_id);
-                        let _ = self.state.storage().put(&exp_key, now_ms.saturating_add(ms)).await;
+                        let _ = self
+                            .state
+                            .storage()
+                            .put(&exp_key, now_ms.saturating_add(ms))
+                            .await;
                     }
                 }
 
@@ -354,8 +437,19 @@ impl DurableObject for NsObject {
                     }
                 }
 
-                let seq: u64 = self.state.storage().get("wal:seq").await.ok().flatten().unwrap_or(0);
-                let ack = ServerMsg::BatchAck { seq, count: delta_count, client_seq };
+                let seq: u64 = self
+                    .state
+                    .storage()
+                    .get("wal:seq")
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+                let ack = ServerMsg::BatchAck {
+                    seq,
+                    count: delta_count,
+                    client_seq,
+                };
                 if let Ok(b) = ack.to_msgpack() {
                     let _ = ws.send_with_bytes(&b);
                 }
@@ -366,9 +460,17 @@ impl DurableObject for NsObject {
                 }
             }
             ClientMsg::AwarenessUpdate { key, data } => {
-                let client_id: u64 = ws.deserialize_attachment::<WsAttachment>()
-                    .ok().flatten().map(|a| a.client_id).unwrap_or(0);
-                let broadcast = ServerMsg::AwarenessBroadcast { client_id, key, data };
+                let client_id: u64 = ws
+                    .deserialize_attachment::<WsAttachment>()
+                    .ok()
+                    .flatten()
+                    .map(|a| a.client_id)
+                    .unwrap_or(0);
+                let broadcast = ServerMsg::AwarenessBroadcast {
+                    client_id,
+                    key,
+                    data,
+                };
                 if let Ok(b) = broadcast.to_msgpack() {
                     for other in self.state.get_websockets() {
                         let _ = other.send_with_bytes(&b);
@@ -376,14 +478,12 @@ impl DurableObject for NsObject {
                 }
             }
             ClientMsg::SubscribeQuery { query_id, query } => {
-                let attachment: Option<WsAttachment> =
-                    ws.deserialize_attachment().ok().flatten();
+                let attachment: Option<WsAttachment> = ws.deserialize_attachment().ok().flatten();
                 let conn_id = attachment.map(|a| a.conn_id).unwrap_or_default();
 
                 // Persist subscription to KV.
                 let key = format!("lq:{conn_id}:{query_id}");
-                let payload_bytes = rmp_serde::encode::to_vec_named(&query)
-                    .unwrap_or_default();
+                let payload_bytes = rmp_serde::encode::to_vec_named(&query).unwrap_or_default();
                 let _ = self.state.storage().put(&key, Bytes(payload_bytes)).await;
 
                 // Push initial result immediately.
@@ -400,8 +500,7 @@ impl DurableObject for NsObject {
             }
 
             ClientMsg::UnsubscribeQuery { query_id } => {
-                let attachment: Option<WsAttachment> =
-                    ws.deserialize_attachment().ok().flatten();
+                let attachment: Option<WsAttachment> = ws.deserialize_attachment().ok().flatten();
                 let conn_id = attachment.map(|a| a.conn_id).unwrap_or_default();
                 let key = format!("lq:{conn_id}:{query_id}");
                 let _ = self.state.storage().delete(&key).await;
@@ -418,7 +517,13 @@ impl DurableObject for NsObject {
 
         // --- Namespace TTL: delete if inactive for > NAMESPACE_TTL_MS ---
         const NAMESPACE_TTL_MS: u64 = 30 * 24 * 3600 * 1000; // 30 days
-        let last_activity: Option<u64> = self.state.storage().get("ns:last_activity").await.ok().flatten();
+        let last_activity: Option<u64> = self
+            .state
+            .storage()
+            .get("ns:last_activity")
+            .await
+            .ok()
+            .flatten();
         if let Some(last) = last_activity
             && now_ms.saturating_sub(last) > NAMESPACE_TTL_MS
         {
@@ -504,11 +609,25 @@ impl NsObject {
         let bucket = now_ms / window_ms;
         let elapsed_in_bucket = now_ms % window_ms; // ms since current bucket started
 
-        let cur_key  = format!("rl:{bucket}");
+        let cur_key = format!("rl:{bucket}");
         let prev_key = format!("rl:{}", bucket.saturating_sub(1));
 
-        let cur_count: u64  = self.state.storage().get(&cur_key).await.ok().flatten().unwrap_or(0u64);
-        let prev_count: u64 = self.state.storage().get(&prev_key).await.ok().flatten().unwrap_or(0u64);
+        let cur_count: u64 = self
+            .state
+            .storage()
+            .get(&cur_key)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(0u64);
+        let prev_count: u64 = self
+            .state
+            .storage()
+            .get(&prev_key)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(0u64);
 
         // Weight the previous bucket by the fraction of the window not yet consumed.
         // Integer arithmetic: multiply first to avoid float.
@@ -575,8 +694,7 @@ impl NsObject {
 
         // Reject ops with client HLC timestamps too far from server wall time.
         let now_ms = js_sys::Date::now() as u64;
-        validate_clock_drift(&op, now_ms)
-            .map_err(|e| worker::Error::RustError(e.to_string()))?;
+        validate_clock_drift(&op, now_ms).map_err(|e| worker::Error::RustError(e.to_string()))?;
 
         // Write-ahead: persist the op before applying the snapshot.
         self.append_wal(&crdt_id, &body).await?;
@@ -588,8 +706,8 @@ impl NsObject {
             .await?
             .unwrap_or_else(|| CrdtValue::new(crdt_type));
 
-        let delta_bytes = apply_op(&mut value, op)
-            .map_err(|e| worker::Error::RustError(e.to_string()))?;
+        let delta_bytes =
+            apply_op(&mut value, op).map_err(|e| worker::Error::RustError(e.to_string()))?;
 
         self.save_crdt(&crdt_id, &value).await?;
 
@@ -597,7 +715,10 @@ impl NsObject {
         if let Some(ms) = ttl_ms {
             let now = js_sys::Date::now() as u64;
             let exp_key = format!("crdt:{crdt_id}:exp");
-            self.state.storage().put(&exp_key, now.saturating_add(ms)).await?;
+            self.state
+                .storage()
+                .put(&exp_key, now.saturating_add(ms))
+                .await?;
         }
 
         // Broadcast delta to all connected WS clients
@@ -614,7 +735,14 @@ impl NsObject {
         }
 
         // Fire webhooks (best-effort, non-blocking)
-        let seq: u64 = self.state.storage().get("wal:seq").await.ok().flatten().unwrap_or(0);
+        let seq: u64 = self
+            .state
+            .storage()
+            .get("wal:seq")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(0);
         let _ = self.fire_webhooks(&crdt_id, seq).await;
 
         // Push live query results to all matching subscribers.
@@ -647,7 +775,10 @@ impl NsObject {
             let pair = js_sys::Array::from(&item);
             let raw = pair.get(1);
             let s = raw.as_string().unwrap_or_else(|| {
-                js_sys::JSON::stringify(&raw).ok().and_then(|s| s.as_string()).unwrap_or_default()
+                js_sys::JSON::stringify(&raw)
+                    .ok()
+                    .and_then(|s| s.as_string())
+                    .unwrap_or_default()
             });
             if let Ok(hook) = serde_json::from_str::<Webhook>(&s) {
                 hooks.push(hook);
@@ -673,14 +804,21 @@ impl NsObject {
             crdt_ids: Vec<String>,
         }
 
-        let body: RegisterBody = req.json().await
+        let body: RegisterBody = req
+            .json()
+            .await
             .map_err(|_| worker::Error::RustError("invalid body".into()))?;
 
         let id = uuid::Uuid::new_v4().to_string();
-        let hook = Webhook { id: id.clone(), url: body.url, secret: body.secret, crdt_ids: body.crdt_ids };
+        let hook = Webhook {
+            id: id.clone(),
+            url: body.url,
+            secret: body.secret,
+            crdt_ids: body.crdt_ids,
+        };
         let key = format!("webhook:{id}");
-        let val = serde_json::to_string(&hook)
-            .map_err(|e| worker::Error::RustError(e.to_string()))?;
+        let val =
+            serde_json::to_string(&hook).map_err(|e| worker::Error::RustError(e.to_string()))?;
         self.state.storage().put(&key, val).await?;
 
         Response::from_json(&hook)
@@ -707,22 +845,33 @@ impl NsObject {
         }
 
         let now_ms = js_sys::Date::now() as u64;
-        let ns: String = self.state.storage().get("ns:name").await.ok().flatten().unwrap_or_default();
+        let ns: String = self
+            .state
+            .storage()
+            .get("ns:name")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let payload = WebhookPayload {
             namespace: &ns,
             crdt_id,
             seq,
             timestamp_ms: now_ms,
         };
-        let payload_json = serde_json::to_string(&payload)
-            .map_err(|e| worker::Error::RustError(e.to_string()))?;
+        let payload_json =
+            serde_json::to_string(&payload).map_err(|e| worker::Error::RustError(e.to_string()))?;
 
         for hook in hooks {
-            if !hook.crdt_ids.is_empty() && !hook.crdt_ids.iter().any(|id| id == crdt_id || id == "*") {
+            if !hook.crdt_ids.is_empty()
+                && !hook.crdt_ids.iter().any(|id| id == crdt_id || id == "*")
+            {
                 continue;
             }
 
-            let delivered = self.send_webhook(&hook.url, hook.secret.as_deref(), &payload_json).await;
+            let delivered = self
+                .send_webhook(&hook.url, hook.secret.as_deref(), &payload_json)
+                .await;
             if !delivered {
                 // Queue for retry — store in KV with a unique key.
                 let entry_id = format!("wdlq:{seq}:{}", hook.id);
@@ -783,7 +932,10 @@ impl NsObject {
             let raw = pair.get(1).as_string().unwrap_or_default();
             let mut entry: WebhookDlqEntry = match serde_json::from_str(&raw) {
                 Ok(e) => e,
-                Err(_) => { let _ = self.state.storage().delete(&key).await; continue; }
+                Err(_) => {
+                    let _ = self.state.storage().delete(&key).await;
+                    continue;
+                }
             };
 
             // Not yet due for retry.
@@ -791,7 +943,13 @@ impl NsObject {
                 continue;
             }
 
-            let delivered = self.send_webhook(&entry.hook_url, entry.hook_secret.as_deref(), &entry.payload_json).await;
+            let delivered = self
+                .send_webhook(
+                    &entry.hook_url,
+                    entry.hook_secret.as_deref(),
+                    &entry.payload_json,
+                )
+                .await;
             entry.attempts += 1;
 
             if delivered || entry.attempts > WEBHOOK_MAX_ATTEMPTS {
@@ -799,7 +957,8 @@ impl NsObject {
                 let _ = self.state.storage().delete(&key).await;
             } else {
                 // Schedule next retry with exponential backoff.
-                let delay_idx = (entry.attempts as usize - 1).min(WEBHOOK_RETRY_DELAYS_MS.len() - 1);
+                let delay_idx =
+                    (entry.attempts as usize - 1).min(WEBHOOK_RETRY_DELAYS_MS.len() - 1);
                 entry.retry_after_ms = now_ms + WEBHOOK_RETRY_DELAYS_MS[delay_idx];
                 if let Ok(json) = serde_json::to_string(&entry) {
                     let _ = self.state.storage().put(&key, json).await;
@@ -880,7 +1039,8 @@ impl NsObject {
             }
 
             // For RGA / Tree CRDTs: strip tombstones and stale move_log entries.
-            let stats = crdt.compact();
+            // 24-hour grace period matches the server-side crdt_compactor default.
+            let stats = crdt.compact_before(now_ms.saturating_sub(24 * 60 * 60 * 1_000));
             if (stats.tombstones_removed > 0 || stats.move_records_removed > 0)
                 && let Ok(data) = crdt.to_msgpack()
             {
@@ -901,8 +1061,14 @@ impl NsObject {
     async fn compact_wal_before(&self, cutoff_ms: u64) -> Result<()> {
         // Load the lowest seq any peer has ever requested from this DO.
         // u64::MAX means no peer has ever pulled WAL → fall back to pure time-based compaction.
-        let min_peer_seq: u64 = self.state.storage()
-            .get("wal:min_peer_seq").await.ok().flatten().unwrap_or(u64::MAX);
+        let min_peer_seq: u64 = self
+            .state
+            .storage()
+            .get("wal:min_peer_seq")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(u64::MAX);
 
         let opts = worker::durable::ListOptions::new().prefix("wal:");
         let map = self.state.storage().list_with_options(opts).await?;
@@ -957,7 +1123,11 @@ impl NsObject {
         }
 
         if last_deleted_seq > 0 {
-            let _ = self.state.storage().put("wal:checkpoint", last_deleted_seq).await;
+            let _ = self
+                .state
+                .storage()
+                .put("wal:checkpoint", last_deleted_seq)
+                .await;
         }
 
         Ok(())
@@ -1047,7 +1217,10 @@ impl NsObject {
     async fn handle_wal(&self, req: Request) -> Result<Response> {
         let url = req.url()?;
         let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
-        let from_seq: u64 = params.get("from_seq").and_then(|v| v.parse().ok()).unwrap_or(0);
+        let from_seq: u64 = params
+            .get("from_seq")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
         let until_ms: Option<u64> = params.get("until_ms").and_then(|v| v.parse().ok());
 
         // Track the minimum seq any active peer has requested during this compaction
@@ -1058,15 +1231,27 @@ impl NsObject {
         // wal:min_peer_seq is reset to u64::MAX at the start of each alarm cycle
         // so stale / decommissioned peers cannot block compaction indefinitely.
         if from_seq > 0 {
-            let current_min: u64 = self.state.storage()
-                .get("wal:min_peer_seq").await.ok().flatten().unwrap_or(u64::MAX);
+            let current_min: u64 = self
+                .state
+                .storage()
+                .get("wal:min_peer_seq")
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(u64::MAX);
             if from_seq < current_min {
                 let _ = self.state.storage().put("wal:min_peer_seq", from_seq).await;
             }
         }
 
-        let checkpoint_seq: u64 = self.state.storage()
-            .get("wal:checkpoint").await.ok().flatten().unwrap_or(0u64);
+        let checkpoint_seq: u64 = self
+            .state
+            .storage()
+            .get("wal:checkpoint")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(0u64);
         let entries = self.replay_wal(from_seq, until_ms).await?;
 
         #[derive(Serialize)]
@@ -1075,7 +1260,10 @@ impl NsObject {
             entries: Vec<WalEntry>,
         }
 
-        Response::from_json(&WalResponse { checkpoint_seq, entries })
+        Response::from_json(&WalResponse {
+            checkpoint_seq,
+            entries,
+        })
     }
 
     /// GET /history?crdt_id=<id>[&since_seq=<n>][&limit=<n>]
@@ -1084,8 +1272,15 @@ impl NsObject {
         let url = req.url()?;
         let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
         let crdt_id = params.get("crdt_id").cloned().unwrap_or_default();
-        let since_seq: u64 = params.get("since_seq").and_then(|v| v.parse().ok()).unwrap_or(0);
-        let limit: usize = params.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50).min(500);
+        let since_seq: u64 = params
+            .get("since_seq")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let limit: usize = params
+            .get("limit")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(50)
+            .min(500);
 
         let all_entries = self.replay_wal(since_seq, None).await?;
 
@@ -1096,7 +1291,11 @@ impl NsObject {
 
         let has_more = filtered.len() > limit;
         let page: Vec<_> = filtered.into_iter().take(limit).collect();
-        let next_seq = if has_more { page.last().map(|e| e.seq + 1) } else { None };
+        let next_seq = if has_more {
+            page.last().map(|e| e.seq + 1)
+        } else {
+            None
+        };
 
         #[derive(Serialize)]
         struct HistoryEntry {
@@ -1115,15 +1314,25 @@ impl NsObject {
         let entries: Vec<HistoryEntry> = page
             .into_iter()
             .map(|e| {
-                let op = rmp_serde::decode::from_slice::<meridian_core::crdt::registry::CrdtOp>(&e.op_bytes)
-                    .ok()
-                    .and_then(|op| serde_json::to_value(op).ok())
-                    .unwrap_or(serde_json::Value::Null);
-                HistoryEntry { seq: e.seq, timestamp_ms: e.timestamp_ms, op }
+                let op = rmp_serde::decode::from_slice::<meridian_core::crdt::registry::CrdtOp>(
+                    &e.op_bytes,
+                )
+                .ok()
+                .and_then(|op| serde_json::to_value(op).ok())
+                .unwrap_or(serde_json::Value::Null);
+                HistoryEntry {
+                    seq: e.seq,
+                    timestamp_ms: e.timestamp_ms,
+                    op,
+                }
             })
             .collect();
 
-        Response::from_json(&HistoryResponse { crdt_id, entries, next_seq })
+        Response::from_json(&HistoryResponse {
+            crdt_id,
+            entries,
+            next_seq,
+        })
     }
 
     /// GET /sync?crdt_id=<id>[&since=<base64url-msgpack-vc>]
@@ -1174,7 +1383,9 @@ impl NsObject {
     /// Body is JSON: `{ "from": "gc:*", "aggregate": "sum", "where": { ... } }`
     /// Returns JSON: `{ "value": ..., "matched": N, "scanned": N }`
     async fn handle_query(&self, mut req: Request) -> Result<Response> {
-        let payload: meridian_core::protocol::LiveQueryPayload = req.json().await
+        let payload: meridian_core::protocol::LiveQueryPayload = req
+            .json()
+            .await
             .map_err(|_| worker::Error::RustError("invalid query body".into()))?;
 
         match self.run_live_query(&payload).await {
@@ -1261,7 +1472,8 @@ impl NsObject {
                 Ok(b) => b,
                 Err(_) => continue,
             };
-            let crdt_value = match meridian_core::crdt::registry::CrdtValue::from_msgpack(&stored.0) {
+            let crdt_value = match meridian_core::crdt::registry::CrdtValue::from_msgpack(&stored.0)
+            {
                 Ok(v) => v,
                 Err(_) => continue,
             };
@@ -1295,7 +1507,8 @@ impl NsObject {
 
         // Build a map from conn_id → WebSocket for fast lookup.
         let all_sockets = self.state.get_websockets();
-        let mut conn_to_ws: std::collections::HashMap<String, &WebSocket> = std::collections::HashMap::new();
+        let mut conn_to_ws: std::collections::HashMap<String, &WebSocket> =
+            std::collections::HashMap::new();
         for ws in &all_sockets {
             if let Ok(Some(attachment)) = ws.deserialize_attachment::<WsAttachment>() {
                 conn_to_ws.insert(attachment.conn_id, ws);
@@ -1358,9 +1571,10 @@ impl NsObject {
 
 fn map_query_error(e: meridian_core::query::QueryError) -> String {
     match e {
-        meridian_core::query::QueryError::UnknownCrdtType(s) =>
-            format!("unknown crdt type: {s}"),
-        meridian_core::query::QueryError::IncompatibleAggregate { aggregate, crdt_type } =>
-            format!("aggregate '{aggregate}' is not supported for crdt type '{crdt_type}'"),
+        meridian_core::query::QueryError::UnknownCrdtType(s) => format!("unknown crdt type: {s}"),
+        meridian_core::query::QueryError::IncompatibleAggregate {
+            aggregate,
+            crdt_type,
+        } => format!("aggregate '{aggregate}' is not supported for crdt type '{crdt_type}'"),
     }
 }

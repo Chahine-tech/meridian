@@ -23,6 +23,12 @@ pub enum ClientError {
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error("crypto error: {0}")]
+    Crypto(String),
+
+    #[error("http error {status}: {body}")]
+    Http { status: u16, body: String },
+
     #[error("websocket error: {0}")]
     #[cfg(feature = "ws")]
     WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),

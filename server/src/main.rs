@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-use meridian_server::server::{run, Config};
+use meridian_server::server::{Config, run};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -32,10 +32,7 @@ fn init_metrics() -> anyhow::Result<PrometheusHandle> {
 /// each backend branch produces a different concrete type — Rust generics
 /// require the type to be known at the call site, so we resolve it here and
 /// call `run` directly.
-async fn init_storage_and_run(
-    config: Config,
-    metrics: PrometheusHandle,
-) -> anyhow::Result<()> {
+async fn init_storage_and_run(config: Config, metrics: PrometheusHandle) -> anyhow::Result<()> {
     #[cfg(feature = "storage-postgres")]
     if let Some(ref url) = config.database_url {
         use meridian_server::storage::{PgStore, PgWal};
@@ -43,7 +40,10 @@ async fn init_storage_and_run(
         use tracing::info;
 
         info!(url, "postgres backend selected");
-        let pool = PgPoolOptions::new().max_connections(16).connect(url).await?;
+        let pool = PgPoolOptions::new()
+            .max_connections(16)
+            .connect(url)
+            .await?;
         PgStore::migrate(&pool).await?;
         PgWal::migrate(&pool).await?;
         let store = Arc::new(PgStore::new(pool.clone()));
@@ -52,7 +52,10 @@ async fn init_storage_and_run(
         // Pass the pool to the pg-sync transport so it reuses this connection
         // pool instead of opening a second one.
         #[cfg(feature = "pg-sync")]
-        let config = Config { pg_pool: Some(pool), ..config };
+        let config = Config {
+            pg_pool: Some(pool),
+            ..config
+        };
 
         #[cfg(feature = "wal-archive-s3")]
         if let Some(s3_cfg) = meridian_storage::S3ArchiveConfig::from_env() {
@@ -105,6 +108,12 @@ async fn init_storage_and_run(
         run(config, metrics, store, wal).await
     }
 
-    #[cfg(not(any(feature = "storage-sled", feature = "storage-postgres", feature = "storage-redis")))]
-    compile_error!("no storage backend enabled — build with --features storage-sled, storage-postgres, or storage-redis")
+    #[cfg(not(any(
+        feature = "storage-sled",
+        feature = "storage-postgres",
+        feature = "storage-redis"
+    )))]
+    compile_error!(
+        "no storage backend enabled — build with --features storage-sled, storage-postgres, or storage-redis"
+    )
 }

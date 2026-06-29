@@ -1,4 +1,4 @@
-use redis::{aio::MultiplexedConnection, AsyncCommands, Client};
+use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
@@ -62,8 +62,7 @@ where
     async fn put(&self, ns: &str, id: &str, value: &V) -> Result<()> {
         let mut conn = self.conn().await?;
         let key = Self::redis_key(ns, id);
-        let bytes =
-            rmp_serde::encode::to_vec_named(value).map_err(StorageError::Serialization)?;
+        let bytes = rmp_serde::encode::to_vec_named(value).map_err(StorageError::Serialization)?;
         conn.set::<_, Vec<u8>, ()>(&key, bytes).await?;
         Ok(())
     }

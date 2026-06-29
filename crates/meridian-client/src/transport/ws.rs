@@ -4,11 +4,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use meridian_core::protocol::{ClientMsg, ServerMsg};
-use tokio::sync::{broadcast, watch, Mutex};
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::Message,
-};
+use tokio::sync::{Mutex, broadcast, watch};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, info, warn};
 
 use super::{ConnectionState, Transport};
@@ -18,13 +15,13 @@ const INITIAL_BACKOFF: Duration = Duration::from_millis(100);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 pub struct WsTransport {
-    inbox_tx:   broadcast::Sender<ServerMsg>,
-    outbox_tx:  tokio::sync::mpsc::UnboundedSender<ClientMsg>,
-    state_tx:   Arc<watch::Sender<ConnectionState>>,
-    state_rx:   watch::Receiver<ConnectionState>,
-    op_queue:   Arc<OpQueue>,
+    inbox_tx: broadcast::Sender<ServerMsg>,
+    outbox_tx: tokio::sync::mpsc::UnboundedSender<ClientMsg>,
+    state_tx: Arc<watch::Sender<ConnectionState>>,
+    state_rx: watch::Receiver<ConnectionState>,
+    op_queue: Arc<OpQueue>,
     // Held to prevent close until explicitly called
-    _close_tx:  tokio::sync::oneshot::Sender<()>,
+    _close_tx: tokio::sync::oneshot::Sender<()>,
 }
 
 impl WsTransport {
@@ -93,7 +90,10 @@ async fn connection_loop(
                 // Drain pending ops from queue on reconnect
                 let pending = op_queue.drain();
                 if !pending.is_empty() {
-                    debug!(count = pending.len(), "replaying queued ops after reconnect");
+                    debug!(
+                        count = pending.len(),
+                        "replaying queued ops after reconnect"
+                    );
                 }
 
                 let (mut sink, mut stream) = ws.split();
@@ -185,7 +185,9 @@ impl Transport for WsTransport {
             self.op_queue.push(msg);
             return Ok(());
         }
-        self.outbox_tx.send(msg).map_err(|_| ClientError::TransportClosed)
+        self.outbox_tx
+            .send(msg)
+            .map_err(|_| ClientError::TransportClosed)
     }
 
     fn subscribe_incoming(&self) -> broadcast::Receiver<ServerMsg> {

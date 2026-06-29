@@ -8,8 +8,8 @@ use meridian_storage::WalBackend;
 use crate::{
     cluster_handle::LocalBroadcast,
     config::ClusterConfig,
-    transport::{ClusterTransport, DeltaEnvelope},
     node_id::NodeId,
+    transport::{ClusterTransport, DeltaEnvelope},
 };
 
 #[cfg(feature = "transport-http")]
@@ -107,7 +107,10 @@ pub async fn run_pull_anti_entropy<W, A, B>(
             let count = entries.len();
 
             for entry in entries {
-                match applier.apply_wal_op(&entry.namespace, &entry.crdt_id, entry.op_bytes).await {
+                match applier
+                    .apply_wal_op(&entry.namespace, &entry.crdt_id, entry.op_bytes)
+                    .await
+                {
                     Ok(Some(delta_bytes)) => {
                         broadcast.publish_delta(
                             &entry.namespace,
@@ -210,7 +213,10 @@ pub async fn run_anti_entropy<W, A, B>(
             Ok(entries) => {
                 let count = entries.len();
                 for entry in entries {
-                    match applier.apply_wal_op(&entry.namespace, &entry.crdt_id, entry.op_bytes).await {
+                    match applier
+                        .apply_wal_op(&entry.namespace, &entry.crdt_id, entry.op_bytes)
+                        .await
+                    {
                         Ok(Some(delta_bytes)) => {
                             // Publish locally (to WS clients on this node).
                             broadcast.publish_delta(

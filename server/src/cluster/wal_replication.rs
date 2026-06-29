@@ -92,7 +92,11 @@ async fn stream_once<A: PgStateApplier>(
     // Parse the connection string into ReplicationConfig fields.
     let cfg = parse_replication_config(connstr, slot_name, pub_name)?;
 
-    info!(slot = slot_name, publication = pub_name, "WAL replication stream starting");
+    info!(
+        slot = slot_name,
+        publication = pub_name,
+        "WAL replication stream starting"
+    );
 
     let mut repl_client = ReplicationClient::connect(cfg).await?;
     let mut schema_cache: HashMap<u32, RelationSchema> = HashMap::new();
@@ -158,7 +162,6 @@ async fn ensure_slot_and_pub(
     Ok(())
 }
 
-
 type ConnParams = (String, u16, String, String, String);
 type ParseError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -172,13 +175,12 @@ fn parse_replication_config(
     slot_name: &str,
     pub_name: &str,
 ) -> Result<ReplicationConfig, ParseError> {
-    let (host, port, user, password, database) = if connstr.starts_with("postgresql://")
-        || connstr.starts_with("postgres://")
-    {
-        parse_url_connstr(connstr)?
-    } else {
-        parse_kv_connstr(connstr)?
-    };
+    let (host, port, user, password, database) =
+        if connstr.starts_with("postgresql://") || connstr.starts_with("postgres://") {
+            parse_url_connstr(connstr)?
+        } else {
+            parse_kv_connstr(connstr)?
+        };
 
     let mut cfg = ReplicationConfig::new(
         host,
@@ -205,7 +207,10 @@ fn parse_url_connstr(url: &str) -> Result<ConnParams, ParseError> {
     };
 
     let (user, password) = if let Some(colon) = userinfo.find(':') {
-        (userinfo[..colon].to_owned(), userinfo[colon + 1..].to_owned())
+        (
+            userinfo[..colon].to_owned(),
+            userinfo[colon + 1..].to_owned(),
+        )
     } else {
         (userinfo.to_owned(), String::new())
     };
@@ -226,9 +231,21 @@ fn parse_url_connstr(url: &str) -> Result<ConnParams, ParseError> {
         (hostport.to_owned(), 5432u16)
     };
 
-    let host = if host.is_empty() { "localhost".to_owned() } else { host };
-    let user = if user.is_empty() { "postgres".to_owned() } else { user };
-    let database = if database.is_empty() { user.clone() } else { database };
+    let host = if host.is_empty() {
+        "localhost".to_owned()
+    } else {
+        host
+    };
+    let user = if user.is_empty() {
+        "postgres".to_owned()
+    } else {
+        user
+    };
+    let database = if database.is_empty() {
+        user.clone()
+    } else {
+        database
+    };
 
     Ok((host, port, user, password, database))
 }
@@ -243,11 +260,11 @@ fn parse_kv_connstr(kv: &str) -> Result<ConnParams, ParseError> {
     for token in kv.split_whitespace() {
         if let Some((k, v)) = token.split_once('=') {
             match k {
-                "host"     => host = v.to_owned(),
-                "port"     => port = v.parse().unwrap_or(5432),
-                "user"     => user = v.to_owned(),
+                "host" => host = v.to_owned(),
+                "port" => port = v.parse().unwrap_or(5432),
+                "user" => user = v.to_owned(),
                 "password" => password = v.to_owned(),
-                "dbname"   => database = v.to_owned(),
+                "dbname" => database = v.to_owned(),
                 _ => {}
             }
         }
@@ -326,7 +343,14 @@ fn parse_relation(body: &[u8]) -> Option<(u32, RelationSchema)> {
         });
     }
 
-    Some((oid, RelationSchema { namespace, table_name, columns }))
+    Some((
+        oid,
+        RelationSchema {
+            namespace,
+            table_name,
+            columns,
+        },
+    ))
 }
 
 async fn parse_and_apply_insert<A: PgStateApplier>(
@@ -525,7 +549,9 @@ impl<'a> Reader<'a> {
     fn read_cstr(&mut self) -> Option<String> {
         let start = self.offset;
         let end = self.data[start..].iter().position(|&b| b == 0)?;
-        let s = std::str::from_utf8(&self.data[start..start + end]).ok()?.to_owned();
+        let s = std::str::from_utf8(&self.data[start..start + end])
+            .ok()?
+            .to_owned();
         self.offset = start + end + 1;
         Some(s)
     }

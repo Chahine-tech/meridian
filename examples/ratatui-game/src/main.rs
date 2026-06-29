@@ -14,25 +14,21 @@
 //! cargo run -p ratatui-game -- --url ws://localhost:3000 --player bob   --token <TOKEN>
 //! ```
 
-use std::{
-    io,
-    sync::Arc,
-    time::Duration,
-};
+use std::{io, sync::Arc, time::Duration};
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use meridian_client::{GCounterHandle, MeridianClient};
 use ratatui::{
+    Terminal,
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, List, ListItem, Paragraph},
-    Terminal,
 };
 use tokio::sync::watch;
 use tracing::info;
@@ -40,44 +36,70 @@ use tracing::info;
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
 struct Args {
-    url:       String,
+    url: String,
     namespace: String,
-    player:    String,
-    token:     String,
+    player: String,
+    token: String,
     /// Other known player names to show on the leaderboard
-    peers:     Vec<String>,
+    peers: Vec<String>,
 }
 
 fn parse_args() -> Args {
     let mut args = std::env::args().skip(1);
-    let mut url       = "ws://localhost:3000".to_owned();
+    let mut url = "ws://localhost:3000".to_owned();
     let mut namespace = "game-room".to_owned();
-    let mut player    = "player1".to_owned();
-    let mut token     = "dev".to_owned();
-    let mut peers     = vec![];
+    let mut player = "player1".to_owned();
+    let mut token = "dev".to_owned();
+    let mut peers = vec![];
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--url"       => { if let Some(v) = args.next() { url = v; } }
-            "--namespace" => { if let Some(v) = args.next() { namespace = v; } }
-            "--player"    => { if let Some(v) = args.next() { player = v; } }
-            "--token"     => { if let Some(v) = args.next() { token = v; } }
-            "--peers"     => { if let Some(v) = args.next() { peers = v.split(',').map(str::to_owned).collect(); } }
+            "--url" => {
+                if let Some(v) = args.next() {
+                    url = v;
+                }
+            }
+            "--namespace" => {
+                if let Some(v) = args.next() {
+                    namespace = v;
+                }
+            }
+            "--player" => {
+                if let Some(v) = args.next() {
+                    player = v;
+                }
+            }
+            "--token" => {
+                if let Some(v) = args.next() {
+                    token = v;
+                }
+            }
+            "--peers" => {
+                if let Some(v) = args.next() {
+                    peers = v.split(',').map(str::to_owned).collect();
+                }
+            }
             _ => {}
         }
     }
 
-    Args { url, namespace, player, token, peers }
+    Args {
+        url,
+        namespace,
+        player,
+        token,
+        peers,
+    }
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────
 
 struct App {
-    client:     Arc<MeridianClient>,
-    my_handle:  GCounterHandle,
+    client: Arc<MeridianClient>,
+    my_handle: GCounterHandle,
     /// (player_name, handle) pairs including self
     all_handles: Vec<(String, GCounterHandle)>,
-    player:     String,
+    player: String,
 }
 
 impl App {
@@ -107,7 +129,8 @@ impl App {
     }
 
     fn leaderboard(&self) -> Vec<(String, u64, bool)> {
-        let mut entries: Vec<(String, u64, bool)> = self.all_handles
+        let mut entries: Vec<(String, u64, bool)> = self
+            .all_handles
             .iter()
             .map(|(name, h)| (name.clone(), h.value(), name == &self.player))
             .collect();
@@ -128,17 +151,25 @@ fn ui(frame: &mut ratatui::Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // title
-            Constraint::Min(0),     // leaderboard
-            Constraint::Length(5),  // my score gauge
-            Constraint::Length(3),  // help bar
+            Constraint::Length(3), // title
+            Constraint::Min(0),    // leaderboard
+            Constraint::Length(5), // my score gauge
+            Constraint::Length(3), // help bar
         ])
         .split(area);
 
     // Title
     let title = Paragraph::new(Line::from(vec![
-        Span::styled("🎮 Meridian Leaderboard ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("({})", app.player), Style::default().fg(Color::Yellow)),
+        Span::styled(
+            "🎮 Meridian Leaderboard ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("({})", app.player),
+            Style::default().fg(Color::Yellow),
+        ),
     ]))
     .alignment(Alignment::Center)
     .block(Block::default().borders(Borders::ALL));
@@ -162,7 +193,9 @@ fn ui(frame: &mut ratatui::Frame, app: &App) {
             let bar = "█".repeat(bar_width) + &"░".repeat(20 - bar_width);
 
             let style = if *is_me {
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
@@ -172,15 +205,22 @@ fn ui(frame: &mut ratatui::Frame, app: &App) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" Leaderboard "));
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Leaderboard "),
+    );
     frame.render_widget(list, chunks[1]);
 
     // My score gauge
     let my_score = app.my_score();
     let ratio = (my_score as f64 / max_score as f64).min(1.0);
     let gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).title(format!(" Your score — {} ", app.player)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" Your score — {} ", app.player)),
+        )
         .gauge_style(Style::default().fg(Color::Green).bg(Color::DarkGray))
         .ratio(ratio)
         .label(format!("{my_score} pts"));
@@ -188,9 +228,19 @@ fn ui(frame: &mut ratatui::Frame, app: &App) {
 
     // Help bar
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(" [Space] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [Space] ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Score a point  "),
-        Span::styled(" [q] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [q] ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Quit"),
     ]))
     .alignment(Alignment::Center)
@@ -238,7 +288,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Subscribe to local score changes → trigger redraw
     let score_tx = redraw_tx.clone();
-    let _guard = app.my_handle.on_change(move |_| { let _ = score_tx.send(()); });
+    let _guard = app.my_handle.on_change(move |_| {
+        let _ = score_tx.send(());
+    });
 
     // Event loop
     let result: Result<(), Box<dyn std::error::Error>> = 'main: loop {
@@ -249,21 +301,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Drain all pending crossterm events (non-blocking)
         while event::poll(Duration::ZERO)? {
             match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
-                            break 'main Ok(());
-                        }
-                        KeyCode::Char(' ') => {
-                            if let Err(e) = app.score().await {
-                                tracing::warn!(error = %e, "failed to send score op");
-                            }
-                            let _ = redraw_tx.send(());
-                        }
-                        _ => {}
+                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                    KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                        break 'main Ok(());
                     }
+                    KeyCode::Char(' ') => {
+                        if let Err(e) = app.score().await {
+                            tracing::warn!(error = %e, "failed to send score op");
+                        }
+                        let _ = redraw_tx.send(());
+                    }
+                    _ => {}
+                },
+                Event::Resize(_, _) => {
+                    let _ = redraw_tx.send(());
                 }
-                Event::Resize(_, _) => { let _ = redraw_tx.send(()); }
                 _ => {}
             }
         }

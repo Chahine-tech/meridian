@@ -2,20 +2,16 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    http::{header, Method, Request, StatusCode},
+    http::{Method, Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use meridian_server::{
+    AppState,
     api::{build_router, ws::SubscriptionManager},
     auth::{AuthState, Permissions, PermissionsV1, TokenClaims, TokenSigner},
-    crdt::{
-        gcounter::GCounterOp,
-        orset::ORSetOp,
-        registry::CrdtOp,
-    },
+    crdt::{gcounter::GCounterOp, orset::ORSetOp, registry::CrdtOp},
     rate_limit::RateLimiter,
     storage::{SledStore, SledWal},
-    AppState,
 };
 use tower::ServiceExt;
 
@@ -51,8 +47,8 @@ fn build_test_app() -> (axum::Router, Arc<TokenSigner>) {
         #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
         cluster: None,
     };
-    let router = build_router(state, auth_state)
-        .layer(axum::extract::Extension(prometheus_handle()));
+    let router =
+        build_router(state, auth_state).layer(axum::extract::Extension(prometheus_handle()));
     (router, signer)
 }
 
@@ -140,7 +136,10 @@ async fn post_op_gcounter_returns_ok() {
     let (app, signer) = build_test_app();
     let token = read_write_token(&signer, "ns");
 
-    let op = CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 10 });
+    let op = CrdtOp::GCounter(GCounterOp {
+        client_id: 1,
+        amount: 10,
+    });
     let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
 
     let response = app
@@ -164,7 +163,10 @@ async fn post_op_then_get_returns_updated_value() {
     let (app, signer) = build_test_app();
     let token = read_write_token(&signer, "ns");
 
-    let op = CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 5 });
+    let op = CrdtOp::GCounter(GCounterOp {
+        client_id: 1,
+        amount: 5,
+    });
     let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
 
     // POST op
@@ -207,7 +209,10 @@ async fn post_op_read_only_token_returns_403() {
     let (app, signer) = build_test_app();
     let token = read_only_token(&signer, "ns");
 
-    let op = CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 });
+    let op = CrdtOp::GCounter(GCounterOp {
+        client_id: 1,
+        amount: 1,
+    });
     let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
 
     let response = app
@@ -240,7 +245,10 @@ async fn post_op_scoped_permission_blocks_wrong_key() {
         }),
     );
 
-    let op = CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 });
+    let op = CrdtOp::GCounter(GCounterOp {
+        client_id: 1,
+        amount: 1,
+    });
     let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
 
     let response = app
@@ -273,7 +281,10 @@ async fn post_op_scoped_permission_allows_matching_key() {
         }),
     );
 
-    let op = CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 });
+    let op = CrdtOp::GCounter(GCounterOp {
+        client_id: 1,
+        amount: 1,
+    });
     let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
 
     let response = app
@@ -325,7 +336,10 @@ async fn history_returns_empty_for_new_crdt() {
     let token = read_write_token(&signer, "ns");
 
     // First write an op so the CRDT exists
-    let op = CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 });
+    let op = CrdtOp::GCounter(GCounterOp {
+        client_id: 1,
+        amount: 1,
+    });
     let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
 
     app.clone()
@@ -412,7 +426,7 @@ async fn orset_add_and_get_returns_element() {
 
 // Permissions V2 — op-mask enforcement
 
-use meridian_server::auth::{op_masks, PermEntry, PermissionsV2};
+use meridian_server::auth::{PermEntry, PermissionsV2, op_masks};
 
 fn make_v2_token(signer: &TokenSigner, ns: &str, client_id: u64, perms: PermissionsV2) -> String {
     make_token(signer, ns, client_id, Permissions::V2(perms))
@@ -437,7 +451,10 @@ async fn v2_op_mask_blocks_disallowed_op() {
     );
 
     use meridian_server::crdt::pncounter::PNCounterOp;
-    let op = CrdtOp::PNCounter(PNCounterOp::Decrement { client_id: 1, amount: 1 });
+    let op = CrdtOp::PNCounter(PNCounterOp::Decrement {
+        client_id: 1,
+        amount: 1,
+    });
     let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
 
     let response = app
@@ -473,7 +490,10 @@ async fn v2_op_mask_allows_permitted_op() {
         },
     );
 
-    let op = CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 5 });
+    let op = CrdtOp::GCounter(GCounterOp {
+        client_id: 1,
+        amount: 5,
+    });
     let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
 
     let response = app
@@ -509,7 +529,10 @@ async fn v2_per_rule_expiry_blocks_write() {
         },
     );
 
-    let op = CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 });
+    let op = CrdtOp::GCounter(GCounterOp {
+        client_id: 1,
+        amount: 1,
+    });
     let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
 
     let response = app
@@ -545,7 +568,10 @@ async fn v2_no_write_rules_blocks_all_writes() {
         },
     );
 
-    let op = CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 });
+    let op = CrdtOp::GCounter(GCounterOp {
+        client_id: 1,
+        amount: 1,
+    });
     let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
 
     let response = app
@@ -566,13 +592,7 @@ async fn v2_no_write_rules_blocks_all_writes() {
 
 // POST /v1/namespaces/:ns/query
 
-async fn post_op_for_query(
-    app: axum::Router,
-    ns: &str,
-    crdt_id: &str,
-    op: CrdtOp,
-    token: &str,
-) {
+async fn post_op_for_query(app: axum::Router, ns: &str, crdt_id: &str, op: CrdtOp, token: &str) {
     let op_bytes = rmp_serde::encode::to_vec_named(&op).unwrap();
     let uri = format!("/v1/namespaces/{ns}/crdts/{crdt_id}/ops");
     let response = app
@@ -626,7 +646,10 @@ async fn post_query_gcounter_sum() {
             app.clone(),
             "ns",
             id,
-            CrdtOp::GCounter(GCounterOp { client_id: 1, amount }),
+            CrdtOp::GCounter(GCounterOp {
+                client_id: 1,
+                amount,
+            }),
             &token,
         )
         .await;
@@ -657,7 +680,10 @@ async fn post_query_count_short_circuit() {
             app.clone(),
             "ns",
             id,
-            CrdtOp::GCounter(GCounterOp { client_id: 1, amount }),
+            CrdtOp::GCounter(GCounterOp {
+                client_id: 1,
+                amount,
+            }),
             &token,
         )
         .await;
@@ -687,7 +713,10 @@ async fn post_query_glob_filter() {
         app.clone(),
         "ns",
         "gc:views-home",
-        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 5 }),
+        CrdtOp::GCounter(GCounterOp {
+            client_id: 1,
+            amount: 5,
+        }),
         &token,
     )
     .await;
@@ -695,7 +724,10 @@ async fn post_query_glob_filter() {
         app.clone(),
         "ns",
         "gc:views-dash",
-        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 8 }),
+        CrdtOp::GCounter(GCounterOp {
+            client_id: 1,
+            amount: 8,
+        }),
         &token,
     )
     .await;
@@ -703,7 +735,10 @@ async fn post_query_glob_filter() {
         app.clone(),
         "ns",
         "pn:score",
-        CrdtOp::PNCounter(PNCounterOp::Increment { client_id: 1, amount: 3 }),
+        CrdtOp::PNCounter(PNCounterOp::Increment {
+            client_id: 1,
+            amount: 3,
+        }),
         &token,
     )
     .await;
@@ -733,7 +768,10 @@ async fn post_query_type_filter() {
         app.clone(),
         "ns",
         "gc:counter",
-        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 7 }),
+        CrdtOp::GCounter(GCounterOp {
+            client_id: 1,
+            amount: 7,
+        }),
         &token,
     )
     .await;
@@ -741,7 +779,10 @@ async fn post_query_type_filter() {
         app.clone(),
         "ns",
         "pn:score",
-        CrdtOp::PNCounter(PNCounterOp::Increment { client_id: 1, amount: 3 }),
+        CrdtOp::PNCounter(PNCounterOp::Increment {
+            client_id: 1,
+            amount: 3,
+        }),
         &token,
     )
     .await;
@@ -835,7 +876,10 @@ async fn post_query_incompatible_aggregate_returns_400() {
         app.clone(),
         "ns",
         "gc:counter",
-        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 5 }),
+        CrdtOp::GCounter(GCounterOp {
+            client_id: 1,
+            amount: 5,
+        }),
         &token,
     )
     .await;
@@ -925,7 +969,9 @@ async fn expect_query_result(
     let deadline = std::time::Duration::from_millis(timeout_ms);
     let result = tokio::time::timeout(deadline, async {
         loop {
-            let frame = ws.next().await
+            let frame = ws
+                .next()
+                .await
                 .expect("WebSocket closed before QueryResult arrived")
                 .expect("WebSocket error");
             let msg = ws_decode(frame);
@@ -953,9 +999,7 @@ async fn assert_no_query_result(
     use meridian_core::protocol::ServerMsg;
 
     let deadline = std::time::Duration::from_millis(timeout_ms);
-    while let Ok(Some(Ok(frame))) =
-        tokio::time::timeout(deadline, ws.next()).await
-    {
+    while let Ok(Some(Ok(frame))) = tokio::time::timeout(deadline, ws.next()).await {
         if matches!(ws_decode(frame), ServerMsg::QueryResult { query_id: id, .. } if id == query_id)
         {
             panic!("unexpected QueryResult(query_id={query_id}) received");
@@ -977,7 +1021,10 @@ async fn ws_live_query_initial_result() {
         app.clone(),
         "ns",
         "gc:hits-a",
-        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 10 }),
+        CrdtOp::GCounter(GCounterOp {
+            client_id: 1,
+            amount: 10,
+        }),
         &token,
     )
     .await;
@@ -985,7 +1032,10 @@ async fn ws_live_query_initial_result() {
         app.clone(),
         "ns",
         "gc:hits-b",
-        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 20 }),
+        CrdtOp::GCounter(GCounterOp {
+            client_id: 1,
+            amount: 20,
+        }),
         &token,
     )
     .await;
@@ -1008,7 +1058,12 @@ async fn ws_live_query_initial_result() {
     // The server pushes a QueryResult immediately on subscribe.
     let frame = ws.next().await.unwrap().unwrap();
     let msg = ws_decode(frame);
-    let ServerMsg::QueryResult { query_id, value, matched } = msg else {
+    let ServerMsg::QueryResult {
+        query_id,
+        value,
+        matched,
+    } = msg
+    else {
         panic!("expected QueryResult, got {msg:?}");
     };
     assert_eq!(query_id, "q1");
@@ -1049,14 +1104,24 @@ async fn ws_live_query_pushed_on_delta() {
         app,
         "ns",
         "gc:score-1",
-        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 42 }),
+        CrdtOp::GCounter(GCounterOp {
+            client_id: 1,
+            amount: 42,
+        }),
         &token,
     )
     .await;
 
     // The server should push a Delta followed by a QueryResult.
     let msg = expect_query_result(&mut ws, "q2", 2_000).await;
-    let ServerMsg::QueryResult { query_id, value, matched } = msg else { unreachable!() };
+    let ServerMsg::QueryResult {
+        query_id,
+        value,
+        matched,
+    } = msg
+    else {
+        unreachable!()
+    };
     assert_eq!(query_id, "q2");
     assert_eq!(matched, 1);
     assert_eq!(value, serde_json::json!(42u64));
@@ -1095,23 +1160,31 @@ async fn ws_live_query_unsubscribe_stops_pushes() {
         app.clone(),
         "ns",
         "gc:unsub-1",
-        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 1 }),
+        CrdtOp::GCounter(GCounterOp {
+            client_id: 1,
+            amount: 1,
+        }),
         &token,
     )
     .await;
     let _ = expect_query_result(&mut ws, "q3", 2_000).await;
 
     // Now unsubscribe.
-    ws.send(ws_encode(&ClientMsg::UnsubscribeQuery { query_id: "q3".into() }))
-        .await
-        .unwrap();
+    ws.send(ws_encode(&ClientMsg::UnsubscribeQuery {
+        query_id: "q3".into(),
+    }))
+    .await
+    .unwrap();
 
     // Apply a second op — the server must NOT push a QueryResult for q3.
     post_op_for_query(
         app,
         "ns",
         "gc:unsub-2",
-        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 2 }),
+        CrdtOp::GCounter(GCounterOp {
+            client_id: 1,
+            amount: 2,
+        }),
         &token,
     )
     .await;
@@ -1169,13 +1242,21 @@ async fn ws_live_query_type_filter_skips_unrelated() {
         app,
         "ns",
         "gc:typed-1",
-        CrdtOp::GCounter(GCounterOp { client_id: 1, amount: 7 }),
+        CrdtOp::GCounter(GCounterOp {
+            client_id: 1,
+            amount: 7,
+        }),
         &token,
     )
     .await;
 
     let msg = expect_query_result(&mut ws, "q4", 2_000).await;
-    let ServerMsg::QueryResult { query_id, matched, .. } = msg else { unreachable!() };
+    let ServerMsg::QueryResult {
+        query_id, matched, ..
+    } = msg
+    else {
+        unreachable!()
+    };
     assert_eq!(query_id, "q4");
     assert_eq!(matched, 1);
 }
@@ -1224,7 +1305,10 @@ async fn token_me_returns_decoded_claims_v2() {
         PermissionsV2 {
             v: 2,
             r: vec![PermEntry::new("*")],
-            w: vec![PermEntry::new("or:cart-{clientId}").with_mask(op_masks::OR_ADD | op_masks::OR_REMOVE)],
+            w: vec![
+                PermEntry::new("or:cart-{clientId}")
+                    .with_mask(op_masks::OR_ADD | op_masks::OR_REMOVE),
+            ],
             admin: false,
             rl: Some(200),
         },

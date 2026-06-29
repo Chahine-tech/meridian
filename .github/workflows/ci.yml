@@ -246,3 +246,26 @@ jobs:
         working-directory: packages/cli
         run: bun run build
 
+  python-sdk:
+    name: Python SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: lint
+        run: uv run ruff check packages/python/src
+
+      - name: format
+        run: uv run ruff format --check packages/python/src
+
+      - name: type check
+        run: uv run ty check packages/python/src
+        continue-on-error: true  # ty is still alpha
+
+      - name: test
+        run: uv run --extra crypto pytest packages/python/ -q
+

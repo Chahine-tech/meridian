@@ -55,7 +55,9 @@ impl Crdt for GCounter {
 
         let mut delta_counters = BTreeMap::new();
         delta_counters.insert(op.client_id, *entry);
-        Ok(Some(GCounterDelta { counters: delta_counters }))
+        Ok(Some(GCounterDelta {
+            counters: delta_counters,
+        }))
     }
 
     fn merge(&mut self, other: &GCounter) {
@@ -130,7 +132,11 @@ mod tests {
     fn make(entries: &[(u64, u64)]) -> GCounter {
         let mut g = GCounter::default();
         for &(id, amt) in entries {
-            g.apply(GCounterOp { client_id: id, amount: amt }).unwrap();
+            g.apply(GCounterOp {
+                client_id: id,
+                amount: amt,
+            })
+            .unwrap();
         }
         g
     }
@@ -192,14 +198,25 @@ mod tests {
     #[test]
     fn delta_apply() {
         let mut g = make(&[(1, 5)]);
-        let delta = g.apply(GCounterOp { client_id: 1, amount: 3 }).unwrap().unwrap();
+        let delta = g
+            .apply(GCounterOp {
+                client_id: 1,
+                amount: 3,
+            })
+            .unwrap()
+            .unwrap();
         assert_eq!(delta.counters[&1], 8);
     }
 
     #[test]
     fn zero_amount_no_delta() {
         let mut g = GCounter::default();
-        let delta = g.apply(GCounterOp { client_id: 1, amount: 0 }).unwrap();
+        let delta = g
+            .apply(GCounterOp {
+                client_id: 1,
+                amount: 0,
+            })
+            .unwrap();
         assert!(delta.is_none());
     }
 }

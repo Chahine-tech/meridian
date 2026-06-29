@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
 use axum::{
-    middleware,
+    Router, middleware,
     routing::{get, post},
-    Router,
 };
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use crate::auth::AuthState;
 
 use super::handlers::{
+    AppStateExt,
     crdt::{get_crdt, get_sync, post_op},
     health::{health_live, health_ready},
     history::get_history,
@@ -17,7 +17,6 @@ use super::handlers::{
     query::post_query,
     sse::get_sse,
     tokens::{issue_token, token_me},
-    AppStateExt,
 };
 use super::ws::ws_upgrade_handler;
 use crate::auth::auth_middleware;
@@ -47,7 +46,10 @@ where
         .route("/v1/namespaces/{ns}/crdts/{id}", get(get_crdt::<S>))
         .route("/v1/namespaces/{ns}/crdts/{id}/ops", post(post_op::<S>))
         .route("/v1/namespaces/{ns}/crdts/{id}/sync", get(get_sync::<S>))
-        .route("/v1/namespaces/{ns}/crdts/{id}/history", get(get_history::<S>))
+        .route(
+            "/v1/namespaces/{ns}/crdts/{id}/history",
+            get(get_history::<S>),
+        )
         .route("/v1/namespaces/{ns}/crdts/{id}/events", get(get_sse::<S>))
         .route("/v1/namespaces/{ns}/query", post(post_query::<S>))
         .route("/v1/namespaces/{ns}/tokens", post(issue_token::<S>))

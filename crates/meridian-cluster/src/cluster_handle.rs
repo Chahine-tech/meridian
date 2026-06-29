@@ -8,17 +8,14 @@ use tracing::{debug, instrument, warn};
 use meridian_storage::WalBackend;
 
 use crate::{
-    anti_entropy::{run_anti_entropy, AntiEntropyApplier},
+    anti_entropy::{AntiEntropyApplier, run_anti_entropy},
     config::ClusterConfig,
     node_id::NodeId,
     transport::{ClusterTransport, DeltaEnvelope},
 };
 
 #[cfg(feature = "transport-http")]
-use crate::{
-    anti_entropy::run_pull_anti_entropy,
-    transport::http_push::HttpPushTransport,
-};
+use crate::{anti_entropy::run_pull_anti_entropy, transport::http_push::HttpPushTransport};
 
 // ClusterHandle needs to call `subscriptions.publish()` but lives in its own
 // crate with no dependency on `meridian-server`. We use a trait to break the
@@ -69,11 +66,7 @@ impl ClusterHandle {
     /// and forwards each received envelope to the local broadcast hub.
     ///
     /// Must be called once at server startup.
-    pub fn spawn_receiver<B: LocalBroadcast>(
-        &self,
-        broadcast: Arc<B>,
-        cancel: CancellationToken,
-    ) {
+    pub fn spawn_receiver<B: LocalBroadcast>(&self, broadcast: Arc<B>, cancel: CancellationToken) {
         let mut stream = self.transport.subscribe_deltas();
         let node_id = self.node_id;
 
@@ -124,13 +117,7 @@ impl ClusterHandle {
         let config = Arc::clone(&self.config);
 
         tokio::spawn(run_pull_anti_entropy(
-            wal,
-            transport,
-            applier,
-            broadcast,
-            node_id,
-            config,
-            cancel,
+            wal, transport, applier, broadcast, node_id, config, cancel,
         ));
     }
 
@@ -156,13 +143,7 @@ impl ClusterHandle {
         let config = Arc::clone(&self.config);
 
         tokio::spawn(run_anti_entropy(
-            wal,
-            applier,
-            broadcast,
-            transport,
-            node_id,
-            config,
-            cancel,
+            wal, applier, broadcast, transport, node_id, config, cancel,
         ));
     }
 }

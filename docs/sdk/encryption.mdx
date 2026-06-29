@@ -1,0 +1,141 @@
+---
+title: E2E Encryption
+description: Encrypt CRDT values client-side — the server stores and forwards ciphertext and never sees plaintext.
+---
+
+Meridian supports **end-to-end encryption** for CRDT values. Encryption and decryption happen entirely in the browser using the Web Crypto API (AES-GCM-256). The server handles CRDT structure (HLC timestamps, node IDs, merge logic) but stores opaque ciphertext for encrypted fields.
+
+## How it works
+
+When you pass an `encryption` map to `MeridianClient.create()`, matching CRDT handles automatically:
+
+1. Encrypt the value with AES-GCM-256 before sending any op
+2. Decrypt incoming deltas before surfacing values to your app
+
+The encrypted wire format is a JSON sentinel object stored in place of the plaintext value:
+
+```json
+{ "$e": 1, "n": "<base64url nonce>", "d": "<base64url ciphertext+tag>" }
+```
+
+The server treats this as an opaque JSON value — it stores, merges, and broadcasts it without modification.
+
+## Supported CRDT types
+
+| CRDT | Encrypted |
+|------|-----------|
+| `LwwRegister` | ✅ value field |
+| `Presence` | ✅ data field |
+| `GCounter` | ❌ numeric merge requires plaintext |
+| `PNCounter` | ❌ numeric merge requires plaintext |
+| `RGA` | ❌ character-level merge requires plaintext |
+| `ORSet` | ❌ see [limitations](#orset-limitation) |
+| `CRDTMap` | ❌ delegates to inner CRDTs |
+
+## Quick start
+
+### 1. Generate or import a key
+
+```ts
+import { generateAesGcmKey, importAesGcmKey } from "meridian-sdk";
+
+// Generate a fresh key (distribute out-of-band to other clients)
+const { key, rawBase64 } = await generateAesGcmKey();
+console.log(rawBase64); // share this with peers
+
+// Import an existing key from a base64url string
+const key = await importAesGcmKey("your-base64url-key-here");
+```
+
+### 2. Pass keys to the client
+
+The `encryption` config is a map from CRDT ID pattern (glob supported) to `CryptoKey`. Any handle whose `crdtId` matches a pattern uses that key.
+
+```ts
+import { Effect } from "effect";
+import { MeridianClient, importAesGcmKey } from "meridian-sdk";
+
+const profileKey = await importAesGcmKey(process.env.PROFILE_KEY!);
+const roomKey    = await importAesGcmKey(process.env.ROOM_KEY!);
+
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "wss://your-server.com",
+    namespace: "my-app",
+    token: myToken,
+    encryption: {
+      "lw:profile": profileKey,   // exact match
+      "pr:room-*":  roomKey,      // glob — matches pr:room-1, pr:room-lobby, …
+    },
+  })
+);
+```
+
+### 3. Use handles normally
+
+No API change — `set()`, `value()`, `heartbeat()`, `online()` all work identically. Encryption is transparent.
+
+```ts
+// LwwRegister — value is encrypted on the wire
+const profile = client.lwwregister("lw:profile");
+profile.set({ name: "Alice", email: "alice@example.com" });
+console.log(profile.value()); // { name: "Alice", email: "…" } — already decrypted
+
+// Presence — data field is encrypted
+const room = client.presence("pr:room-1");
+room.heartbeat({ cursor: { x: 42, y: 100 }, status: "active" }, 30_000);
+console.log(room.online()); // entries with decrypted data
+```
+
+## Key distribution
+
+Meridian does not manage keys. You are responsible for distributing them to clients that need access. Common patterns:
+
+- **Symmetric per-user key** — derive a key from a password or passphrase using PBKDF2, store encrypted under the user's auth token
+- **Per-room key** — generate once, share via your app server's invite flow (e.g. encrypted with the recipient's public key)
+- **Key server** — a separate service that issues keys after verifying access rights
+
+## Glob patterns
+
+The `encryption` map keys support a single `*` wildcard (same syntax as [V2 permission patterns](/sdk/permissions)):
+
+```ts
+encryption: {
+  "lw:*":     secretKey,  // all LWW registers
+  "pr:room-*": roomKey,   // presence channels for rooms
+  "lw:public": undefined, // no entry = not encrypted (plaintext)
+}
+```
+
+Pattern evaluation is first-match-wins in iteration order. Unmatched CRDT IDs are not encrypted.
+
+## ORSet limitation
+
+ORSet cannot be encrypted with AES-GCM because it is **non-deterministic**: encrypting the same element twice (with different random nonces) produces different ciphertexts. Since the server uses the element value as a map key internally, two clients encrypting `"alice"` would create two separate server-side entries — Remove operations could only remove one of them, breaking convergence.
+
+A future release will add ORSet encryption using **deterministic authenticated encryption** (AES-SIV or HMAC-based pseudonymization), which preserves element identity while hiding plaintext from the server.
+
+## What the server can still see
+
+Even with encryption enabled, the server observes:
+
+- **CRDT structure** — timestamps (HLC), client IDs, op ordering, number of ops
+- **Ciphertext size** — reveals approximate plaintext length
+- **Access patterns** — which clients write to which CRDTs and when
+
+For stronger privacy guarantees (hiding access patterns), combine with BFT signing and route traffic through an anonymizing proxy.
+
+## API reference
+
+```ts
+// Generate a new AES-256-GCM key
+generateAesGcmKey(): Promise<{ key: CryptoKey; rawBase64: string }>
+
+// Import a key from raw bytes or a base64url string
+importAesGcmKey(raw: Uint8Array | string): Promise<CryptoKey>
+
+// Low-level primitives (for custom integrations)
+encryptJson(key: CryptoKey, value: unknown): Promise<EncryptedValue>
+decryptJson(key: CryptoKey, enc: EncryptedValue): Promise<unknown>
+isEncryptedValue(v: unknown): v is EncryptedValue
+```

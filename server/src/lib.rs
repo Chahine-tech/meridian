@@ -14,7 +14,10 @@ pub mod webhooks;
 use std::sync::Arc;
 
 use crate::{
-    api::{handlers::AppStateExt, ws::{SubscriptionManager, WsState}},
+    api::{
+        handlers::AppStateExt,
+        ws::{SubscriptionManager, WsState},
+    },
     auth::TokenSigner,
     storage::{CrdtStore, WalBackend},
     webhooks::WebhookDispatcher,

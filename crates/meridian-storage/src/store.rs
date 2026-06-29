@@ -32,11 +32,7 @@ where
     ) -> impl std::future::Future<Output = Result<()>> + Send;
 
     /// Delete a CRDT entry.
-    fn delete(
-        &self,
-        ns: &str,
-        id: &str,
-    ) -> impl std::future::Future<Output = Result<()>> + Send;
+    fn delete(&self, ns: &str, id: &str) -> impl std::future::Future<Output = Result<()>> + Send;
 
     /// Scan all CRDTs whose key starts with `prefix` (e.g. `"my_namespace/"`).
     /// Returns `(full_key, value)` pairs.

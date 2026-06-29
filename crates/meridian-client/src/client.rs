@@ -5,24 +5,24 @@ use meridian_core::{
     crdt::clock::VectorClock,
     protocol::{ClientMsg, LiveQueryPayload, ServerMsg},
 };
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 use crate::{
     error::ClientError,
     handles::{
-        awareness::AwarenessInner,
-        lwwregister::LwwRegisterInner,
-        orset::ORSetInner,
-        presence::PresenceInner,
         AwarenessHandle, GCounterHandle, LwwRegisterHandle, ORSetHandle, PNCounterHandle,
-        PresenceHandle, RgaHandle, TreeHandle,
+        PresenceHandle, RgaHandle, TreeHandle, awareness::AwarenessInner,
+        lwwregister::LwwRegisterInner, orset::ORSetInner, presence::PresenceInner,
     },
     op_queue::OpQueue,
     transport::{ConnectionState, Transport},
 };
+
+#[cfg(feature = "crypto")]
+use crate::crypto::{AesGcmKey, ClientKeypair};
 
 /// Result type for live query pushes.
 #[derive(Debug, Clone)]
@@ -37,28 +37,31 @@ pub struct LiveQueryResult {
 /// All handles returned by `gcounter()`, `orset()`, etc. share the same inner
 /// state via `Arc` — cloning a handle is cheap and safe across tasks.
 pub struct MeridianClient {
-    pub namespace:  String,
-    pub client_id:  u64,
-    transport:      Arc<dyn Transport>,
-    op_queue:       Arc<OpQueue>,
+    pub namespace: String,
+    pub client_id: u64,
+    transport: Arc<dyn Transport>,
+    op_queue: Arc<OpQueue>,
 
     // Handle caches — one Arc<Inner> per crdt_id
-    gc_handles:   DashMap<String, GCounterHandle>,
-    pn_handles:   DashMap<String, PNCounterHandle>,
+    gc_handles: DashMap<String, GCounterHandle>,
+    pn_handles: DashMap<String, PNCounterHandle>,
     // Generic handles: store Arc<Inner> directly; typed handles are reconstructed via from_inner()
-    or_handles:   DashMap<String, Arc<ORSetInner>>,
-    lw_handles:   DashMap<String, Arc<LwwRegisterInner>>,
-    pr_handles:   DashMap<String, Arc<PresenceInner>>,
-    aw_handles:   DashMap<String, Arc<AwarenessInner>>,
-    rga_handles:  DashMap<String, RgaHandle>,
+    or_handles: DashMap<String, Arc<ORSetInner>>,
+    lw_handles: DashMap<String, Arc<LwwRegisterInner>>,
+    pr_handles: DashMap<String, Arc<PresenceInner>>,
+    aw_handles: DashMap<String, Arc<AwarenessInner>>,
+    rga_handles: DashMap<String, RgaHandle>,
     tree_handles: DashMap<String, TreeHandle>,
 
     // Subscription tracking for re-subscribe on reconnect
     subscriptions: DashMap<String, VectorClock>,
 
     // Live query registry: query_id → channel sender
-    live_queries:  DashMap<String, mpsc::Sender<LiveQueryResult>>,
-    lq_counter:    std::sync::atomic::AtomicU64,
+    live_queries: DashMap<String, mpsc::Sender<LiveQueryResult>>,
+    lq_counter: std::sync::atomic::AtomicU64,
+
+    #[cfg(feature = "crypto")]
+    signing_keypair: Option<Arc<ClientKeypair>>,
 }
 
 impl MeridianClient {
@@ -78,6 +81,49 @@ impl MeridianClient {
         Ok(Self::from_transport(namespace, client_id, transport))
     }
 
+    /// Connect with an Ed25519 signing keypair for BFT op signing.
+    #[cfg(all(feature = "ws", feature = "crypto"))]
+    pub async fn connect_signed(
+        url: &str,
+        namespace: &str,
+        token: &str,
+        keypair: ClientKeypair,
+    ) -> Result<Arc<Self>, ClientError> {
+        let transport = crate::transport::ws::WsTransport::connect(url, namespace, token).await?;
+        let client_id = rand::random::<u64>();
+        Ok(Self::from_transport_with_keypair(namespace, client_id, transport, keypair))
+    }
+
+    #[cfg(feature = "crypto")]
+    pub fn from_transport_with_keypair(
+        namespace: &str,
+        client_id: u64,
+        transport: Arc<dyn Transport>,
+        keypair: ClientKeypair,
+    ) -> Arc<Self> {
+        let op_queue = Arc::new(OpQueue::new());
+        let client = Arc::new(Self {
+            namespace: namespace.to_owned(),
+            client_id,
+            transport: Arc::clone(&transport),
+            op_queue,
+            gc_handles: DashMap::new(),
+            pn_handles: DashMap::new(),
+            or_handles: DashMap::new(),
+            lw_handles: DashMap::new(),
+            pr_handles: DashMap::new(),
+            aw_handles: DashMap::new(),
+            rga_handles: DashMap::new(),
+            tree_handles: DashMap::new(),
+            subscriptions: DashMap::new(),
+            live_queries: DashMap::new(),
+            lq_counter: std::sync::atomic::AtomicU64::new(0),
+            signing_keypair: Some(Arc::new(keypair)),
+        });
+        Self::spawn_dispatch(Arc::clone(&client));
+        client
+    }
+
     /// Create a client from an existing transport. Used in tests with `FakeTransport`.
     pub fn from_transport(
         namespace: &str,
@@ -90,17 +136,19 @@ impl MeridianClient {
             client_id,
             transport: Arc::clone(&transport),
             op_queue,
-            gc_handles:    DashMap::new(),
-            pn_handles:    DashMap::new(),
-            or_handles:    DashMap::new(),
-            lw_handles:    DashMap::new(),
-            pr_handles:    DashMap::new(),
-            aw_handles:    DashMap::new(),
-            rga_handles:   DashMap::new(),
-            tree_handles:  DashMap::new(),
+            gc_handles: DashMap::new(),
+            pn_handles: DashMap::new(),
+            or_handles: DashMap::new(),
+            lw_handles: DashMap::new(),
+            pr_handles: DashMap::new(),
+            aw_handles: DashMap::new(),
+            rga_handles: DashMap::new(),
+            tree_handles: DashMap::new(),
             subscriptions: DashMap::new(),
-            live_queries:  DashMap::new(),
-            lq_counter:    std::sync::atomic::AtomicU64::new(0),
+            live_queries: DashMap::new(),
+            lq_counter: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(feature = "crypto")]
+            signing_keypair: None,
         });
         Self::spawn_dispatch(Arc::clone(&client));
         client
@@ -142,10 +190,17 @@ impl MeridianClient {
 
     fn handle_server_msg(&self, msg: ServerMsg) {
         match msg {
-            ServerMsg::Delta { crdt_id, delta_bytes } => {
+            ServerMsg::Delta {
+                crdt_id,
+                delta_bytes,
+            } => {
                 self.apply_delta(&crdt_id, &delta_bytes);
             }
-            ServerMsg::AwarenessBroadcast { client_id, key, data } => {
+            ServerMsg::AwarenessBroadcast {
+                client_id,
+                key,
+                data,
+            } => {
                 if let Some(inner) = self.aw_handles.get(&key) {
                     let h = AwarenessHandle::<serde_json::Value>::from_inner(Arc::clone(&*inner));
                     if let Err(e) = h.apply_broadcast(client_id, &data) {
@@ -153,9 +208,17 @@ impl MeridianClient {
                     }
                 }
             }
-            ServerMsg::QueryResult { query_id, value, matched } => {
+            ServerMsg::QueryResult {
+                query_id,
+                value,
+                matched,
+            } => {
                 if let Some(tx) = self.live_queries.get(&query_id) {
-                    let result = LiveQueryResult { query_id: query_id.clone(), value, matched };
+                    let result = LiveQueryResult {
+                        query_id: query_id.clone(),
+                        value,
+                        matched,
+                    };
                     let _ = tx.try_send(result);
                 }
             }
@@ -218,7 +281,10 @@ impl MeridianClient {
     }
 
     async fn on_reconnect(&self) {
-        debug!("transport reconnected — re-subscribing {} CRDTs", self.subscriptions.len());
+        debug!(
+            "transport reconnected — re-subscribing {} CRDTs",
+            self.subscriptions.len()
+        );
 
         // Re-subscribe to all tracked CRDTs
         for entry in self.subscriptions.iter() {
@@ -231,8 +297,16 @@ impl MeridianClient {
                     continue;
                 }
             };
-            let _ = self.transport.send(ClientMsg::Subscribe { crdt_id: crdt_id.clone() }).await;
-            let _ = self.transport.send(ClientMsg::Sync { crdt_id, since_vc }).await;
+            let _ = self
+                .transport
+                .send(ClientMsg::Subscribe {
+                    crdt_id: crdt_id.clone(),
+                })
+                .await;
+            let _ = self
+                .transport
+                .send(ClientMsg::Sync { crdt_id, since_vc })
+                .await;
         }
 
         // Re-register live queries
@@ -259,28 +333,34 @@ impl MeridianClient {
 
     /// Get or create a GCounterHandle.
     pub fn gcounter(&self, crdt_id: &str) -> GCounterHandle {
-        let h = self.gc_handles
+        let h = self
+            .gc_handles
             .entry(crdt_id.to_owned())
-            .or_insert_with(|| GCounterHandle::new(
-                crdt_id.to_owned(),
-                self.client_id,
-                Arc::clone(&self.transport),
-                Arc::clone(&self.op_queue),
-            ))
+            .or_insert_with(|| {
+                GCounterHandle::new(
+                    crdt_id.to_owned(),
+                    self.client_id,
+                    Arc::clone(&self.transport),
+                    Arc::clone(&self.op_queue),
+                )
+            })
             .clone();
         self.subscribe_crdt(crdt_id);
         h
     }
 
     pub fn pncounter(&self, crdt_id: &str) -> PNCounterHandle {
-        let h = self.pn_handles
+        let h = self
+            .pn_handles
             .entry(crdt_id.to_owned())
-            .or_insert_with(|| PNCounterHandle::new(
-                crdt_id.to_owned(),
-                self.client_id,
-                Arc::clone(&self.transport),
-                Arc::clone(&self.op_queue),
-            ))
+            .or_insert_with(|| {
+                PNCounterHandle::new(
+                    crdt_id.to_owned(),
+                    self.client_id,
+                    Arc::clone(&self.transport),
+                    Arc::clone(&self.op_queue),
+                )
+            })
             .clone();
         self.subscribe_crdt(crdt_id);
         h
@@ -290,7 +370,8 @@ impl MeridianClient {
         &self,
         crdt_id: &str,
     ) -> ORSetHandle<T> {
-        let inner = self.or_handles
+        let inner = self
+            .or_handles
             .entry(crdt_id.to_owned())
             .or_insert_with(|| {
                 ORSetHandle::<serde_json::Value>::new(
@@ -298,7 +379,8 @@ impl MeridianClient {
                     self.client_id,
                     Arc::clone(&self.transport),
                     Arc::clone(&self.op_queue),
-                ).into_inner()
+                )
+                .into_inner()
             })
             .clone();
         self.subscribe_crdt(crdt_id);
@@ -309,15 +391,64 @@ impl MeridianClient {
         &self,
         crdt_id: &str,
     ) -> LwwRegisterHandle<T> {
-        let inner = self.lw_handles
+        let inner = self
+            .lw_handles
             .entry(crdt_id.to_owned())
             .or_insert_with(|| {
-                LwwRegisterHandle::<serde_json::Value>::new(
+                #[cfg(feature = "crypto")]
+                {
+                    LwwRegisterHandle::<serde_json::Value>::new_with_crypto(
+                        crdt_id.to_owned(),
+                        self.client_id,
+                        Arc::clone(&self.transport),
+                        Arc::clone(&self.op_queue),
+                        self.signing_keypair.clone(),
+                        None,
+                        None,
+                    )
+                    .into_inner()
+                }
+                #[cfg(not(feature = "crypto"))]
+                {
+                    LwwRegisterHandle::<serde_json::Value>::new(
+                        crdt_id.to_owned(),
+                        self.client_id,
+                        Arc::clone(&self.transport),
+                        Arc::clone(&self.op_queue),
+                    )
+                    .into_inner()
+                }
+            })
+            .clone();
+        self.subscribe_crdt(crdt_id);
+        LwwRegisterHandle::from_inner(inner)
+    }
+
+    /// Get or create an encrypted LwwRegister handle.
+    ///
+    /// `encrypt_key` encrypts values before sending; `decrypt_key` decrypts incoming deltas.
+    /// Both can be the same key for symmetric encryption.
+    #[cfg(feature = "crypto")]
+    pub fn lwwregister_encrypted<T: DeserializeOwned + Serialize + Send + Sync + 'static>(
+        &self,
+        crdt_id: &str,
+        encrypt_key: Option<AesGcmKey>,
+        decrypt_key: Option<AesGcmKey>,
+    ) -> LwwRegisterHandle<T> {
+        let inner = self
+            .lw_handles
+            .entry(crdt_id.to_owned())
+            .or_insert_with(|| {
+                LwwRegisterHandle::<serde_json::Value>::new_with_crypto(
                     crdt_id.to_owned(),
                     self.client_id,
                     Arc::clone(&self.transport),
                     Arc::clone(&self.op_queue),
-                ).into_inner()
+                    self.signing_keypair.clone(),
+                    encrypt_key.map(Arc::new),
+                    decrypt_key.map(Arc::new),
+                )
+                .into_inner()
             })
             .clone();
         self.subscribe_crdt(crdt_id);
@@ -328,15 +459,61 @@ impl MeridianClient {
         &self,
         crdt_id: &str,
     ) -> PresenceHandle<T> {
-        let inner = self.pr_handles
+        let inner = self
+            .pr_handles
             .entry(crdt_id.to_owned())
             .or_insert_with(|| {
-                PresenceHandle::<serde_json::Value>::new(
+                #[cfg(feature = "crypto")]
+                {
+                    PresenceHandle::<serde_json::Value>::new_with_crypto(
+                        crdt_id.to_owned(),
+                        self.client_id,
+                        Arc::clone(&self.transport),
+                        Arc::clone(&self.op_queue),
+                        self.signing_keypair.clone(),
+                        None,
+                        None,
+                    )
+                    .into_inner()
+                }
+                #[cfg(not(feature = "crypto"))]
+                {
+                    PresenceHandle::<serde_json::Value>::new(
+                        crdt_id.to_owned(),
+                        self.client_id,
+                        Arc::clone(&self.transport),
+                        Arc::clone(&self.op_queue),
+                    )
+                    .into_inner()
+                }
+            })
+            .clone();
+        self.subscribe_crdt(crdt_id);
+        PresenceHandle::from_inner(inner)
+    }
+
+    /// Get or create an encrypted Presence handle.
+    #[cfg(feature = "crypto")]
+    pub fn presence_encrypted<T: DeserializeOwned + Serialize + Send + Sync + 'static>(
+        &self,
+        crdt_id: &str,
+        encrypt_key: Option<AesGcmKey>,
+        decrypt_key: Option<AesGcmKey>,
+    ) -> PresenceHandle<T> {
+        let inner = self
+            .pr_handles
+            .entry(crdt_id.to_owned())
+            .or_insert_with(|| {
+                PresenceHandle::<serde_json::Value>::new_with_crypto(
                     crdt_id.to_owned(),
                     self.client_id,
                     Arc::clone(&self.transport),
                     Arc::clone(&self.op_queue),
-                ).into_inner()
+                    self.signing_keypair.clone(),
+                    encrypt_key.map(Arc::new),
+                    decrypt_key.map(Arc::new),
+                )
+                .into_inner()
             })
             .clone();
         self.subscribe_crdt(crdt_id);
@@ -347,42 +524,50 @@ impl MeridianClient {
         &self,
         key: &str,
     ) -> AwarenessHandle<T> {
-        let inner = self.aw_handles
+        let inner = self
+            .aw_handles
             .entry(key.to_owned())
             .or_insert_with(|| {
                 AwarenessHandle::<serde_json::Value>::new(
                     key.to_owned(),
                     Arc::clone(&self.transport),
                     Arc::clone(&self.op_queue),
-                ).into_inner()
+                )
+                .into_inner()
             })
             .clone();
         AwarenessHandle::from_inner(inner)
     }
 
     pub fn rga(&self, crdt_id: &str) -> RgaHandle {
-        let h = self.rga_handles
+        let h = self
+            .rga_handles
             .entry(crdt_id.to_owned())
-            .or_insert_with(|| RgaHandle::new(
-                crdt_id.to_owned(),
-                self.client_id,
-                Arc::clone(&self.transport),
-                Arc::clone(&self.op_queue),
-            ))
+            .or_insert_with(|| {
+                RgaHandle::new(
+                    crdt_id.to_owned(),
+                    self.client_id,
+                    Arc::clone(&self.transport),
+                    Arc::clone(&self.op_queue),
+                )
+            })
             .clone();
         self.subscribe_crdt(crdt_id);
         h
     }
 
     pub fn tree(&self, crdt_id: &str) -> TreeHandle {
-        let h = self.tree_handles
+        let h = self
+            .tree_handles
             .entry(crdt_id.to_owned())
-            .or_insert_with(|| TreeHandle::new(
-                crdt_id.to_owned(),
-                self.client_id,
-                Arc::clone(&self.transport),
-                Arc::clone(&self.op_queue),
-            ))
+            .or_insert_with(|| {
+                TreeHandle::new(
+                    crdt_id.to_owned(),
+                    self.client_id,
+                    Arc::clone(&self.transport),
+                    Arc::clone(&self.op_queue),
+                )
+            })
             .clone();
         self.subscribe_crdt(crdt_id);
         h
@@ -390,12 +575,10 @@ impl MeridianClient {
 
     /// Subscribe to a live cross-CRDT query.
     /// Returns a `Receiver` that gets a push on each matching CRDT change.
-    pub fn live_query(
-        &self,
-        pattern: &str,
-        aggregate: &str,
-    ) -> mpsc::Receiver<LiveQueryResult> {
-        let seq = self.lq_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    pub fn live_query(&self, pattern: &str, aggregate: &str) -> mpsc::Receiver<LiveQueryResult> {
+        let seq = self
+            .lq_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let query_id = format!("lq-{}-{seq}", self.client_id);
         let (tx, rx) = mpsc::channel(64);
         self.live_queries.insert(query_id.clone(), tx);
@@ -410,7 +593,9 @@ impl MeridianClient {
             },
         };
         let transport = Arc::clone(&self.transport);
-        tokio::spawn(async move { let _ = transport.send(msg).await; });
+        tokio::spawn(async move {
+            let _ = transport.send(msg).await;
+        });
         rx
     }
 
@@ -446,7 +631,10 @@ mod tests {
         score.increment(5).await.unwrap();
         let sent = fh.sent();
         // Subscribe + Op
-        assert!(sent.iter().any(|m| matches!(m, ClientMsg::Op { crdt_id, .. } if crdt_id == "gc:score")));
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, ClientMsg::Op { crdt_id, .. } if crdt_id == "gc:score"))
+        );
     }
 
     #[tokio::test]
@@ -493,6 +681,9 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         let sent = fh.sent();
-        assert!(sent.iter().any(|m| matches!(m, ClientMsg::Subscribe { crdt_id } if crdt_id == "gc:resub")));
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, ClientMsg::Subscribe { crdt_id } if crdt_id == "gc:resub"))
+        );
     }
 }

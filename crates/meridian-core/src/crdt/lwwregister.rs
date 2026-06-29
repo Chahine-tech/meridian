@@ -51,8 +51,12 @@ pub struct LwwValue {
 /// totally ordered and commutative even when two writers share the same HLC and author.
 /// Serialized once per call to avoid redundant allocations on large values.
 fn wins_over(
-    a_hlc: HybridLogicalClock, a_author: u64, a_value: &serde_json::Value,
-    b_hlc: HybridLogicalClock, b_author: u64, b_value: &serde_json::Value,
+    a_hlc: HybridLogicalClock,
+    a_author: u64,
+    a_value: &serde_json::Value,
+    b_hlc: HybridLogicalClock,
+    b_author: u64,
+    b_value: &serde_json::Value,
 ) -> bool {
     match a_hlc.cmp(&b_hlc) {
         std::cmp::Ordering::Greater => true,
@@ -83,13 +87,22 @@ impl Crdt for LwwRegister {
 
         let should_apply = match &self.entry {
             None => true,
-            Some(existing) => wins_over(new_entry.hlc, new_entry.author, &new_entry.value, existing.hlc, existing.author, &existing.value),
+            Some(existing) => wins_over(
+                new_entry.hlc,
+                new_entry.author,
+                &new_entry.value,
+                existing.hlc,
+                existing.author,
+                &existing.value,
+            ),
         };
 
         if should_apply {
             // Store first, then borrow for the delta — avoids a second clone.
             self.entry = Some(new_entry);
-            Ok(Some(LwwDelta { entry: self.entry.clone() }))
+            Ok(Some(LwwDelta {
+                entry: self.entry.clone(),
+            }))
         } else {
             Ok(None) // Stale write — no state change
         }
@@ -123,7 +136,9 @@ impl Crdt for LwwRegister {
                 // If the caller has seen at least this logical count from this author,
                 // they already have this entry.
                 if (e.hlc.logical as u32) > seen_version {
-                    Some(LwwDelta { entry: Some(e.clone()) })
+                    Some(LwwDelta {
+                        entry: Some(e.clone()),
+                    })
                 } else {
                     None
                 }
@@ -133,7 +148,11 @@ impl Crdt for LwwRegister {
 
     fn value(&self) -> LwwValue {
         match &self.entry {
-            None => LwwValue { value: None, updated_at_ms: None, author: None },
+            None => LwwValue {
+                value: None,
+                updated_at_ms: None,
+                author: None,
+            },
             Some(e) => LwwValue {
                 value: Some(e.value.clone()),
                 updated_at_ms: Some(e.hlc.wall_ms),
@@ -152,7 +171,11 @@ mod tests {
     use super::*;
 
     fn hlc(wall_ms: u64, logical: u16, node_id: u64) -> HybridLogicalClock {
-        HybridLogicalClock { wall_ms, logical, node_id }
+        HybridLogicalClock {
+            wall_ms,
+            logical,
+            node_id,
+        }
     }
 
     fn write(wall_ms: u64, logical: u16, author: u64, val: &str) -> LwwOp {
@@ -190,7 +213,10 @@ mod tests {
 
         r.merge(&r2);
         // client 2 has higher author id → wins
-        assert_eq!(r.value().value, Some(JsonValue::String("from_client_2".into())));
+        assert_eq!(
+            r.value().value,
+            Some(JsonValue::String("from_client_2".into()))
+        );
     }
 
     #[test]

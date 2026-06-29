@@ -102,8 +102,17 @@ impl Crdt for Presence {
 
     fn apply(&mut self, op: PresenceOp) -> Result<Option<PresenceDelta>, CrdtError> {
         match op {
-            PresenceOp::Heartbeat { client_id, data, hlc, ttl_ms } => {
-                let new_entry = PresenceEntry { data: Arc::new(data), hlc, ttl_ms };
+            PresenceOp::Heartbeat {
+                client_id,
+                data,
+                hlc,
+                ttl_ms,
+            } => {
+                let new_entry = PresenceEntry {
+                    data: Arc::new(data),
+                    hlc,
+                    ttl_ms,
+                };
 
                 let should_apply = match self.entries.get(&client_id) {
                     None => true,
@@ -163,18 +172,16 @@ impl Crdt for Presence {
     fn merge_delta(&mut self, delta: PresenceDelta) {
         for (client_id, maybe_entry) in delta.changes {
             match maybe_entry {
-                Some(new_entry) => {
-                    match self.entries.get(&client_id) {
-                        None => {
+                Some(new_entry) => match self.entries.get(&client_id) {
+                    None => {
+                        self.entries.insert(client_id, new_entry);
+                    }
+                    Some(existing) => {
+                        if presence_entry_wins(&new_entry, existing) {
                             self.entries.insert(client_id, new_entry);
                         }
-                        Some(existing) => {
-                            if presence_entry_wins(&new_entry, existing) {
-                                self.entries.insert(client_id, new_entry);
-                            }
-                        }
                     }
-                }
+                },
                 None => {
                     // Tombstone broadcast: mark as left (ttl=0) if we have an entry.
                     // We don't remove the entry entirely — we need the tombstone to
@@ -250,7 +257,11 @@ mod tests {
     use super::*;
 
     fn hlc(wall_ms: u64) -> HybridLogicalClock {
-        HybridLogicalClock { wall_ms, logical: 0, node_id: 1 }
+        HybridLogicalClock {
+            wall_ms,
+            logical: 0,
+            node_id: 1,
+        }
     }
 
     fn heartbeat(client_id: u64, wall_ms: u64, ttl_ms: u64) -> PresenceOp {
@@ -296,7 +307,11 @@ mod tests {
     fn leave_expires_immediately() {
         let mut p = Presence::default();
         p.apply(heartbeat(1, 1000, 10000)).unwrap();
-        p.apply(PresenceOp::Leave { client_id: 1, hlc: hlc(2000) }).unwrap();
+        p.apply(PresenceOp::Leave {
+            client_id: 1,
+            hlc: hlc(2000),
+        })
+        .unwrap();
         // ttl=0 → expired at any time >= 2000
         assert!(!p.entries[&1].is_alive(2000));
         assert!(!p.entries[&1].is_alive(2001));

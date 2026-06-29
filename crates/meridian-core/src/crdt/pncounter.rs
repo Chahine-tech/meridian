@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    gcounter::{GCounter, GCounterDelta, GCounterOp},
     Crdt, CrdtError, VectorClock,
+    gcounter::{GCounter, GCounterDelta, GCounterOp},
 };
 
 //
@@ -46,11 +46,17 @@ impl Crdt for PNCounter {
         match op {
             PNCounterOp::Increment { client_id, amount } => {
                 let delta = self.pos.apply(GCounterOp { client_id, amount })?;
-                Ok(delta.map(|d| PNCounterDelta { pos: Some(d), neg: None }))
+                Ok(delta.map(|d| PNCounterDelta {
+                    pos: Some(d),
+                    neg: None,
+                }))
             }
             PNCounterOp::Decrement { client_id, amount } => {
                 let delta = self.neg.apply(GCounterOp { client_id, amount })?;
-                Ok(delta.map(|d| PNCounterDelta { pos: None, neg: Some(d) }))
+                Ok(delta.map(|d| PNCounterDelta {
+                    pos: None,
+                    neg: Some(d),
+                }))
             }
         }
     }
@@ -105,8 +111,14 @@ mod tests {
     #[test]
     fn increment_decrement() {
         let c = make(&[
-            PNCounterOp::Increment { client_id: 1, amount: 10 },
-            PNCounterOp::Decrement { client_id: 1, amount: 3 },
+            PNCounterOp::Increment {
+                client_id: 1,
+                amount: 10,
+            },
+            PNCounterOp::Decrement {
+                client_id: 1,
+                amount: 3,
+            },
         ]);
         assert_eq!(c.value().value, 7);
     }
@@ -114,16 +126,28 @@ mod tests {
     #[test]
     fn can_go_negative() {
         let c = make(&[
-            PNCounterOp::Increment { client_id: 1, amount: 2 },
-            PNCounterOp::Decrement { client_id: 1, amount: 5 },
+            PNCounterOp::Increment {
+                client_id: 1,
+                amount: 2,
+            },
+            PNCounterOp::Decrement {
+                client_id: 1,
+                amount: 5,
+            },
         ]);
         assert_eq!(c.value().value, -3);
     }
 
     #[test]
     fn merge_commutative() {
-        let a = make(&[PNCounterOp::Increment { client_id: 1, amount: 10 }]);
-        let b = make(&[PNCounterOp::Decrement { client_id: 2, amount: 3 }]);
+        let a = make(&[PNCounterOp::Increment {
+            client_id: 1,
+            amount: 10,
+        }]);
+        let b = make(&[PNCounterOp::Decrement {
+            client_id: 2,
+            amount: 3,
+        }]);
 
         let mut ab = a.clone();
         ab.merge(&b);
@@ -138,8 +162,14 @@ mod tests {
     #[test]
     fn merge_idempotent() {
         let mut a = make(&[
-            PNCounterOp::Increment { client_id: 1, amount: 5 },
-            PNCounterOp::Decrement { client_id: 1, amount: 2 },
+            PNCounterOp::Increment {
+                client_id: 1,
+                amount: 5,
+            },
+            PNCounterOp::Decrement {
+                client_id: 1,
+                amount: 2,
+            },
         ]);
         let b = a.clone();
         a.merge(&b);
@@ -148,9 +178,18 @@ mod tests {
 
     #[test]
     fn merge_associative() {
-        let a = make(&[PNCounterOp::Increment { client_id: 1, amount: 1 }]);
-        let b = make(&[PNCounterOp::Decrement { client_id: 2, amount: 2 }]);
-        let c = make(&[PNCounterOp::Increment { client_id: 3, amount: 3 }]);
+        let a = make(&[PNCounterOp::Increment {
+            client_id: 1,
+            amount: 1,
+        }]);
+        let b = make(&[PNCounterOp::Decrement {
+            client_id: 2,
+            amount: 2,
+        }]);
+        let c = make(&[PNCounterOp::Increment {
+            client_id: 3,
+            amount: 3,
+        }]);
 
         let mut ab_c = a.clone();
         ab_c.merge(&b);
@@ -168,10 +207,18 @@ mod tests {
     fn concurrent_inc_dec_both_reflected() {
         // Two clients: one increments, one decrements concurrently.
         let mut a = PNCounter::default();
-        a.apply(PNCounterOp::Increment { client_id: 1, amount: 10 }).unwrap();
+        a.apply(PNCounterOp::Increment {
+            client_id: 1,
+            amount: 10,
+        })
+        .unwrap();
 
         let mut b = PNCounter::default();
-        b.apply(PNCounterOp::Decrement { client_id: 2, amount: 4 }).unwrap();
+        b.apply(PNCounterOp::Decrement {
+            client_id: 2,
+            amount: 4,
+        })
+        .unwrap();
 
         a.merge(&b);
         assert_eq!(a.value().value, 6);

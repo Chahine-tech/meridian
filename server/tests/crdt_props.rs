@@ -8,13 +8,13 @@
 //! Plus type-specific invariants.
 
 use meridian_server::crdt::{
+    Crdt,
     clock::HybridLogicalClock,
     gcounter::{GCounter, GCounterOp},
     lwwregister::{LwwOp, LwwRegister},
     orset::{ORSet, ORSetOp},
     pncounter::{PNCounter, PNCounterOp},
     presence::{Presence, PresenceOp},
-    Crdt,
 };
 use proptest::prelude::*;
 use serde_json::Value as JsonValue;
@@ -23,14 +23,22 @@ use uuid::Uuid;
 // Helpers
 
 fn hlc(wall_ms: u64, logical: u16, node_id: u64) -> HybridLogicalClock {
-    HybridLogicalClock { wall_ms, logical, node_id }
+    HybridLogicalClock {
+        wall_ms,
+        logical,
+        node_id,
+    }
 }
 
 /// Build a GCounter from a list of (client_id, amount) increments.
 fn build_gcounter(ops: &[(u64, u64)]) -> GCounter {
     let mut g = GCounter::default();
     for &(id, amt) in ops {
-        g.apply(GCounterOp { client_id: id, amount: amt }).unwrap();
+        g.apply(GCounterOp {
+            client_id: id,
+            amount: amt,
+        })
+        .unwrap();
     }
     g
 }
@@ -40,9 +48,17 @@ fn build_pncounter(ops: &[(u64, i64)]) -> PNCounter {
     let mut c = PNCounter::default();
     for &(id, amt) in ops {
         if amt >= 0 {
-            c.apply(PNCounterOp::Increment { client_id: id, amount: amt as u64 }).unwrap();
+            c.apply(PNCounterOp::Increment {
+                client_id: id,
+                amount: amt as u64,
+            })
+            .unwrap();
         } else {
-            c.apply(PNCounterOp::Decrement { client_id: id, amount: (-amt) as u64 }).unwrap();
+            c.apply(PNCounterOp::Decrement {
+                client_id: id,
+                amount: (-amt) as u64,
+            })
+            .unwrap();
         }
     }
     c
@@ -184,7 +200,8 @@ fn build_lww(ops: &[(u64, u16, u64, u8)]) -> LwwRegister {
             value: JsonValue::Number(val.into()),
             hlc: hlc(wall_ms, logical, author),
             author,
-        }).unwrap();
+        })
+        .unwrap();
     }
     r
 }
@@ -269,19 +286,30 @@ fn str_val(s: &str) -> JsonValue {
 }
 
 fn orset_add(val: &str) -> ORSetOp {
-    ORSetOp::Add { element: str_val(val), tag: Uuid::new_v4(), node_id: 1, seq: 1 }
+    ORSetOp::Add {
+        element: str_val(val),
+        tag: Uuid::new_v4(),
+        node_id: 1,
+        seq: 1,
+    }
 }
 
 fn orset_remove_all(s: &ORSet, val: &str) -> ORSetOp {
     let key = val.to_string();
     let quoted = format!("\"{}\"", key);
     let known_tags = s.entries.get(&quoted).cloned().unwrap_or_default();
-    ORSetOp::Remove { element: str_val(val), known_tags }
+    ORSetOp::Remove {
+        element: str_val(val),
+        known_tags,
+    }
 }
 
 fn orset_contains(s: &ORSet, val: &str) -> bool {
     let quoted = format!("\"{}\"", val);
-    s.entries.get(&quoted).map(|t| !t.is_empty()).unwrap_or(false)
+    s.entries
+        .get(&quoted)
+        .map(|t| !t.is_empty())
+        .unwrap_or(false)
 }
 
 proptest! {
@@ -367,7 +395,8 @@ fn build_presence(heartbeats: &[(u64, u64, u64)]) -> Presence {
             data: JsonValue::Null,
             hlc: hlc(wall_ms, 0, client_id),
             ttl_ms,
-        }).unwrap();
+        })
+        .unwrap();
     }
     p
 }

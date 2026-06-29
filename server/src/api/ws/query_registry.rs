@@ -38,7 +38,11 @@ impl QueryRegistry {
                 return None;
             }
             // If the query has an explicit type filter, skip if it doesn't match.
-            if payload.crdt_type.as_deref().is_some_and(|s| s.parse::<CrdtType>().ok() != Some(crdt_type)) {
+            if payload
+                .crdt_type
+                .as_deref()
+                .is_some_and(|s| s.parse::<CrdtType>().ok() != Some(crdt_type))
+            {
                 return None;
             }
             Some((id.as_str(), payload))

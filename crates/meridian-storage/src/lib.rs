@@ -1,7 +1,7 @@
 pub mod error;
 pub mod store;
-pub mod wal_backend;
 pub(crate) mod utils;
+pub mod wal_backend;
 
 #[cfg(feature = "storage-sled")]
 pub mod sled;

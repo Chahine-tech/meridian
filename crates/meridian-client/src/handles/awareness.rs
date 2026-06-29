@@ -4,7 +4,7 @@ use std::{
 };
 
 use meridian_core::protocol::ClientMsg;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_bytes::ByteBuf;
 use tokio::sync::watch;
 
@@ -13,35 +13,34 @@ use crate::{codec, error::ClientError, op_queue::OpQueue, transport::Transport};
 #[allow(dead_code)]
 pub(crate) struct AwarenessInner {
     /// Peers: (client_id, raw_data). Does not include self.
-    peers:     Mutex<Vec<(u64, serde_json::Value)>>,
-    watch_tx:  watch::Sender<Vec<(u64, serde_json::Value)>>,
-    key:       String,
+    peers: Mutex<Vec<(u64, serde_json::Value)>>,
+    watch_tx: watch::Sender<Vec<(u64, serde_json::Value)>>,
+    key: String,
     transport: Arc<dyn Transport>,
-    op_queue:  Arc<OpQueue>,
+    op_queue: Arc<OpQueue>,
 }
 
 /// Handle for ephemeral awareness broadcasts (cursors, selections, "is typing").
 /// Not persisted — fire-and-forget fan-out.
 #[derive(Clone)]
 pub struct AwarenessHandle<T> {
-    inner:   Arc<AwarenessInner>,
+    inner: Arc<AwarenessInner>,
     _marker: PhantomData<T>,
 }
 
 impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> AwarenessHandle<T> {
     pub(crate) fn from_inner(inner: Arc<AwarenessInner>) -> Self {
-        Self { inner, _marker: PhantomData }
+        Self {
+            inner,
+            _marker: PhantomData,
+        }
     }
 
     pub(crate) fn into_inner(self) -> Arc<AwarenessInner> {
         self.inner
     }
 
-    pub(crate) fn new(
-        key: String,
-        transport: Arc<dyn Transport>,
-        op_queue: Arc<OpQueue>,
-    ) -> Self {
+    pub(crate) fn new(key: String, transport: Arc<dyn Transport>, op_queue: Arc<OpQueue>) -> Self {
         let (watch_tx, _) = watch::channel(vec![]);
         Self {
             inner: Arc::new(AwarenessInner {
@@ -99,7 +98,11 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> AwarenessHandle<T>
     }
 
     /// Called by the dispatch loop when an `AwarenessBroadcast` arrives.
-    pub(crate) fn apply_broadcast(&self, client_id: u64, data_bytes: &[u8]) -> Result<(), ClientError> {
+    pub(crate) fn apply_broadcast(
+        &self,
+        client_id: u64,
+        data_bytes: &[u8],
+    ) -> Result<(), ClientError> {
         let json_data: serde_json::Value = codec::decode_delta(data_bytes)?;
         let mut peers = self.inner.peers.lock().expect("awareness lock poisoned");
         // Update or insert peer entry
@@ -111,7 +114,12 @@ impl<T: DeserializeOwned + Serialize + Send + Sync + 'static> AwarenessHandle<T>
         let new_val = peers.clone();
         drop(peers);
         let _ = self.inner.watch_tx.send_if_modified(|v| {
-            if *v != new_val { *v = new_val; true } else { false }
+            if *v != new_val {
+                *v = new_val;
+                true
+            } else {
+                false
+            }
         });
         Ok(())
     }

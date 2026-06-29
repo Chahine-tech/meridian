@@ -4,18 +4,15 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::{
-        sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
+        sse::{Event, KeepAlive, Sse},
     },
 };
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::{
-    auth::ClaimsExt,
-    api::ws::protocol::ServerMsg,
-};
+use crate::{api::ws::protocol::ServerMsg, auth::ClaimsExt};
 
 use super::AppStateExt;
 
@@ -45,7 +42,10 @@ pub async fn get_sse<S: AppStateExt>(
         let crdt_id = Arc::clone(&crdt_id);
         match msg {
             Ok(server_msg) => {
-                if let ServerMsg::Delta { crdt_id: ref cid, ref delta_bytes } = *server_msg
+                if let ServerMsg::Delta {
+                    crdt_id: ref cid,
+                    ref delta_bytes,
+                } = *server_msg
                     && cid.as_str() == crdt_id.as_str()
                 {
                     let encoded = STANDARD.encode(delta_bytes.as_ref());

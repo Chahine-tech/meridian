@@ -1,23 +1,17 @@
 use std::time::Instant;
 
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
-use meridian_core::query::{
-    execute_query_on_values, AggregateOp, QueryError, WhereClause,
-};
+use meridian_core::query::{AggregateOp, QueryError, WhereClause, execute_query_on_values};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 use tracing::instrument;
 
-use crate::{
-    api::handlers::AppStateExt,
-    auth::ClaimsExt,
-    storage::CrdtStore,
-};
+use crate::{api::handlers::AppStateExt, auth::ClaimsExt, storage::CrdtStore};
 
 // Request / response types (HTTP layer only)
 
@@ -45,7 +39,10 @@ pub use meridian_core::query::QueryOutcome;
 
 pub enum ExecuteQueryError {
     UnknownCrdtType(String),
-    IncompatibleAggregate { aggregate: String, crdt_type: String },
+    IncompatibleAggregate {
+        aggregate: String,
+        crdt_type: String,
+    },
     Storage(String),
 }
 
@@ -68,13 +65,18 @@ pub async fn execute_query<S: CrdtStore>(
         .map(|(key, val)| (key.trim_start_matches(&format!("{ns}/")).to_owned(), val))
         .collect();
 
-    execute_query_on_values(bare_pairs, from, crdt_type_str, aggregate_op, filter)
-        .map_err(|e| match e {
+    execute_query_on_values(bare_pairs, from, crdt_type_str, aggregate_op, filter).map_err(|e| {
+        match e {
             QueryError::UnknownCrdtType(s) => ExecuteQueryError::UnknownCrdtType(s),
-            QueryError::IncompatibleAggregate { aggregate, crdt_type } => {
-                ExecuteQueryError::IncompatibleAggregate { aggregate, crdt_type }
-            }
-        })
+            QueryError::IncompatibleAggregate {
+                aggregate,
+                crdt_type,
+            } => ExecuteQueryError::IncompatibleAggregate {
+                aggregate,
+                crdt_type,
+            },
+        }
+    })
 }
 
 // HTTP handler

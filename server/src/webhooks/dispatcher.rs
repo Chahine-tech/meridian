@@ -128,8 +128,8 @@ async fn try_deliver(
 /// Computes `HMAC-SHA256(secret, body)` as a lowercase hex string.
 /// Compatible with standard webhook verification in Node, Python, Go, etc.
 pub(crate) fn hmac_signature(secret: &str, body: &str) -> String {
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
-        .expect("HMAC accepts keys of any length");
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts keys of any length");
     mac.update(body.as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }

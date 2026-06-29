@@ -42,5 +42,12 @@ examples/cursors/dist/
 server/src/bin/
 server/data/
 
-
 node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+packages/python/dist/

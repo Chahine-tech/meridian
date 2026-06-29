@@ -31,8 +31,8 @@ pub fn validate(req: &Request, env: &Env) -> Result<TokenClaims, AuthError> {
         .map_err(|_| AuthError::MissingToken)?
         .to_string();
 
-    let signer = TokenSigner::from_hex(&signing_key)
-        .map_err(|e| AuthError::Signing(e.to_string()))?;
+    let signer =
+        TokenSigner::from_hex(&signing_key).map_err(|e| AuthError::Signing(e.to_string()))?;
 
     let token = extract_bearer(req)?;
     signer.verify(&token)
@@ -50,5 +50,6 @@ pub fn auth_error_response(err: &AuthError) -> worker::Response {
     };
 
     let body = serde_json::json!({ "error": message, "code": code }).to_string();
-    worker::Response::error(body, code).unwrap_or_else(|_| worker::Response::error("error", 500).unwrap())
+    worker::Response::error(body, code)
+        .unwrap_or_else(|_| worker::Response::error("error", 500).unwrap())
 }

@@ -43,7 +43,7 @@ export const OpMasks = {
 
 export type OpMask = number;
 
-function globMatch(pattern: string, value: string): boolean {
+export function globMatch(pattern: string, value: string): boolean {
   if (pattern === "*") return true;
   const starPos = pattern.indexOf("*");
   if (starPos === -1) return pattern === value;

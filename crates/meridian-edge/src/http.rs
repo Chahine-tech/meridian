@@ -1,5 +1,7 @@
 use meridian_core::{
-    auth::{Permissions, PermissionsV1, PermissionsV2, PermEntry, op_masks, TokenClaims, TokenSigner},
+    auth::{
+        PermEntry, Permissions, PermissionsV1, PermissionsV2, TokenClaims, TokenSigner, op_masks,
+    },
     crdt::registry::CrdtOp,
     namespace::NamespaceId,
 };
@@ -93,7 +95,11 @@ struct PermEntryDto {
 
 impl From<PermEntryDto> for PermEntry {
     fn from(dto: PermEntryDto) -> Self {
-        Self { p: dto.p, o: dto.o.unwrap_or(op_masks::ALL), e: dto.e }
+        Self {
+            p: dto.p,
+            o: dto.o.unwrap_or(op_masks::ALL),
+            e: dto.e,
+        }
     }
 }
 
@@ -165,7 +171,8 @@ pub async fn get_sync(req: Request, ctx: RouteContext<()>) -> worker::Result<Res
     }
 
     let url = req.url()?;
-    let since = url.query_pairs()
+    let since = url
+        .query_pairs()
         .find(|(k, _)| k == "since")
         .map(|(_, v)| v.into_owned());
 
@@ -175,7 +182,11 @@ pub async fn get_sync(req: Request, ctx: RouteContext<()>) -> worker::Result<Res
     }
 
     let do_req = Request::new(&do_url, worker::Method::Get)?;
-    let do_stub = ctx.env.durable_object("NS_OBJECT")?.id_from_name(&ns)?.get_stub()?;
+    let do_stub = ctx
+        .env
+        .durable_object("NS_OBJECT")?
+        .id_from_name(&ns)?
+        .get_stub()?;
     do_stub.fetch_with_request(do_req).await
 }
 
@@ -193,26 +204,41 @@ async fn webhook_do_stub(
         Err(e) => return Ok(Some(crate::auth::auth_error_response(&e))),
     };
     if claims.namespace != ns || !claims.is_admin() {
-        return Ok(Some(Response::error("forbidden: admin permission required", 403)?));
+        return Ok(Some(Response::error(
+            "forbidden: admin permission required",
+            403,
+        )?));
     }
     Ok(None)
 }
 
 pub async fn list_webhooks(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
     let ns = ctx.param("ns").cloned().unwrap_or_default();
-    if let Some(r) = webhook_do_stub(&req, &ctx, &ns).await? { return Ok(r); }
+    if let Some(r) = webhook_do_stub(&req, &ctx, &ns).await? {
+        return Ok(r);
+    }
 
-    let do_stub = ctx.env.durable_object("NS_OBJECT")?.id_from_name(&ns)?.get_stub()?;
+    let do_stub = ctx
+        .env
+        .durable_object("NS_OBJECT")?
+        .id_from_name(&ns)?
+        .get_stub()?;
     let do_req = Request::new(&format!("http://do/{ns}/webhooks"), worker::Method::Get)?;
     do_stub.fetch_with_request(do_req).await
 }
 
 pub async fn register_webhook(mut req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
     let ns = ctx.param("ns").cloned().unwrap_or_default();
-    if let Some(r) = webhook_do_stub(&req, &ctx, &ns).await? { return Ok(r); }
+    if let Some(r) = webhook_do_stub(&req, &ctx, &ns).await? {
+        return Ok(r);
+    }
 
     let body = req.bytes().await?;
-    let do_stub = ctx.env.durable_object("NS_OBJECT")?.id_from_name(&ns)?.get_stub()?;
+    let do_stub = ctx
+        .env
+        .durable_object("NS_OBJECT")?
+        .id_from_name(&ns)?
+        .get_stub()?;
     let do_req = Request::new_with_init(
         &format!("http://do/{ns}/webhooks"),
         worker::RequestInit::new()
@@ -225,9 +251,15 @@ pub async fn register_webhook(mut req: Request, ctx: RouteContext<()>) -> worker
 pub async fn delete_webhook(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
     let ns = ctx.param("ns").cloned().unwrap_or_default();
     let id = ctx.param("id").cloned().unwrap_or_default();
-    if let Some(r) = webhook_do_stub(&req, &ctx, &ns).await? { return Ok(r); }
+    if let Some(r) = webhook_do_stub(&req, &ctx, &ns).await? {
+        return Ok(r);
+    }
 
-    let do_stub = ctx.env.durable_object("NS_OBJECT")?.id_from_name(&ns)?.get_stub()?;
+    let do_stub = ctx
+        .env
+        .durable_object("NS_OBJECT")?
+        .id_from_name(&ns)?
+        .get_stub()?;
     let do_req = Request::new(
         &format!("http://do/{ns}/webhooks/{id}"),
         worker::Method::Delete,
@@ -251,7 +283,11 @@ pub async fn get_history(req: Request, ctx: RouteContext<()>) -> worker::Result<
     let url = req.url()?;
     let query = url.query().unwrap_or_default().to_owned();
     // Percent-encode the crdt_id for use in the internal DO URL query param.
-    let encoded_id = id.replace('%', "%25").replace('&', "%26").replace('=', "%3D").replace('+', "%2B");
+    let encoded_id = id
+        .replace('%', "%25")
+        .replace('&', "%26")
+        .replace('=', "%3D")
+        .replace('+', "%2B");
     let do_url = format!("http://do/{ns}/history?crdt_id={encoded_id}&{query}");
     let do_req = Request::new(&do_url, worker::Method::Get)?;
 
@@ -341,8 +377,8 @@ pub async fn issue_token(mut req: Request, ctx: RouteContext<()>) -> worker::Res
         .map_err(|_| worker::Error::RustError("MERIDIAN_SIGNING_KEY not set".into()))?
         .to_string();
 
-    let signer = TokenSigner::from_hex(&signing_key)
-        .map_err(|e| worker::Error::RustError(e.to_string()))?;
+    let signer =
+        TokenSigner::from_hex(&signing_key).map_err(|e| worker::Error::RustError(e.to_string()))?;
 
     let perms: Permissions = if let Some(v2) = body.rules {
         Permissions::V2(PermissionsV2 {

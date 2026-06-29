@@ -28,10 +28,20 @@ uuid       = { version = "1", features = ["v4"] }
 thiserror  = "2"
 tracing    = "0.1"
 rand       = "0.8"
+base64     = "0.22"
+
+# Crypto (optional — feature = "crypto")
+aes-gcm       = { version = "=0.10.3", optional = true }
+ed25519-dalek = { version = "=2.2.0", features = ["rand_core"], optional = true }
+
+# HTTP (optional — feature = "http")
+reqwest = { version = "=0.12.28", features = ["json", "rustls-tls"], default-features = false, optional = true }
 
 [features]
 default = ["ws"]
-ws = ["dep:tokio-tungstenite", "dep:futures-util"]
+ws     = ["dep:tokio-tungstenite", "dep:futures-util"]
+crypto = ["dep:aes-gcm", "dep:ed25519-dalek"]
+http   = ["dep:reqwest"]
 
 [dev-dependencies]
 tokio-test          = "0.4"

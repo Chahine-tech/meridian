@@ -3,17 +3,17 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json, Response},
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Deserialize;
 use tracing::instrument;
 
 use crate::{
     auth::ClaimsExt,
     crdt::{
-        clock::now_ms,
-        ops::{apply_op_atomic, ApplyError},
-        registry::{validate_clock_drift, CrdtOp},
         VectorClock,
+        clock::now_ms,
+        ops::{ApplyError, apply_op_atomic},
+        registry::{CrdtOp, validate_clock_drift},
     },
     metrics,
     storage::Store,
@@ -107,7 +107,6 @@ pub async fn post_op<S: AppStateExt>(
     };
 
     if let Some(ref bytes) = delta_bytes {
-
         metrics::record_op(&ns, &id, "http");
 
         if let Some(dispatcher) = state.webhooks() {
@@ -129,7 +128,9 @@ pub async fn post_op<S: AppStateExt>(
         // Fan-out delta to peer nodes via cluster transport (best-effort).
         #[cfg(any(feature = "cluster", feature = "cluster-http"))]
         if let Some(cluster) = state.cluster() {
-            cluster.on_delta(&ns, &id, bytes::Bytes::from(bytes.clone())).await;
+            cluster
+                .on_delta(&ns, &id, bytes::Bytes::from(bytes.clone()))
+                .await;
         }
 
         axum::response::Response::builder()

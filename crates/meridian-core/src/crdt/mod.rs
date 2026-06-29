@@ -16,11 +16,11 @@ pub use lwwregister::LwwRegister;
 pub use orset::ORSet;
 pub use pncounter::PNCounter;
 pub use presence::Presence;
-pub use registry::{CrdtValue, VersionedOp, OP_VERSION};
+pub use registry::{CrdtValue, OP_VERSION, VersionedOp};
 pub use rga::{Rga, RgaDelta, RgaOp};
 pub use tree::{TreeCrdt, TreeDelta, TreeOp};
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
 #[derive(Debug, Error)]

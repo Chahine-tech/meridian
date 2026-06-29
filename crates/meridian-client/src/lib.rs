@@ -26,6 +26,12 @@ pub mod transport;
 mod client;
 mod handles;
 
+pub mod crypto;
+pub mod auth;
+
+#[cfg(feature = "http")]
+pub mod http;
+
 pub use client::{LiveQueryResult, MeridianClient};
 pub use error::ClientError;
 pub use handles::{
@@ -33,3 +39,6 @@ pub use handles::{
     PresenceHandle, RgaHandle, TreeHandle,
 };
 pub use transport::{ConnectionState, Transport};
+
+#[cfg(feature = "crypto")]
+pub use crypto::{AesGcmKey, ClientKeypair};

@@ -1,13 +1,10 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 
 use crate::crdt::clock::now_ms;
 
-use super::{
-    claims::TokenClaims,
-    error::AuthError,
-};
+use super::{claims::TokenClaims, error::AuthError};
 
 /// Signs and verifies Meridian tokens using ed25519.
 ///
@@ -30,20 +27,26 @@ impl TokenSigner {
     pub fn from_bytes(seed: &[u8; 32]) -> Self {
         let signing_key = SigningKey::from_bytes(seed);
         let verifying_key = signing_key.verifying_key();
-        Self { signing_key, verifying_key }
+        Self {
+            signing_key,
+            verifying_key,
+        }
     }
 
     /// Generate a fresh random keypair (for dev/testing).
     pub fn generate() -> Self {
         let signing_key = SigningKey::generate(&mut OsRng);
         let verifying_key = signing_key.verifying_key();
-        Self { signing_key, verifying_key }
+        Self {
+            signing_key,
+            verifying_key,
+        }
     }
 
     /// Construct from a hex-encoded 32-byte secret seed.
     pub fn from_hex(hex: &str) -> Result<Self, AuthError> {
-        let bytes = hex::decode(hex)
-            .map_err(|e| AuthError::Signing(format!("invalid hex: {e}")))?;
+        let bytes =
+            hex::decode(hex).map_err(|e| AuthError::Signing(format!("invalid hex: {e}")))?;
         let arr: [u8; 32] = bytes
             .try_into()
             .map_err(|_| AuthError::Signing("seed must be exactly 32 bytes".into()))?;
@@ -69,15 +72,11 @@ impl TokenSigner {
     /// 2. ed25519 signature (constant-time)
     /// 3. Expiry (`claims.expires_at > now_ms()`)
     pub fn verify(&self, token: &str) -> Result<TokenClaims, AuthError> {
-        let (payload_b64, sig_b64) = token
-            .split_once('.')
-            .ok_or(AuthError::InvalidFormat)?;
+        let (payload_b64, sig_b64) = token.split_once('.').ok_or(AuthError::InvalidFormat)?;
 
         // Decode signature
         let sig_bytes = URL_SAFE_NO_PAD.decode(sig_b64)?;
-        let sig_arr: [u8; 64] = sig_bytes
-            .try_into()
-            .map_err(|_| AuthError::InvalidFormat)?;
+        let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| AuthError::InvalidFormat)?;
         let signature = Signature::from_bytes(&sig_arr);
 
         // Verify (constant-time)
@@ -141,7 +140,10 @@ mod tests {
         payload[0] ^= 0xff; // flip first byte
         let tampered = format!("{}.{sig_b64}", URL_SAFE_NO_PAD.encode(&payload));
 
-        assert!(matches!(s.verify(&tampered), Err(AuthError::SignatureInvalid)));
+        assert!(matches!(
+            s.verify(&tampered),
+            Err(AuthError::SignatureInvalid)
+        ));
     }
 
     #[test]
@@ -152,6 +154,7 @@ mod tests {
             client_id: 1,
             expires_at: 1, // epoch + 1ms
             permissions: Permissions::read_write(),
+            client_pubkey: None,
         };
         let token = s.sign(&claims).unwrap();
         assert!(matches!(s.verify(&token), Err(AuthError::Expired { .. })));
@@ -160,7 +163,10 @@ mod tests {
     #[test]
     fn missing_dot_rejected() {
         let s = signer();
-        assert!(matches!(s.verify("nodothere"), Err(AuthError::InvalidFormat)));
+        assert!(matches!(
+            s.verify("nodothere"),
+            Err(AuthError::InvalidFormat)
+        ));
     }
 
     #[test]
@@ -168,7 +174,10 @@ mod tests {
         let s1 = signer();
         let s2 = signer();
         let token = s1.sign(&valid_claims()).unwrap();
-        assert!(matches!(s2.verify(&token), Err(AuthError::SignatureInvalid)));
+        assert!(matches!(
+            s2.verify(&token),
+            Err(AuthError::SignatureInvalid)
+        ));
     }
 
     #[test]

@@ -56,7 +56,10 @@ mod tests {
             if client.get(probe.as_str()).send().await.is_ok() {
                 return;
             }
-            assert!(std::time::Instant::now() < deadline, "server did not start within 2s");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "server did not start within 2s"
+            );
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }
@@ -120,11 +123,17 @@ mod tests {
             .send()
             .await
             .unwrap();
-        assert!(resp.status().is_success(), "handler should return 200 even for self-messages");
+        assert!(
+            resp.status().is_success(),
+            "handler should return 200 even for self-messages"
+        );
 
         // Nothing should arrive on the stream.
         let result = tokio::time::timeout(Duration::from_millis(200), stream_b.next()).await;
-        assert!(result.is_err(), "self-originating delta should be silently dropped");
+        assert!(
+            result.is_err(),
+            "self-originating delta should be silently dropped"
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -207,6 +216,9 @@ mod tests {
         let envelope = make_envelope(50, "ns", "crdt", b"bytes");
         let result = transport.broadcast_delta(envelope).await;
 
-        assert!(result.is_err(), "should return error when all peers are unreachable");
+        assert!(
+            result.is_err(),
+            "should return error when all peers are unreachable"
+        );
     }
 }

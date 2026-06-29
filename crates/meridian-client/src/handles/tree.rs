@@ -1,12 +1,12 @@
 use std::sync::{Arc, Mutex};
 
 use meridian_core::{
-    crdt::{
-        clock::{now_ms, HybridLogicalClock},
-        tree::{DiscardedMove, TreeCrdt, TreeDelta, TreeNodeValue, TreeOp},
-        Crdt,
-    },
     crdt::registry::{CrdtOp, VersionedOp},
+    crdt::{
+        Crdt,
+        clock::{HybridLogicalClock, now_ms},
+        tree::{DiscardedMove, TreeCrdt, TreeDelta, TreeNodeValue, TreeOp},
+    },
     protocol::ClientMsg,
 };
 use tokio::sync::watch;
@@ -15,12 +15,12 @@ use crate::{codec, error::ClientError, op_queue::OpQueue, transport::Transport};
 
 #[allow(dead_code)]
 pub(crate) struct TreeInner {
-    state:     Mutex<TreeCrdt>,
-    watch_tx:  watch::Sender<Vec<TreeNodeValue>>,
-    crdt_id:   String,
+    state: Mutex<TreeCrdt>,
+    watch_tx: watch::Sender<Vec<TreeNodeValue>>,
+    crdt_id: String,
     client_id: u64,
     transport: Arc<dyn Transport>,
-    op_queue:  Arc<OpQueue>,
+    op_queue: Arc<OpQueue>,
 }
 
 /// Live handle to a Tree CRDT (Kleppmann et al. move-operation algorithm).
@@ -142,25 +142,34 @@ impl TreeHandle {
         }
         let versioned = VersionedOp::new(CrdtOp::Tree(op));
         let op_bytes = codec::encode_op(&versioned)?;
-        self.0.transport.send(ClientMsg::Op {
-            crdt_id: self.0.crdt_id.clone(),
-            op_bytes,
-            ttl_ms: None,
-            client_seq: None,
-        }).await
+        self.0
+            .transport
+            .send(ClientMsg::Op {
+                crdt_id: self.0.crdt_id.clone(),
+                op_bytes,
+                ttl_ms: None,
+                client_seq: None,
+                sig: None,
+            })
+            .await
     }
 
     fn notify(&self, state: &TreeCrdt) {
         let roots = state.value().roots;
         let _ = self.0.watch_tx.send_if_modified(|v| {
-            if *v == roots { return false; }
+            if *v == roots {
+                return false;
+            }
             *v = roots;
             true
         });
     }
 
     /// Called by the dispatch loop for incoming deltas.
-    pub(crate) fn apply_delta(&self, delta_bytes: &[u8]) -> Result<Vec<DiscardedMove>, ClientError> {
+    pub(crate) fn apply_delta(
+        &self,
+        delta_bytes: &[u8],
+    ) -> Result<Vec<DiscardedMove>, ClientError> {
         let delta: TreeDelta = codec::decode_delta(delta_bytes)?;
         let discarded = delta.discarded_moves.clone();
         let mut state = self.0.state.lock().expect("tree lock poisoned");

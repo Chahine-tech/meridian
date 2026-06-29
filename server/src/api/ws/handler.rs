@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Path, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::{IntoResponse, Response},
 };
@@ -12,15 +12,15 @@ use tracing::{debug, info, warn};
 
 use meridian_core::protocol::BatchItem;
 
-use meridian_core::query::{infer_crdt_type, AggregateOp, WhereClause};
+use meridian_core::query::{AggregateOp, WhereClause, infer_crdt_type};
 
 use crate::{
     api::handlers::{ExecuteQueryError, query::execute_query},
     auth::ClaimsExt,
     crdt::{
         clock::now_ms,
-        ops::{apply_op_atomic, ApplyError},
-        registry::{validate_clock_drift, CrdtOp},
+        ops::{ApplyError, apply_op_atomic},
+        registry::{CrdtOp, validate_clock_drift},
     },
     metrics,
     storage::{CrdtStore, Store},
@@ -32,6 +32,23 @@ use super::{
     query_registry::QueryRegistry,
     subscription::SubscriptionManager,
 };
+
+/// Verify an Ed25519 signature over `op_bytes` using the 32-byte public key
+/// stored in the token claims. Returns `true` if the signature is valid.
+fn verify_op_sig(pubkey_bytes: &[u8], op_bytes: &[u8], sig_bytes: &[u8]) -> bool {
+    use ed25519_dalek::{Signature, VerifyingKey};
+    let Ok(pk_arr): Result<[u8; 32], _> = pubkey_bytes.try_into() else {
+        return false;
+    };
+    let Ok(vk) = VerifyingKey::from_bytes(&pk_arr) else {
+        return false;
+    };
+    let Ok(sig_arr): Result<[u8; 64], _> = sig_bytes.try_into() else {
+        return false;
+    };
+    let sig = Signature::from_bytes(&sig_arr);
+    vk.verify_strict(op_bytes, &sig).is_ok()
+}
 
 // AppState subset (injected via State — avoids circular dependency on AppState)
 
@@ -82,7 +99,13 @@ where
 
 // Per-connection loop
 
-async fn handle_socket<S: WsState>(mut socket: WebSocket, ns: String, client_id: u64, claims: TokenClaims, state: S) {
+async fn handle_socket<S: WsState>(
+    mut socket: WebSocket,
+    ns: String,
+    client_id: u64,
+    claims: TokenClaims,
+    state: S,
+) {
     // Subscribe to namespace broadcast channel.
     let mut broadcast_rx = state.subscriptions().subscribe(&ns);
 
@@ -189,7 +212,16 @@ async fn push_live_query_result<S: CrdtStore>(
         }
     };
 
-    match execute_query(store, ns, &payload.from, payload.crdt_type.as_deref(), agg_op, filter.as_ref()).await {
+    match execute_query(
+        store,
+        ns,
+        &payload.from,
+        payload.crdt_type.as_deref(),
+        agg_op,
+        filter.as_ref(),
+    )
+    .await
+    {
         Ok(outcome) => {
             let msg = ServerMsg::QueryResult {
                 query_id: query_id.to_owned(),
@@ -246,13 +278,22 @@ async fn handle_client_message<S: WsState>(
         ClientMsg::Subscribe { crdt_id } => {
             debug!(ns, client_id, crdt_id, "subscribed");
             // No explicit per-crdt subscribe needed — all deltas in ns are broadcast together.
-            let ack = ServerMsg::Ack { seq: *seq, client_seq: None };
+            let ack = ServerMsg::Ack {
+                seq: *seq,
+                client_seq: None,
+            };
             if let Ok(b) = ack.to_msgpack() {
                 let _ = socket.send(Message::Binary(b.into())).await;
             }
         }
 
-        ClientMsg::Op { crdt_id, op_bytes, ttl_ms, client_seq } => {
+        ClientMsg::Op {
+            crdt_id,
+            op_bytes,
+            ttl_ms,
+            client_seq,
+            sig,
+        } => {
             let op: CrdtOp = match rmp_serde::decode::from_slice(&op_bytes) {
                 Ok(o) => o,
                 Err(e) => {
@@ -261,6 +302,25 @@ async fn handle_client_message<S: WsState>(
                     return true;
                 }
             };
+
+            // BFT signature verification: if the token embeds a client public key,
+            // every op must carry a valid Ed25519 signature over op_bytes.
+            if let Some(pubkey) = &claims.client_pubkey {
+                match &sig {
+                    Some(sig_bytes)
+                        if verify_op_sig(pubkey.as_ref(), &op_bytes, sig_bytes.as_ref()) => {}
+                    Some(_) => {
+                        warn!(client_id, crdt_id, "invalid BFT op signature");
+                        send_error(socket, 401, "invalid op signature").await;
+                        return true;
+                    }
+                    None => {
+                        warn!(client_id, crdt_id, "missing BFT op signature");
+                        send_error(socket, 401, "op signature required").await;
+                        return true;
+                    }
+                }
+            }
 
             // Single permission check: V1 uses key-level glob, V2 uses op-level mask.
             if !claims.can_write_key_op(&crdt_id, op.op_mask()) {
@@ -292,17 +352,25 @@ async fn handle_client_message<S: WsState>(
                     // Fan-out delta to peer nodes via cluster transport (best-effort).
                     #[cfg(any(feature = "cluster", feature = "cluster-http"))]
                     if let Some(cluster) = state.cluster() {
-                        cluster.on_delta(ns, &crdt_id, bytes::Bytes::from(delta_bytes)).await;
+                        cluster
+                            .on_delta(ns, &crdt_id, bytes::Bytes::from(delta_bytes))
+                            .await;
                     }
 
-                    let ack = ServerMsg::Ack { seq: *seq, client_seq };
+                    let ack = ServerMsg::Ack {
+                        seq: *seq,
+                        client_seq,
+                    };
                     if let Ok(b) = ack.to_msgpack() {
                         let _ = socket.send(Message::Binary(b.into())).await;
                     }
                 }
                 Ok(None) => {
                     // Op was a no-op (stale / idempotent) — still ack.
-                    let ack = ServerMsg::Ack { seq: *seq, client_seq };
+                    let ack = ServerMsg::Ack {
+                        seq: *seq,
+                        client_seq,
+                    };
                     if let Ok(b) = ack.to_msgpack() {
                         let _ = socket.send(Message::Binary(b.into())).await;
                     }
@@ -326,14 +394,53 @@ async fn handle_client_message<S: WsState>(
 
             let server_now = now_ms();
 
-            struct Parsed { crdt_id: String, op: CrdtOp, ttl_ms: Option<u64> }
+            struct Parsed {
+                crdt_id: String,
+                op: CrdtOp,
+                ttl_ms: Option<u64>,
+            }
             let mut parsed: Vec<Parsed> = Vec::with_capacity(ops.len());
-            for BatchItem { crdt_id, op_bytes, ttl_ms } in ops {
+            for BatchItem {
+                crdt_id,
+                op_bytes,
+                ttl_ms,
+                sig,
+            } in ops
+            {
+                // BFT signature check per-item in the batch.
+                if let Some(pubkey) = &claims.client_pubkey {
+                    match &sig {
+                        Some(sig_bytes)
+                            if verify_op_sig(pubkey.as_ref(), &op_bytes, sig_bytes.as_ref()) => {}
+                        Some(_) => {
+                            warn!(client_id, crdt_id, "invalid BFT sig in batch");
+                            send_error(
+                                socket,
+                                401,
+                                &format!("batch: invalid op signature for {crdt_id}"),
+                            )
+                            .await;
+                            return true;
+                        }
+                        None => {
+                            warn!(client_id, crdt_id, "missing BFT sig in batch");
+                            send_error(
+                                socket,
+                                401,
+                                &format!("batch: op signature required for {crdt_id}"),
+                            )
+                            .await;
+                            return true;
+                        }
+                    }
+                }
+
                 let op: CrdtOp = match rmp_serde::decode::from_slice(&op_bytes) {
                     Ok(o) => o,
                     Err(e) => {
                         warn!(error = %e, crdt_id, "batch: malformed CrdtOp");
-                        send_error(socket, 400, &format!("batch: malformed op for {crdt_id}")).await;
+                        send_error(socket, 400, &format!("batch: malformed op for {crdt_id}"))
+                            .await;
                         return true;
                     }
                 };
@@ -343,10 +450,19 @@ async fn handle_client_message<S: WsState>(
                 }
                 // Single permission check: V1 uses key-level glob, V2 uses op-level mask.
                 if !claims.can_write_key_op(&crdt_id, op.op_mask()) {
-                    send_error(socket, 403, &format!("batch: op not permitted on {crdt_id}")).await;
+                    send_error(
+                        socket,
+                        403,
+                        &format!("batch: op not permitted on {crdt_id}"),
+                    )
+                    .await;
                     return true;
                 }
-                parsed.push(Parsed { crdt_id, op, ttl_ms });
+                parsed.push(Parsed {
+                    crdt_id,
+                    op,
+                    ttl_ms,
+                });
             }
 
             let mut delta_count = 0usize;
@@ -355,7 +471,8 @@ async fn handle_client_message<S: WsState>(
             let mut cluster_deltas: Vec<(String, bytes::Bytes)> = Vec::new();
 
             for item in parsed {
-                match apply_op_atomic(state.store(), ns, &item.crdt_id, item.op, item.ttl_ms).await {
+                match apply_op_atomic(state.store(), ns, &item.crdt_id, item.op, item.ttl_ms).await
+                {
                     Ok(Some(delta_bytes)) => {
                         *seq += 1;
                         delta_count += 1;
@@ -371,7 +488,10 @@ async fn handle_client_message<S: WsState>(
                         }
 
                         #[cfg(any(feature = "cluster", feature = "cluster-http"))]
-                        cluster_deltas.push((item.crdt_id.clone(), bytes::Bytes::from(delta_bytes.clone())));
+                        cluster_deltas.push((
+                            item.crdt_id.clone(),
+                            bytes::Bytes::from(delta_bytes.clone()),
+                        ));
 
                         broadcast_msgs.push(Arc::new(ServerMsg::Delta {
                             crdt_id: item.crdt_id,
@@ -391,7 +511,7 @@ async fn handle_client_message<S: WsState>(
                     }
                 }
             }
-            
+
             for msg in broadcast_msgs {
                 state.subscriptions().publish(ns, msg);
             }
@@ -403,7 +523,11 @@ async fn handle_client_message<S: WsState>(
                 }
             }
 
-            let ack = ServerMsg::BatchAck { seq: *seq, count: delta_count, client_seq };
+            let ack = ServerMsg::BatchAck {
+                seq: *seq,
+                count: delta_count,
+                client_seq,
+            };
             if let Ok(b) = ack.to_msgpack() {
                 let _ = socket.send(Message::Binary(b.into())).await;
             }
@@ -436,13 +560,19 @@ async fn handle_client_message<S: WsState>(
             match state.store().get(ns, &crdt_id).await {
                 Ok(Some(crdt)) => {
                     if let Ok(Some(delta_bytes)) = crdt.delta_since_msgpack(&vc) {
-                        let msg = ServerMsg::Delta { crdt_id, delta_bytes: delta_bytes.into() };
+                        let msg = ServerMsg::Delta {
+                            crdt_id,
+                            delta_bytes: delta_bytes.into(),
+                        };
                         if let Ok(b) = msg.to_msgpack() {
                             let _ = socket.send(Message::Binary(b.into())).await;
                         }
                     } else {
                         // Up to date — send empty ack
-                        let ack = ServerMsg::Ack { seq: *seq, client_seq: None };
+                        let ack = ServerMsg::Ack {
+                            seq: *seq,
+                            client_seq: None,
+                        };
                         if let Ok(b) = ack.to_msgpack() {
                             let _ = socket.send(Message::Binary(b.into())).await;
                         }
@@ -473,8 +603,61 @@ async fn handle_client_message<S: WsState>(
 }
 
 async fn send_error(socket: &mut WebSocket, code: u16, message: &str) {
-    let err = ServerMsg::Error { code, message: message.to_owned() };
+    let err = ServerMsg::Error {
+        code,
+        message: message.to_owned(),
+    };
     if let Ok(b) = err.to_msgpack() {
         let _ = socket.send(Message::Binary(b.into())).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::verify_op_sig;
+    use ed25519_dalek::{Signature, Signer, SigningKey};
+
+    fn make_key() -> SigningKey {
+        SigningKey::from_bytes(&[0x42u8; 32])
+    }
+
+    #[test]
+    fn valid_signature_accepted() {
+        let sk = make_key();
+        let msg = b"op_bytes_payload";
+        let sig: Signature = sk.sign(msg);
+        let vk = sk.verifying_key();
+        assert!(verify_op_sig(vk.as_bytes(), msg, sig.to_bytes().as_ref()));
+    }
+
+    #[test]
+    fn tampered_message_rejected() {
+        let sk = make_key();
+        let msg = b"op_bytes_payload";
+        let sig: Signature = sk.sign(msg);
+        let vk = sk.verifying_key();
+        assert!(!verify_op_sig(vk.as_bytes(), b"tampered_payload", sig.to_bytes().as_ref()));
+    }
+
+    #[test]
+    fn wrong_key_rejected() {
+        let sk = make_key();
+        let other_sk = SigningKey::from_bytes(&[0x99u8; 32]);
+        let msg = b"op_bytes_payload";
+        let sig: Signature = sk.sign(msg);
+        let wrong_vk = other_sk.verifying_key();
+        assert!(!verify_op_sig(wrong_vk.as_bytes(), msg, sig.to_bytes().as_ref()));
+    }
+
+    #[test]
+    fn bad_pubkey_length_rejected() {
+        assert!(!verify_op_sig(&[0u8; 16], b"msg", &[0u8; 64]));
+    }
+
+    #[test]
+    fn bad_sig_length_rejected() {
+        let sk = make_key();
+        let vk = sk.verifying_key();
+        assert!(!verify_op_sig(vk.as_bytes(), b"msg", &[0u8; 32]));
     }
 }

@@ -14,12 +14,12 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use meridian_core::crdt::{
+    Crdt, HybridLogicalClock,
     gcounter::{GCounter, GCounterOp},
     lwwregister::{LwwOp, LwwRegister},
     orset::{ORSet, ORSetOp},
     pncounter::{PNCounter, PNCounterOp},
     rga::{Rga, RgaOp},
-    Crdt, HybridLogicalClock,
 };
 
 // Arbitrary generators
@@ -106,7 +106,10 @@ proptest! {
 // PNCounter
 
 #[derive(Debug, Clone)]
-enum PNOp { Inc(u64, u64), Dec(u64, u64) }
+enum PNOp {
+    Inc(u64, u64),
+    Dec(u64, u64),
+}
 
 fn arb_pn_op() -> impl Strategy<Value = PNOp> {
     prop_oneof![
@@ -119,8 +122,20 @@ fn apply_pn_ops(ops: &[PNOp]) -> PNCounter {
     let mut c = PNCounter::default();
     for op in ops {
         match op {
-            PNOp::Inc(cid, amt) => { c.apply(PNCounterOp::Increment { client_id: *cid, amount: *amt }).unwrap(); }
-            PNOp::Dec(cid, amt) => { c.apply(PNCounterOp::Decrement { client_id: *cid, amount: *amt }).unwrap(); }
+            PNOp::Inc(cid, amt) => {
+                c.apply(PNCounterOp::Increment {
+                    client_id: *cid,
+                    amount: *amt,
+                })
+                .unwrap();
+            }
+            PNOp::Dec(cid, amt) => {
+                c.apply(PNCounterOp::Decrement {
+                    client_id: *cid,
+                    amount: *amt,
+                })
+                .unwrap();
+            }
         }
     }
     c
@@ -159,9 +174,14 @@ fn apply_lww_ops(ops: &[(u64, u64, u16, u64, String)]) -> LwwRegister {
     for (wall_ms, node_id, logical, author, val) in ops {
         r.apply(LwwOp {
             value: JsonValue::String(val.clone()),
-            hlc: HybridLogicalClock { wall_ms: *wall_ms, logical: *logical, node_id: *node_id },
+            hlc: HybridLogicalClock {
+                wall_ms: *wall_ms,
+                logical: *logical,
+                node_id: *node_id,
+            },
             author: *author,
-        }).unwrap();
+        })
+        .unwrap();
     }
     r
 }
