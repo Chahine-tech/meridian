@@ -14,6 +14,8 @@
   <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024" />
   <a href="https://www.npmjs.com/package/meridian-sdk"><img src="https://img.shields.io/npm/dw/meridian-sdk" alt="meridian-sdk downloads" /></a>
   <a href="https://www.npmjs.com/package/meridian-react"><img src="https://img.shields.io/npm/dw/meridian-react" alt="meridian-react downloads" /></a>
+  <a href="https://crates.io/crates/meridian-client"><img src="https://img.shields.io/crates/v/meridian-client" alt="meridian-client on crates.io" /></a>
+  <a href="https://pypi.org/project/meridian-crdt"><img src="https://img.shields.io/pypi/v/meridian-crdt" alt="meridian-crdt on PyPI" /></a>
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
 </p>
 
@@ -101,6 +103,44 @@ cursors.update({ x: 120, y: 80 });
 cursors.onChange(peers => console.log("live cursors:", peers));
 
 client.close();
+```
+
+### Python
+
+```bash
+pip install meridian-crdt
+# With AES-GCM-256 encryption + Ed25519 signing:
+pip install "meridian-crdt[crypto]"
+```
+
+```python
+import asyncio
+from meridian import MeridianClient
+
+async def main():
+    async with MeridianClient("ws://localhost:3000", namespace="my-room", token=token) as client:
+        views = await client.gcounter("gc:views")
+        await views.increment(1)
+        print("views:", views.value())
+
+        register = await client.lww_register("lw:title")
+        await register.set("Hello world")
+        register.on_change(lambda v: print("title:", v))
+
+asyncio.run(main())
+```
+
+With encryption:
+
+```python
+from meridian import MeridianClient
+from meridian.crypto import AesGcmKey
+
+key = AesGcmKey.generate()
+
+async with MeridianClient(...) as client:
+    register = await client.lww_register_encrypted("lw:secret", encrypt_key=key, decrypt_key=key)
+    await register.set({"message": "top secret"})
 ```
 
 ### Rust
@@ -296,6 +336,12 @@ See [`crates/meridian-edge/`](crates/meridian-edge/) for full setup.
 | [`meridian-react`](packages/sdk-react) | React hooks — `useGCounter`, `usePresence`, `useAwareness`, etc. |
 | [`meridian-devtools`](packages/devtools) | Devtools panel — CRDT inspector, event stream, WAL history, op latency P50/P99 |
 | [`meridian-cli`](packages/cli) | CLI — `meridian inspect` and `meridian replay` for terminal-based debugging |
+
+**Python**
+
+| Package | Description |
+|---------|-------------|
+| [`meridian-crdt`](packages/python) | Python SDK — asyncio-native, all 8 CRDT handles, optional AES-GCM-256 encryption and Ed25519 signing (`pip install meridian-crdt[crypto]`) |
 
 **Rust crates**
 
