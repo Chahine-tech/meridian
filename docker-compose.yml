@@ -6,6 +6,7 @@
 
 services:
   meridian:
+    image: ${MERIDIAN_IMAGE:-ghcr.io/chahine-tech/meridian:latest}
     build:
       context: .
       args:

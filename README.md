@@ -40,6 +40,62 @@ curl -X POST http://localhost:3000/v1/namespaces/my-room/tokens \
   -d '{"client_id": 1, "ttl_ms": 3600000}'
 ```
 
+## Self-host
+
+### 1 — Generate a signing key
+
+```bash
+openssl rand -hex 32
+# → e.g. a3f8c2...  (save this — it signs all client tokens)
+```
+
+### 2 — Choose a deployment mode
+
+The pre-built image (`ghcr.io/chahine-tech/meridian`, `linux/amd64` + `linux/arm64`) is used by default — no local Rust build needed. Set `MERIDIAN_IMAGE=local` to build from source instead.
+
+| Mode | Command | When to use |
+|------|---------|-------------|
+| **Single-node** (sled) | `docker compose up -d` | Dev, small teams, no external deps |
+| **PostgreSQL** | `docker compose --profile pg up -d` | Persistent SQL storage, pg-sync |
+| **Cluster** (3 nodes + Redis) | `docker compose -f docker-compose.cluster.yml up -d` | High availability, horizontal scale |
+
+```bash
+# Single-node — embedded sled storage, zero deps
+cp .env.example .env
+# Fill in MERIDIAN_SIGNING_KEY in .env, then:
+docker compose up -d
+
+# PostgreSQL mode
+MERIDIAN_FEATURES=pg-sync \
+DATABASE_URL=postgres://meridian:meridian@localhost/meridian \
+docker compose --profile pg up -d
+
+# 3-node cluster with Redis
+MERIDIAN_SIGNING_KEY=<your-key> \
+docker compose -f docker-compose.cluster.yml up -d
+```
+
+### 3 — Issue a token for your app
+
+Tokens are signed locally — no HTTP call needed:
+
+```bash
+# From source
+cargo run --example gen_demo_token -- <MERIDIAN_SIGNING_KEY> <client_id>
+```
+
+Then pass the token to the SDK:
+
+```ts
+const client = await Effect.runPromise(
+  MeridianClient.create({ url: "http://localhost:3000", namespace: "my-room", token })
+);
+```
+
+All configuration variables are documented in the [Configuration](#configuration) table below.
+
+---
+
 ## Usage
 
 ### React
