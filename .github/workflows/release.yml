@@ -158,12 +158,21 @@ jobs:
           path: ${{ matrix.artifact }}
 
   docker:
-    name: Docker image
+    name: Docker image (${{ matrix.variant }})
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - variant: sled
+            features: ""
+            suffix: ""
+          - variant: cluster
+            features: cluster
+            suffix: -cluster
     steps:
       - uses: actions/checkout@v4
 
@@ -182,19 +191,20 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+            type=semver,pattern={{version}}${{ matrix.suffix }}
+            type=semver,pattern={{major}}.{{minor}}${{ matrix.suffix }}
+            type=raw,value=latest${{ matrix.suffix }}
 
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
+          build-args: FEATURES=${{ matrix.features }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 
   publish-python-sdk:
     name: Publish Python SDK to PyPI

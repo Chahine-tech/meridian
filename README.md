@@ -51,7 +51,12 @@ openssl rand -hex 32
 
 ### 2 — Choose a deployment mode
 
-The pre-built image (`ghcr.io/chahine-tech/meridian`, `linux/amd64` + `linux/arm64`) is used by default — no local Rust build needed. Set `MERIDIAN_IMAGE=local` to build from source instead.
+Two pre-built images are published on every `v*` release (`linux/amd64` + `linux/arm64`) — no local Rust build needed:
+
+| Image | Features | Use with |
+|-------|----------|----------|
+| `ghcr.io/chahine-tech/meridian:latest` | sled storage | `docker compose up` |
+| `ghcr.io/chahine-tech/meridian:latest-cluster` | sled + Redis cluster | `docker compose -f docker-compose.cluster.yml up` |
 
 | Mode | Command | When to use |
 |------|---------|-------------|
