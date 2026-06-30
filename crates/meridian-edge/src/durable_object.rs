@@ -248,7 +248,7 @@ impl DurableObject for NsObject {
                     .unwrap_or(None)
                     .unwrap_or_else(|| CrdtValue::new(crdt_type));
 
-                let delta_bytes = match apply_op(&mut value, op) {
+                let (delta_bytes, _conflict) = match apply_op(&mut value, op) {
                     Ok(d) => d,
                     Err(e) => {
                         let err = ServerMsg::Error {
@@ -406,7 +406,7 @@ impl DurableObject for NsObject {
                         .unwrap_or(None)
                         .unwrap_or_else(|| CrdtValue::new(crdt_type));
 
-                    if let Ok(Some(delta)) = apply_op(&mut value, item.op.clone()) {
+                    if let Ok((Some(delta), _)) = apply_op(&mut value, item.op.clone()) {
                         let _ = self.save_crdt(&item.crdt_id, &value).await;
                         delta_count += 1;
                         let msg = ServerMsg::Delta {
@@ -706,7 +706,7 @@ impl NsObject {
             .await?
             .unwrap_or_else(|| CrdtValue::new(crdt_type));
 
-        let delta_bytes =
+        let (delta_bytes, _conflict) =
             apply_op(&mut value, op).map_err(|e| worker::Error::RustError(e.to_string()))?;
 
         self.save_crdt(&crdt_id, &value).await?;

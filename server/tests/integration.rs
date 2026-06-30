@@ -9,7 +9,7 @@ use meridian_server::{
     AppState,
     api::{build_router, ws::SubscriptionManager},
     auth::{AuthState, Permissions, PermissionsV1, TokenClaims, TokenSigner},
-    crdt::{gcounter::GCounterOp, orset::ORSetOp, registry::CrdtOp},
+    crdt::{ClientRegistry, gcounter::GCounterOp, orset::ORSetOp, registry::CrdtOp},
     rate_limit::RateLimiter,
     storage::{SledStore, SledWal},
 };
@@ -43,6 +43,7 @@ fn build_test_app() -> (axum::Router, Arc<TokenSigner>) {
         wal,
         subscriptions: Arc::new(SubscriptionManager::new()),
         signer: Arc::clone(&signer),
+        client_registry: Arc::new(ClientRegistry::new()),
         webhooks: None,
         #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
         cluster: None,

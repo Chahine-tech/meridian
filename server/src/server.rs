@@ -11,7 +11,7 @@ use crate::{
     api::build_router,
     api::ws::SubscriptionManager,
     auth::{AuthState, TokenSigner},
-    crdt::registry::CrdtValue,
+    crdt::{ClientRegistry, registry::CrdtValue},
     rate_limit::RateLimiter,
     storage::{CrdtStore, Store, WalBackend},
     tasks::{run_crdt_compactor, run_presence_gc, run_snapshot_flusher, run_wal_compactor},
@@ -262,11 +262,14 @@ where
     #[cfg(not(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync")))]
     let _ = &subscriptions; // suppress unused warning in single-node builds
 
+    let client_registry = Arc::new(ClientRegistry::new());
+
     let state = AppState {
         store: Arc::clone(&store),
         wal: Arc::clone(&wal),
         subscriptions: Arc::clone(&subscriptions),
         signer: Arc::clone(&signer),
+        client_registry: Arc::clone(&client_registry),
         webhooks,
         #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
         cluster,
@@ -286,7 +289,11 @@ where
         cancel.clone(),
     ));
 
-    let crdt_compact_handle = tokio::spawn(run_crdt_compactor(Arc::clone(&store), cancel.clone()));
+    let crdt_compact_handle = tokio::spawn(run_crdt_compactor(
+        Arc::clone(&store),
+        Arc::clone(&client_registry),
+        cancel.clone(),
+    ));
 
     let router = build_router(state, auth_state).layer(Extension(prometheus_handle));
 

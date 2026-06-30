@@ -941,6 +941,27 @@ export class MeridianClient {
       return;
     }
 
+    if ("Conflict" in msg) {
+      const { crdt_id, kind } = msg.Conflict;
+      if ("LwwOverwritten" in kind) {
+        const lwHandle = this.lwHandles.get(crdt_id);
+        lwHandle?.applyConflict(kind.LwwOverwritten.winning_client_id, kind.LwwOverwritten.winning_ts_ms);
+      }
+      // Tree conflicts (TreeMoveCycle) are already embedded in the delta's
+      // discarded_moves field and handled by TreeHandle.applyDelta.
+      return;
+    }
+
+    if ("UndoAck" in msg) {
+      this.lwHandles.get(msg.UndoAck.crdt_id)?.applyUndoAck();
+      return;
+    }
+
+    if ("UndoSkipped" in msg) {
+      this.lwHandles.get(msg.UndoSkipped.crdt_id)?.applyUndoSkipped(msg.UndoSkipped.reason);
+      return;
+    }
+
     if ("Delta" in msg) {
       const { crdt_id, delta_bytes } = msg.Delta;
       void this.applyDelta(crdt_id, delta_bytes, true);

@@ -1,5 +1,7 @@
 import { RGAHandle } from "../crdt/rga.js";
 import { TreeHandle } from "../crdt/tree.js";
+import { ORSetHandle } from "../crdt/orset.js";
+import { PNCounterHandle } from "../crdt/pncounter.js";
 import type {
   UndoBatch,
   UndoEntry,
@@ -8,12 +10,15 @@ import type {
   TreeDeleteEntry,
   TreeMoveEntry,
   TreeUpdateEntry,
+  OrSetAddEntry,
+  PNCounterIncrEntry,
+  PNCounterDecrEntry,
 } from "./types.js";
 
 const MAX_STACK_DEPTH = 100;
 const RGA_DEBOUNCE_MS = 250;
 
-type SupportedHandle = RGAHandle | TreeHandle;
+type SupportedHandle = RGAHandle | TreeHandle | ORSetHandle<unknown> | PNCounterHandle;
 
 /**
  * CRDT-aware per-client undo/redo manager.
@@ -234,6 +239,66 @@ export class UndoManager<H extends SupportedHandle> {
     this.clearRedo();
   }
 
+  // ─── ORSet handle proxy methods ──────────────────────────────────────────────
+
+  /**
+   * Add an element to the OR-Set and record the undo entry.
+   *
+   * The returned tag UUID is stored in the undo stack. Undo sends
+   * `removeByTag(element, tag)` which removes only this specific add —
+   * concurrent adds of the same value from other clients are left intact.
+   */
+  orsetAdd<T>(element: T, ttlMs?: number): string {
+    const handle = this.asORSet<T>();
+    const tag = handle.add(element, ttlMs);
+    const entry: OrSetAddEntry = {
+      kind: "orset_add",
+      crdtId: handle.id,
+      elementJson: JSON.stringify(element),
+      tag,
+    };
+    this.record(entry);
+    this.clearRedo();
+    return tag;
+  }
+
+  /**
+   * Remove an element from the OR-Set. NOT tracked for undo — the tags that
+   * existed at removal time are irrecoverably lost (same semantics as RGA delete).
+   */
+  orsetRemove<T>(element: T, ttlMs?: number): void {
+    this.asORSet<T>().remove(element, ttlMs);
+    this.clearRedo();
+  }
+
+  // ─── PNCounter handle proxy methods ─────────────────────────────────────────
+
+  /** Increment the counter and record an undo entry (inverse = decrement). */
+  pnIncrement(amount: number = 1, ttlMs?: number): void {
+    const handle = this.asPNCounter();
+    handle.increment(amount, ttlMs);
+    const entry: PNCounterIncrEntry = {
+      kind: "pncounter_incr",
+      crdtId: handle.id,
+      amount,
+    };
+    this.record(entry);
+    this.clearRedo();
+  }
+
+  /** Decrement the counter and record an undo entry (inverse = increment). */
+  pnDecrement(amount: number = 1, ttlMs?: number): void {
+    const handle = this.asPNCounter();
+    handle.decrement(amount, ttlMs);
+    const entry: PNCounterDecrEntry = {
+      kind: "pncounter_decr",
+      crdtId: handle.id,
+      amount,
+    };
+    this.record(entry);
+    this.clearRedo();
+  }
+
   // ─── Internal ────────────────────────────────────────────────────────────────
 
   private applyInverse(entry: UndoEntry): UndoEntry | null {
@@ -303,6 +368,35 @@ export class UndoManager<H extends SupportedHandle> {
         };
         return inverse;
       }
+
+      case "orset_add": {
+        // Undo: remove the exact tag — does not affect concurrent adds.
+        const element = JSON.parse(entry.elementJson) as unknown;
+        this.asORSet().removeByTag(element, entry.tag);
+        // The inverse of removeByTag is not representable as an UndoEntry because
+        // the tag is now gone and cannot be re-added with the same UUID.
+        return null;
+      }
+
+      case "pncounter_incr": {
+        this.asPNCounter().decrement(entry.amount);
+        const inverse: PNCounterDecrEntry = {
+          kind: "pncounter_decr",
+          crdtId: entry.crdtId,
+          amount: entry.amount,
+        };
+        return inverse;
+      }
+
+      case "pncounter_decr": {
+        this.asPNCounter().increment(entry.amount);
+        const inverse: PNCounterIncrEntry = {
+          kind: "pncounter_incr",
+          crdtId: entry.crdtId,
+          amount: entry.amount,
+        };
+        return inverse;
+      }
     }
   }
 
@@ -360,6 +454,20 @@ export class UndoManager<H extends SupportedHandle> {
   private asTree(): TreeHandle {
     if (!(this.handle instanceof TreeHandle)) {
       throw new Error("UndoManager: handle is not a TreeHandle");
+    }
+    return this.handle;
+  }
+
+  private asORSet<T = unknown>(): ORSetHandle<T> {
+    if (!(this.handle instanceof ORSetHandle)) {
+      throw new Error("UndoManager: handle is not an ORSetHandle");
+    }
+    return this.handle as ORSetHandle<T>;
+  }
+
+  private asPNCounter(): PNCounterHandle {
+    if (!(this.handle instanceof PNCounterHandle)) {
+      throw new Error("UndoManager: handle is not a PNCounterHandle");
     }
     return this.handle;
   }

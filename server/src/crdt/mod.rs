@@ -7,3 +7,7 @@ pub use meridian_core::crdt::{
 
 // Server-only: atomic apply (glues core logic + storage layer)
 pub mod ops;
+
+// Server-only: per-namespace client VectorClock registry for precise GC.
+pub mod client_registry;
+pub use client_registry::ClientRegistry;

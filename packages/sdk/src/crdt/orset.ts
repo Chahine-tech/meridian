@@ -32,6 +32,9 @@ export class ORSetHandle<T> {
     this.schema = opts.schema ?? null;
   }
 
+  /** The CRDT ID this handle is bound to. */
+  get id(): string { return this.crdtId; }
+
   /** Returns the current set elements as an array, decoded via the optional schema. */
   elements(): T[] {
     return Array.from(this.tags.keys())
@@ -71,8 +74,12 @@ export class ORSetHandle<T> {
    *
    * Each call generates a unique tag so concurrent adds of the same value
    * are treated as distinct entries.
+   *
+   * Returns the UUID tag string — pass it to `UndoManager.orsetAdd()` or
+   * to `removeByTag()` to undo exactly this add without affecting concurrent
+   * adds of the same value from other clients.
    */
-  add(element: T, ttlMs?: number): void {
+  add(element: T, ttlMs?: number): string {
     const tag = crypto.randomUUID();
     const key = JSON.stringify(element);
 
@@ -85,6 +92,35 @@ export class ORSetHandle<T> {
       Op: {
         crdt_id: this.crdtId,
         op_bytes: encode({ ORSet: { Add: { element, tag: uuidToBytes(tag) } } }),
+        ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+      },
+    });
+
+    return tag;
+  }
+
+  /**
+   * Removes a specific add by its tag UUID — the inverse of a single `add()` call.
+   *
+   * Unlike `remove(element)` which removes all locally-observed copies, this
+   * removes only the exact add identified by `tag`. Concurrent adds of the same
+   * value from other clients are left intact — correct OR-Set add-wins semantics.
+   *
+   * Primarily used by `UndoManager` to undo an `add()`.
+   */
+  removeByTag(element: T, tag: string, ttlMs?: number): void {
+    const key = JSON.stringify(element);
+    const tagSet = this.tags.get(key);
+    if (tagSet?.has(tag)) {
+      tagSet.delete(tag);
+      if (tagSet.size === 0) this.tags.delete(key);
+      this.emit();
+    }
+
+    this.transport.send({
+      Op: {
+        crdt_id: this.crdtId,
+        op_bytes: encode({ ORSet: { Remove: { element, known_tags: [uuidToBytes(tag)] } } }),
         ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
       },
     });

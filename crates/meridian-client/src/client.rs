@@ -228,6 +228,11 @@ impl MeridianClient {
             ServerMsg::Ack { .. } | ServerMsg::BatchAck { .. } => {
                 // Latency tracking could be added here
             }
+            ServerMsg::Conflict { .. }
+            | ServerMsg::UndoAck { .. }
+            | ServerMsg::UndoSkipped { .. } => {
+                // Handled by higher-level SDK layers; ignored here.
+            }
         }
     }
 
