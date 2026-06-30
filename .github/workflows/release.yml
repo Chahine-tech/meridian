@@ -173,6 +173,9 @@ jobs:
           - variant: cluster
             features: cluster
             suffix: -cluster
+          - variant: pg
+            features: pg-sync
+            suffix: -pg
     steps:
       - uses: actions/checkout@v4
 

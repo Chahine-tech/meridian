@@ -12,12 +12,29 @@ All configuration is via environment variables.
 | `MERIDIAN_SIGNING_KEY` | *(random)* | 64-char hex ed25519 seed (32 bytes) |
 | `MERIDIAN_WEBHOOK_URL` | *(unset)* | HTTP endpoint to receive webhook events |
 | `MERIDIAN_WEBHOOK_SECRET` | *(unset)* | Secret for `X-Meridian-Signature` HMAC-SHA256 |
+| `MERIDIAN_CRDT_GC_GRACE_MS` | `60000` | Grace period before GC removes old CRDT versions (ms) |
 
-For clustering variables (`REDIS_URL`, `MERIDIAN_PEERS`, `MERIDIAN_NODE_ID`, etc.), see the [Clustering](/self-hosting/clustering) page.
+**PostgreSQL / pg-sync** (`--features pg-sync`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | *(unset)* | PostgreSQL URL — enables pg-sync and Postgres storage |
+| `PG_SYNC_DATABASE_URL` | *(unset)* | Alias for `DATABASE_URL` |
+| `MERIDIAN_WAL_CONNSTR` | *(unset)* | Replication connection URL — enables WAL stream for payloads > 8 KB |
+| `MERIDIAN_WAL_SLOT` | `meridian_wal` | Logical replication slot name (auto-created) |
+| `MERIDIAN_WAL_PUB` | `meridian_pub` | Publication name (auto-created, `FOR ALL TABLES`) |
+
+**Clustering** (`--features cluster` or `cluster-http`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REDIS_URL` | *(unset)* | Redis URL — enables Redis Pub/Sub cluster transport |
+| `MERIDIAN_PEERS` | *(unset)* | Comma-separated peer URLs — enables HTTP cluster transport |
+| `MERIDIAN_NODE_ID` | *(auto)* | Unique node ID — derived from `hostname:port` hash if unset |
+| `MERIDIAN_INTERNAL_BIND` | `0.0.0.0:3001` | Internal bind address for inter-node HTTP sync (`cluster-http` only) |
+| `MERIDIAN_ANTI_ENTROPY_SECS` | `30` | Anti-entropy gossip interval in seconds |
 
 For S3 WAL archive variables (`S3_BUCKET`, `S3_ENDPOINT`, etc.), see the [Storage](/self-hosting/storage) page.
-
-For PostgreSQL and WAL replication variables, see the [Postgres integration](/sdk/postgres) page.
 
 | Variable | Default | Description |
 |----------|---------|-------------|

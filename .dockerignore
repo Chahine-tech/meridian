@@ -1,0 +1,44 @@
+# Rust build artifacts — 10+ GB, never needed in build context
+target/
+
+# Node / Bun
+**/node_modules/
+**/dist/
+**/bun.lock
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+**/*.egg-info/
+**/dist/
+.ruff_cache/
+
+# Runtime data
+data/
+server/data/
+
+# Secrets
+.env
+*.env
+.dev.vars
+
+# Editor / OS
+.DS_Store
+**/.idea/
+**/.vscode/
+
+# Git
+.git/
+.github/
+
+# Not needed for the server build
+packages/
+examples/
+docs/
+nix/
+.wrangler/
+
+# Python SDK
+uv.lock
+pyproject.toml

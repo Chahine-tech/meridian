@@ -2,7 +2,7 @@
 #   docker compose up
 #
 # PostgreSQL mode (pg-sync, WAL replication):
-#   docker compose --profile pg up
+#   MERIDIAN_IMAGE=ghcr.io/chahine-tech/meridian:latest-pg docker compose --profile pg up
 
 services:
   meridian:
@@ -24,6 +24,12 @@ services:
       MERIDIAN_WAL_CONNSTR: ${MERIDIAN_WAL_CONNSTR:-}
       MERIDIAN_WAL_SLOT: ${MERIDIAN_WAL_SLOT:-meridian_wal}
       MERIDIAN_WAL_PUB: ${MERIDIAN_WAL_PUB:-meridian_pub}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health/live"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     env_file:
       - path: .env
         required: false

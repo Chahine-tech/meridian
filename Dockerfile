@@ -70,6 +70,7 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/meridian /meridian
@@ -79,5 +80,8 @@ EXPOSE 3000
 
 ENV MERIDIAN_BIND=0.0.0.0:3000
 ENV MERIDIAN_DATA_DIR=/data
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:3000/health/live || exit 1
 
 ENTRYPOINT ["/meridian"]

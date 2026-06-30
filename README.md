@@ -30,14 +30,18 @@ You pick a CRDT type (counter, set, register, presence), apply operations from a
 ## Quick start
 
 ```bash
-# Start the server
-MERIDIAN_SIGNING_KEY=$(openssl rand -hex 32) docker compose up -d
+# Generate a signing key and start the server
+export MERIDIAN_SIGNING_KEY=$(openssl rand -hex 32)
+docker compose up -d
 
-# Issue a token
+# Generate an admin token (needed to issue tokens via HTTP)
+ADMIN_TOKEN=$(cargo run --example gen_demo_token -- $MERIDIAN_SIGNING_KEY 1 --admin)
+
+# Issue a client token via the server API
 curl -X POST http://localhost:3000/v1/namespaces/my-room/tokens \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"client_id": 1, "ttl_ms": 3600000}'
+  -d '{"client_id": 2, "ttl_ms": 3600000}'
 ```
 
 ## Self-host
@@ -56,6 +60,7 @@ Two pre-built images are published on every `v*` release (`linux/amd64` + `linux
 | Image | Features | Use with |
 |-------|----------|----------|
 | `ghcr.io/chahine-tech/meridian:latest` | sled storage | `docker compose up` |
+| `ghcr.io/chahine-tech/meridian:latest-pg` | PostgreSQL + pg-sync | `MERIDIAN_IMAGE=...latest-pg docker compose --profile pg up` |
 | `ghcr.io/chahine-tech/meridian:latest-cluster` | sled + Redis cluster | `docker compose -f docker-compose.cluster.yml up` |
 
 | Mode | Command | When to use |
@@ -70,12 +75,12 @@ cp .env.example .env
 # Fill in MERIDIAN_SIGNING_KEY in .env, then:
 docker compose up -d
 
-# PostgreSQL mode
-MERIDIAN_FEATURES=pg-sync \
+# PostgreSQL mode (uses latest-pg image with pg-sync compiled in)
+MERIDIAN_IMAGE=ghcr.io/chahine-tech/meridian:latest-pg \
 DATABASE_URL=postgres://meridian:meridian@localhost/meridian \
 docker compose --profile pg up -d
 
-# 3-node cluster with Redis
+# 3-node cluster with Redis (uses latest-cluster image)
 MERIDIAN_SIGNING_KEY=<your-key> \
 docker compose -f docker-compose.cluster.yml up -d
 ```
@@ -96,6 +101,14 @@ const client = await Effect.runPromise(
   MeridianClient.create({ url: "http://localhost:3000", namespace: "my-room", token })
 );
 ```
+
+The server exposes two unauthenticated endpoints useful for ops:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health/live` | Always 200 — used by load balancers to detect dead processes |
+| `GET /health/ready` | 200 when storage is operational, 503 otherwise |
+| `GET /metrics` | Prometheus-compatible metrics |
 
 All configuration variables are documented in the [Configuration](#configuration) table below.
 

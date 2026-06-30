@@ -3,28 +3,49 @@ title: Docker
 description: Run Meridian with Docker Compose in under a minute.
 ---
 
+## Pre-built images
+
+Three images are published on every release (`linux/amd64` + `linux/arm64`):
+
+| Image | Compiled features | Use with |
+|-------|------------------|----------|
+| `ghcr.io/chahine-tech/meridian:latest` | sled storage | Default single-node |
+| `ghcr.io/chahine-tech/meridian:latest-pg` | PostgreSQL + pg-sync | `--profile pg` |
+| `ghcr.io/chahine-tech/meridian:latest-cluster` | sled + Redis cluster | `docker-compose.cluster.yml` |
+
+Versioned tags follow the same pattern: `0.1.0`, `0.1.0-pg`, `0.1.0-cluster`.
+
 ## Docker Compose (recommended)
 
 ```bash
-MERIDIAN_SIGNING_KEY=$(openssl rand -hex 32) docker compose up -d
+cp .env.example .env          # fill in MERIDIAN_SIGNING_KEY
+docker compose up -d
 ```
 
 The server listens on `http://localhost:3000`.
 
 <Warning>
-  Set a fixed `MERIDIAN_SIGNING_KEY`. If unset, a random key is generated on startup — all existing tokens become invalid on restart.
+  Set a fixed `MERIDIAN_SIGNING_KEY`. If unset, a random key is generated on startup — all existing tokens become invalid on restart. Generate one with `openssl rand -hex 32`.
 </Warning>
 
-To persist the key, add it to a `.env` file:
+## PostgreSQL mode
 
 ```bash
-# .env
-MERIDIAN_SIGNING_KEY=your_64_char_hex_string_here
+MERIDIAN_IMAGE=ghcr.io/chahine-tech/meridian:latest-pg \
+DATABASE_URL=postgres://meridian:meridian@localhost/meridian \
+docker compose --profile pg up -d
 ```
 
+The `latest-pg` image includes `--features pg-sync` (PostgreSQL storage + WAL replication). The default `latest` image does not.
+
+## Multinode cluster
+
 ```bash
-docker compose up -d
+MERIDIAN_SIGNING_KEY=your-secret \
+docker compose -f docker-compose.cluster.yml up -d
 ```
+
+The cluster compose uses `latest-cluster` by default. See [Clustering](/self-hosting/clustering) for the full setup guide.
 
 ## Docker only
 
@@ -33,18 +54,8 @@ docker run -d \
   -p 3000:3000 \
   -e MERIDIAN_SIGNING_KEY=$(openssl rand -hex 32) \
   -v meridian-data:/data \
-  ghcr.io/Chahine-tech/meridian:latest
+  ghcr.io/chahine-tech/meridian:latest
 ```
-
-## Multinode cluster
-
-To run a 3-node cluster with Redis fan-out, use the dedicated compose file:
-
-```bash
-MERIDIAN_SIGNING_KEY=your-secret docker compose -f docker-compose.cluster.yml up -d
-```
-
-See [Clustering](/self-hosting/clustering) for the full setup guide.
 
 ## From source
 
@@ -52,4 +63,12 @@ See [Clustering](/self-hosting/clustering) for the full setup guide.
 MERIDIAN_SIGNING_KEY=$(openssl rand -hex 32) \
 MERIDIAN_DATA_DIR=./data \
 cargo run --release
+```
+
+Build with specific features:
+
+```bash
+cargo build --release --features cluster      # Redis cluster
+cargo build --release --features pg-sync      # PostgreSQL + WAL
+cargo build --release --features cluster-http # HTTP peer mesh
 ```

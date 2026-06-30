@@ -5,6 +5,20 @@ description: How to issue and use Meridian auth tokens.
 
 Meridian uses custom ed25519-signed tokens — smaller than JWT, constant-time verification.
 
+## Bootstrap your first admin token
+
+The HTTP token endpoint requires a token with `admin: true`. To generate one locally from your signing key (no server needed):
+
+```bash
+cargo run --example gen_demo_token -- <MERIDIAN_SIGNING_KEY> 1 --admin
+```
+
+Store the output as `$ADMIN_TOKEN`. You can then use it to issue scoped client tokens via the HTTP API.
+
+<Tip>
+  For production, generate client tokens server-side in your own backend using the same signing key via the HTTP API below. Use `gen_demo_token` only for local bootstrapping.
+</Tip>
+
 ## Token format
 
 ```

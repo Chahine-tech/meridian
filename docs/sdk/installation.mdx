@@ -1,7 +1,9 @@
 ---
 title: Installation
-description: Install the Meridian TypeScript SDK.
+description: Install the Meridian SDK — TypeScript, Python, or Rust.
 ---
+
+## TypeScript
 
 ```bash
 npm install meridian-sdk
@@ -11,11 +13,32 @@ pnpm add meridian-sdk
 bun add meridian-sdk
 ```
 
-## Requirements
+**Requirements**: TypeScript 5.x with `strict: true`, Node 18+, Bun 1+, or any modern browser.
 
-- TypeScript 5.x with `strict: true`
-- Node 18+, Bun 1+, or any modern browser
-- A running Meridian server (see [Docker](/self-hosting/docker))
+## Python
+
+```bash
+pip install meridian-crdt
+
+# With AES-GCM-256 encryption + Ed25519 signing:
+pip install "meridian-crdt[crypto]"
+```
+
+**Requirements**: Python 3.10+, asyncio.
+
+## Rust
+
+```toml
+[dependencies]
+meridian-client = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+```
+
+See [Rust SDK](/sdk/rust) for usage.
+
+---
+
+A running Meridian server is required for all SDKs — see [Docker](/self-hosting/docker).
 
 ## Examples
 
