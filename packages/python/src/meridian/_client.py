@@ -57,7 +57,6 @@ class MeridianClient:
 
         self._transport = Transport(url, token, self._on_message)
 
-
     @classmethod
     async def connect(
         cls,
@@ -85,7 +84,6 @@ class MeridianClient:
 
     async def __aexit__(self, *_: object) -> None:
         await self.close()
-
 
     def gcounter(self, crdt_id: str) -> GCounter:
         if crdt_id not in self._gcounters:
@@ -139,7 +137,6 @@ class MeridianClient:
             self._subscribe(crdt_id)
         return self._presences[crdt_id]
 
-
     async def live_query(
         self,
         from_: str,
@@ -175,16 +172,13 @@ class MeridianClient:
             if q in listeners:
                 listeners.remove(q)
 
-
     def send_awareness(self, key: str, data: bytes) -> None:
         self._transport.send({"AwarenessUpdate": {"key": key, "data": data}})
-
 
     def sync(self, crdt_id: str, since: dict[str, int] | None = None) -> None:
         """Request a delta sync from the server for a given CRDT."""
         vc_bytes = encode_vector_clock(since or {})
         self._transport.send({"Sync": {"crdt_id": crdt_id, "since_vc": vc_bytes}})
-
 
     def _subscribe(self, crdt_id: str) -> None:
         self._transport.send({"Subscribe": {"crdt_id": crdt_id}})

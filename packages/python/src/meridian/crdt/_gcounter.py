@@ -18,13 +18,11 @@ class GCounter:
         self._counts: dict[str, int] = {}
         self._listeners: list[asyncio.Queue[int]] = []
 
-
     def value(self) -> int:
         return sum(self._counts.values())
 
     def counts(self) -> dict[str, int]:
         return dict(self._counts)
-
 
     def increment(self, amount: int = 1, *, ttl_ms: int | None = None) -> None:
         if amount <= 0:
@@ -38,7 +36,6 @@ class GCounter:
             msg["Op"]["ttl_ms"] = ttl_ms
         self._transport.send(msg)
 
-
     async def changes(self) -> AsyncIterator[int]:
         """Yields the counter value every time it changes."""
         q: asyncio.Queue[int] = asyncio.Queue()
@@ -48,7 +45,6 @@ class GCounter:
                 yield await q.get()
         finally:
             self._listeners.remove(q)
-
 
     def _apply_delta(self, delta: dict) -> None:
         changed = False

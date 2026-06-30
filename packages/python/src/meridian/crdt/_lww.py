@@ -43,7 +43,6 @@ class LwwRegister:
         self._undo_stack: list[dict] = []  # [{"target_hlc_bytes", "prev_entry"}]
         self._undo_result_listeners: list[asyncio.Queue] = []
 
-
     def value(self) -> Any:
         return self._entry["value"] if self._entry else None
 
@@ -55,7 +54,6 @@ class LwwRegister:
             "updated_at_ms": int(hlc["wall_ms"]),
             "author": int(self._entry["author"]),
         }
-
 
     def set(self, value: Any, *, ttl_ms: int | None = None) -> None:
         wall_ms = int(time.time() * 1000)
@@ -89,7 +87,6 @@ class LwwRegister:
         self._push_undo(hlc, prev_entry)
         await self._send_set(value, hlc, ttl_ms)
 
-
     @property
     def can_undo(self) -> bool:
         return bool(self._undo_stack)
@@ -106,13 +103,15 @@ class LwwRegister:
         entry = self._undo_stack.pop()
         prev_entry = entry["prev_entry"]
         restore_value = prev_entry["value"] if prev_entry is not None else None
-        self._transport.send({
-            "UndoLww": {
-                "crdt_id": self._id,
-                "target_hlc": entry["target_hlc_bytes"],
-                "restore_entry": encode(restore_value),
+        self._transport.send(
+            {
+                "UndoLww": {
+                    "crdt_id": self._id,
+                    "target_hlc": entry["target_hlc_bytes"],
+                    "restore_entry": encode(restore_value),
+                }
             }
-        })
+        )
 
     async def undo_results(self) -> AsyncIterator[dict]:
         """Yields ``{"ok": True}`` on UndoAck or ``{"ok": False, "reason": str}``
@@ -125,7 +124,6 @@ class LwwRegister:
         finally:
             self._undo_result_listeners.remove(q)
 
-
     async def changes(self) -> AsyncIterator[Any]:
         q: asyncio.Queue = asyncio.Queue()
         self._listeners.append(q)
@@ -134,7 +132,6 @@ class LwwRegister:
                 yield await q.get()
         finally:
             self._listeners.remove(q)
-
 
     def _push_undo(self, hlc: dict, prev_entry: dict | None) -> None:
         if len(self._undo_stack) >= _MAX_UNDO_STACK:

@@ -48,7 +48,6 @@ class UndoManager:
         else:
             handle.increment(amount, ttl_ms=ttl_ms)
 
-
     def pn_increment(
         self,
         counter: PNCounter,
@@ -70,7 +69,6 @@ class UndoManager:
         """Decrement ``counter`` and record the inverse for ``undo()``."""
         counter.decrement(amount, ttl_ms=ttl_ms)
         self._push(("pn_decr", counter, amount, ttl_ms))
-
 
     def _push(self, entry: _PnOp) -> None:
         if len(self._stack) >= _MAX_STACK:
