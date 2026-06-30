@@ -26,6 +26,8 @@ COPY crates/meridian-core/Cargo.toml            crates/meridian-core/Cargo.toml
 COPY crates/meridian-storage/Cargo.toml         crates/meridian-storage/Cargo.toml
 COPY crates/meridian-cluster/Cargo.toml         crates/meridian-cluster/Cargo.toml
 COPY crates/meridian-edge/Cargo.toml            crates/meridian-edge/Cargo.toml
+COPY crates/meridian-client/Cargo.toml          crates/meridian-client/Cargo.toml
+COPY examples/ratatui-game/Cargo.toml           examples/ratatui-game/Cargo.toml
 
 # Stub sources — only what cargo needs to resolve and cache dependencies.
 # We stub all crates as empty libs; the bench stub avoids "file not found" errors.
@@ -36,13 +38,17 @@ RUN mkdir -p \
     crates/meridian-storage/src \
     crates/meridian-cluster/src \
     crates/meridian-edge/src \
+    crates/meridian-client/src \
+    examples/ratatui-game/src \
     && echo ''              > server/src/lib.rs \
     && echo 'fn main() {}' > server/src/main.rs \
     && echo 'fn main() {}' > server/benches/crdt.rs \
     && echo ''              > crates/meridian-core/src/lib.rs \
     && echo ''              > crates/meridian-storage/src/lib.rs \
     && echo ''              > crates/meridian-cluster/src/lib.rs \
-    && echo ''              > crates/meridian-edge/src/lib.rs
+    && echo ''              > crates/meridian-edge/src/lib.rs \
+    && echo ''              > crates/meridian-client/src/lib.rs \
+    && echo 'fn main() {}' > examples/ratatui-game/src/main.rs
 
 # Cache deps only — ignore errors from stub sources
 RUN cargo fetch
