@@ -31,6 +31,7 @@ use crate::{
 use super::{
     protocol::{ClientMsg, ServerMsg},
     query_registry::QueryRegistry,
+    session_registry::SessionRegistry,
     subscription::SubscriptionManager,
 };
 
@@ -60,6 +61,7 @@ pub trait WsState: Clone + Send + Sync + 'static {
     fn store(&self) -> &Self::S;
     fn subscriptions(&self) -> &Arc<SubscriptionManager>;
     fn client_registry(&self) -> &Arc<crate::crdt::ClientRegistry>;
+    fn session_registry(&self) -> &Arc<SessionRegistry>;
     fn webhooks(&self) -> Option<&WebhookDispatcher>;
 
     #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
@@ -111,6 +113,9 @@ async fn handle_socket<S: WsState>(
     // Subscribe to namespace broadcast channel.
     let mut broadcast_rx = state.subscriptions().subscribe(&ns);
 
+    // Register with the session registry so this connection can be revoked via HTTP.
+    let mut revoke_rx = state.session_registry().register(&ns, client_id);
+
     // The client starts unregistered from the ClientRegistry — it will be added
     // on its first Sync, once we know what it has seen. This prevents new
     // connections that never sync from blocking GC indefinitely.
@@ -120,6 +125,21 @@ async fn handle_socket<S: WsState>(
 
     loop {
         tokio::select! {
+            // Session revocation from DELETE /v1/namespaces/:ns/sessions/:client_id
+            _ = revoke_rx.changed() => {
+                if *revoke_rx.borrow_and_update() {
+                    info!(ns, client_id, "session revoked by admin — closing WebSocket");
+                    let err = ServerMsg::Error {
+                        code: 4401,
+                        message: "session revoked".to_owned(),
+                    };
+                    if let Ok(bytes) = err.to_msgpack() {
+                        let _ = socket.send(Message::Binary(bytes.into())).await;
+                    }
+                    break;
+                }
+            }
+
             // Incoming message from this client
             maybe_msg = socket.recv() => {
                 match maybe_msg {
@@ -193,8 +213,9 @@ async fn handle_socket<S: WsState>(
         }
     }
 
-    // Remove this client from the GC registry so it no longer blocks tombstone removal.
+    // Remove this client from the GC registry and session registry.
     state.client_registry().unregister(&ns, client_id);
+    state.session_registry().deregister(&ns, client_id);
 
     metrics::ws_disconnected();
     debug!(ns, client_id, "WebSocket handler exiting");

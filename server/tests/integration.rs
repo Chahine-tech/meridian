@@ -44,6 +44,7 @@ fn build_test_app() -> (axum::Router, Arc<TokenSigner>) {
         subscriptions: Arc::new(SubscriptionManager::new()),
         signer: Arc::clone(&signer),
         client_registry: Arc::new(ClientRegistry::new()),
+        session_registry: Arc::new(meridian_server::api::ws::SessionRegistry::new()),
         webhooks: None,
         #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
         cluster: None,
@@ -64,6 +65,10 @@ fn read_write_token(signer: &TokenSigner, ns: &str) -> String {
 
 fn read_only_token(signer: &TokenSigner, ns: &str) -> String {
     make_token(signer, ns, 2, Permissions::read_only())
+}
+
+fn admin_token(signer: &TokenSigner, ns: &str) -> String {
+    make_token(signer, ns, 1, Permissions::admin())
 }
 
 async fn body_bytes(body: Body) -> Vec<u8> {
@@ -1377,4 +1382,86 @@ async fn token_me_without_token_returns_401() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+// DELETE /v1/namespaces/:ns/sessions/:client_id
+
+#[tokio::test]
+async fn revoke_session_not_connected_returns_404() {
+    let (app, signer) = build_test_app();
+    let token = admin_token(&signer, "ns");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/v1/namespaces/ns/sessions/99")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn revoke_session_invalid_client_id_returns_400() {
+    let (app, signer) = build_test_app();
+    let token = admin_token(&signer, "ns");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/v1/namespaces/ns/sessions/not-a-number")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn revoke_session_requires_admin_token() {
+    let (app, signer) = build_test_app();
+    let token = read_write_token(&signer, "ns");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/v1/namespaces/ns/sessions/1")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn revoke_session_wrong_namespace_returns_403() {
+    let (app, signer) = build_test_app();
+    let token = admin_token(&signer, "other-ns");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/v1/namespaces/ns/sessions/1")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }

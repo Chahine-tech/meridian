@@ -39,7 +39,7 @@ import { canRead as evalCanRead, canWrite as evalCanWrite, globMatch } from "./a
 import type { OpMask } from "./auth/permissions.js";
 import type { ServerMsg, TokenClaims } from "./schema.js";
 import type { TokenParseError, TokenExpiredError } from "./errors.js";
-import { encryptJson, decryptJson, isEncryptedValue, type EncryptedValue } from "./crypto/aes-gcm.js";
+import { encryptJson, encryptJsonDeterministic, decryptJson, isEncryptedValue, type EncryptedValue } from "./crypto/aes-gcm.js";
 import { signOp, loadOrGenerateKeypair, type ClientKeypair } from "./crypto/ed25519.js";
 
 // --- Devtools snapshot types ---
@@ -148,7 +148,7 @@ export interface MeridianClientConfig {
    * Matching CRDTs encrypt their value fields before sending — the server stores and
    * forwards ciphertext and never sees plaintext.
    *
-   * Supported CRDT types: `LwwRegister`, `Presence`.
+   * Supported CRDT types: `LwwRegister`, `Presence`, `ORSet`, `Tree`.
    * Not supported: `GCounter`, `PNCounter`, `RGA` (numeric/structural merge requires plaintext).
    *
    * @example
@@ -417,6 +417,11 @@ export class MeridianClient {
     return key !== null ? (v) => encryptJson(key, v) : undefined;
   }
 
+  private encryptFnDeterministicFor(crdtId: string): ((v: unknown) => Promise<unknown>) | undefined {
+    const key = this.resolveEncKey(crdtId);
+    return key !== null ? (v) => encryptJsonDeterministic(key, v) : undefined;
+  }
+
   /**
    * Returns a handle for a grow-only counter (GCounter) CRDT.
    *
@@ -493,7 +498,8 @@ export class MeridianClient {
   orset<T>(crdtId: string, schema?: Schema.Schema<T>): ORSetHandle<T> {
     let handle = this.orHandles.get(crdtId) as ORSetHandle<T> | undefined;
     if (!handle) {
-      const base = { ns: this.namespace, crdtId, clientId: this.clientId, transport: this.transport };
+      const encryptFn = this.encryptFnDeterministicFor(crdtId);
+      const base = { ns: this.namespace, crdtId, clientId: this.clientId, transport: this.transport, ...(encryptFn !== undefined && { encryptFn }) };
       handle = schema ? new ORSetHandle<T>({ ...base, schema }) : new ORSetHandle<T>(base);
       this.orHandles.set(crdtId, handle as ORSetHandle<unknown>);
       this.transport.subscribe(crdtId);
@@ -645,7 +651,8 @@ export class MeridianClient {
   tree(crdtId: string, opts?: { validator?: CrdtValidator }): TreeHandle {
     let handle = this.treeHandles.get(crdtId);
     if (!handle) {
-      handle = new TreeHandle({ crdtId, clientId: this.clientId, transport: this.transport, ...(opts?.validator !== undefined ? { validator: opts.validator } : {}) });
+      const encryptFn = this.encryptFnFor(crdtId);
+      handle = new TreeHandle({ crdtId, clientId: this.clientId, transport: this.transport, ...(opts?.validator !== undefined ? { validator: opts.validator } : {}), ...(encryptFn !== undefined ? { encryptFn } : {}) });
       this.treeHandles.set(crdtId, handle);
       this.transport.subscribe(crdtId);
       this.handleUnsubs.push(handle.onChange(() => { this.notifyAnyChange(); }));
@@ -992,7 +999,30 @@ export class MeridianClient {
     }
     const orHandle = this.orHandles.get(crdtId);
     if (orHandle) {
-      try { orHandle.applyDelta(decodeORSetDelta(deltaBytes)); } catch { /* stale */ }
+      try {
+        let delta = decodeORSetDelta(deltaBytes);
+        const encKey = this.resolveEncKey(crdtId);
+        if (encKey !== null) {
+          const decryptMap = async (map: Record<string, Uint8Array[]>): Promise<Record<string, Uint8Array[]>> => {
+            const result: Record<string, Uint8Array[]> = {};
+            await Promise.all(Object.entries(map).map(async ([k, tags]) => {
+              try {
+                const parsed: unknown = JSON.parse(k);
+                if (isEncryptedValue(parsed)) {
+                  const plain = await decryptJson(encKey, parsed);
+                  result[JSON.stringify(plain)] = tags;
+                } else {
+                  result[k] = tags;
+                }
+              } catch { result[k] = tags; }
+            }));
+            return result;
+          };
+          const [decAdds, decRemoves] = await Promise.all([decryptMap(delta.adds), decryptMap(delta.removes)]);
+          delta = { adds: decAdds, removes: decRemoves };
+        }
+        orHandle.applyDelta(delta);
+      } catch { /* stale or decrypt failure */ }
       this.saveSnap(`snap:or:${this.namespace}:${this.clientId}:${crdtId}`, orHandle);
       this.notifyDelta(crdtId, "orset");
       if (broadcast) this.tabSyncChannel?.broadcast(crdtId, deltaBytes);
@@ -1059,7 +1089,33 @@ export class MeridianClient {
     }
     const treeHandle = this.treeHandles.get(crdtId);
     if (treeHandle) {
-      try { treeHandle.applyDelta(decodeTreeDelta(deltaBytes)); } catch { /* stale */ }
+      try {
+        let delta = decodeTreeDelta(deltaBytes);
+        const encKey = this.resolveEncKey(crdtId);
+        if (encKey !== null && delta.ops && delta.ops.length > 0) {
+          const decryptedOps = await Promise.all(delta.ops.map(async (op) => {
+            try {
+              if ("AddNode" in op) {
+                const maybeEnc: unknown = JSON.parse(op.AddNode.value);
+                if (isEncryptedValue(maybeEnc)) {
+                  const plain = await decryptJson(encKey, maybeEnc);
+                  return { AddNode: { ...op.AddNode, value: String(plain) } };
+                }
+              }
+              if ("UpdateNode" in op) {
+                const maybeEnc: unknown = JSON.parse(op.UpdateNode.value);
+                if (isEncryptedValue(maybeEnc)) {
+                  const plain = await decryptJson(encKey, maybeEnc);
+                  return { UpdateNode: { ...op.UpdateNode, value: String(plain) } };
+                }
+              }
+            } catch { /* not encrypted or parse error — return original */ }
+            return op;
+          }));
+          delta = { ...delta, ops: decryptedOps };
+        }
+        treeHandle.applyDelta(delta);
+      } catch { /* stale */ }
       this.saveSnap(`snap:tr:${this.namespace}:${this.clientId}:${crdtId}`, treeHandle);
       this.notifyDelta(crdtId, "tree");
       if (broadcast) this.tabSyncChannel?.broadcast(crdtId, deltaBytes);

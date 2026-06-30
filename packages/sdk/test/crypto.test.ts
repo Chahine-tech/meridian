@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   encryptJson,
+  encryptJsonDeterministic,
   decryptJson,
   importAesGcmKey,
   generateAesGcmKey,
@@ -68,6 +69,50 @@ describe("AES-GCM", () => {
     const enc = await encryptJson(original, "test");
     const dec = await decryptJson(imported, enc);
     expect(dec).toBe("test");
+  });
+});
+
+
+describe("encryptJsonDeterministic", () => {
+  it("encrypts and decrypts a value", async () => {
+    const { key } = await generateAesGcmKey();
+    const enc = await encryptJsonDeterministic(key, "hello");
+    const dec = await decryptJson(key, enc);
+    expect(dec).toBe("hello");
+  });
+
+  it("same value produces same ciphertext (deterministic)", async () => {
+    const { key } = await generateAesGcmKey();
+    const a = await encryptJsonDeterministic(key, "apple");
+    const b = await encryptJsonDeterministic(key, "apple");
+    expect(a.n).toBe(b.n);
+    expect(a.d).toBe(b.d);
+  });
+
+  it("different values produce different nonces", async () => {
+    const { key } = await generateAesGcmKey();
+    const a = await encryptJsonDeterministic(key, "apple");
+    const b = await encryptJsonDeterministic(key, "banana");
+    expect(a.n).not.toBe(b.n);
+    expect(a.d).not.toBe(b.d);
+  });
+
+  it("works with non-string values", async () => {
+    const { key } = await generateAesGcmKey();
+    const value = { id: 1, tag: "x" };
+    const enc = await encryptJsonDeterministic(key, value);
+    const dec = await decryptJson(key, enc);
+    expect(dec).toEqual(value);
+    const enc2 = await encryptJsonDeterministic(key, value);
+    expect(enc.d).toBe(enc2.d);
+  });
+
+  it("different keys produce different ciphertext for same value", async () => {
+    const { key: k1 } = await generateAesGcmKey();
+    const { key: k2 } = await generateAesGcmKey();
+    const a = await encryptJsonDeterministic(k1, "same");
+    const b = await encryptJsonDeterministic(k2, "same");
+    expect(a.d).not.toBe(b.d);
   });
 });
 

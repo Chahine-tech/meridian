@@ -40,6 +40,27 @@ export async function encryptJson(key: CryptoKey, value: unknown): Promise<Encry
   return { $e: 1, n: toB64u(nonce.buffer), d: toB64u(ciphertext) };
 }
 
+/**
+ * Encrypt `value` with AES-GCM-256 using a deterministic nonce derived from the
+ * plaintext (SHA-256(plaintext)[0..12]). Same plaintext + same key → same ciphertext.
+ *
+ * Required for ORSet encryption: the server keys entries by the encrypted element
+ * value, so removes must produce the same ciphertext as the original add.
+ *
+ * Security: different plaintexts produce different nonces (via SHA-256), so there
+ * is no nonce reuse across distinct values. Identical plaintexts produce identical
+ * ciphertexts, which only reveals that two entries hold the same value — already
+ * visible from the plaintext in a non-encrypted ORSet.
+ */
+export async function encryptJsonDeterministic(key: CryptoKey, value: unknown): Promise<EncryptedValue> {
+  const plaintext = new TextEncoder().encode(JSON.stringify(value));
+  // Derive a deterministic 12-byte nonce from the plaintext. `.slice()` creates a
+  // fresh 12-byte ArrayBuffer so toB64u does not accidentally encode all 32 bytes.
+  const nonce = new Uint8Array(await crypto.subtle.digest("SHA-256", plaintext)).slice(0, 12);
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, plaintext);
+  return { $e: 1, n: toB64u(nonce.buffer), d: toB64u(ciphertext) };
+}
+
 /** Decrypt an `EncryptedValue` produced by `encryptJson`. Throws on wrong key or tampered ciphertext. */
 export async function decryptJson(key: CryptoKey, enc: EncryptedValue): Promise<unknown> {
   const nonce = fromB64u(enc.n);

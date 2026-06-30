@@ -18,6 +18,7 @@ export class ORSetHandle<T> {
   private readonly transport: WsTransport;
   private readonly schema: Schema.Schema<T> | null;
   private readonly listeners = new Set<(elements: T[]) => void>();
+  private readonly encryptFn: ((v: unknown) => Promise<unknown>) | null;
 
   constructor(opts: {
     ns: string;
@@ -25,11 +26,14 @@ export class ORSetHandle<T> {
     clientId: number;
     transport: WsTransport;
     schema?: Schema.Schema<T>;
+    /** Deterministic AES-GCM encrypt function. Same value → same ciphertext (required for remove to match add). */
+    encryptFn?: (v: unknown) => Promise<unknown>;
   }) {
     this.crdtId = opts.crdtId;
     this.clientId = opts.clientId;
     this.transport = opts.transport;
     this.schema = opts.schema ?? null;
+    this.encryptFn = opts.encryptFn ?? null;
   }
 
   /** The CRDT ID this handle is bound to. */
@@ -88,13 +92,27 @@ export class ORSetHandle<T> {
     tagSet.add(tag);
     this.emit();
 
-    this.transport.send({
-      Op: {
-        crdt_id: this.crdtId,
-        op_bytes: encode({ ORSet: { Add: { element, tag: uuidToBytes(tag) } } }),
-        ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
-      },
-    });
+    if (this.encryptFn !== null) {
+      const encFn = this.encryptFn;
+      void (async () => {
+        const wireElement = await encFn(element);
+        this.transport.send({
+          Op: {
+            crdt_id: this.crdtId,
+            op_bytes: encode({ ORSet: { Add: { element: wireElement, tag: uuidToBytes(tag) } } }),
+            ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+          },
+        });
+      })();
+    } else {
+      this.transport.send({
+        Op: {
+          crdt_id: this.crdtId,
+          op_bytes: encode({ ORSet: { Add: { element, tag: uuidToBytes(tag) } } }),
+          ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+        },
+      });
+    }
 
     return tag;
   }
@@ -117,13 +135,27 @@ export class ORSetHandle<T> {
       this.emit();
     }
 
-    this.transport.send({
-      Op: {
-        crdt_id: this.crdtId,
-        op_bytes: encode({ ORSet: { Remove: { element, known_tags: [uuidToBytes(tag)] } } }),
-        ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
-      },
-    });
+    if (this.encryptFn !== null) {
+      const encFn = this.encryptFn;
+      void (async () => {
+        const wireElement = await encFn(element);
+        this.transport.send({
+          Op: {
+            crdt_id: this.crdtId,
+            op_bytes: encode({ ORSet: { Remove: { element: wireElement, known_tags: [uuidToBytes(tag)] } } }),
+            ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+          },
+        });
+      })();
+    } else {
+      this.transport.send({
+        Op: {
+          crdt_id: this.crdtId,
+          op_bytes: encode({ ORSet: { Remove: { element, known_tags: [uuidToBytes(tag)] } } }),
+          ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+        },
+      });
+    }
   }
 
   /**
@@ -140,13 +172,27 @@ export class ORSetHandle<T> {
     this.tags.delete(key);
     this.emit();
 
-    this.transport.send({
-      Op: {
-        crdt_id: this.crdtId,
-        op_bytes: encode({ ORSet: { Remove: { element, known_tags: currentTags.map(uuidToBytes) } } }),
-        ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
-      },
-    });
+    if (this.encryptFn !== null) {
+      const encFn = this.encryptFn;
+      void (async () => {
+        const wireElement = await encFn(element);
+        this.transport.send({
+          Op: {
+            crdt_id: this.crdtId,
+            op_bytes: encode({ ORSet: { Remove: { element: wireElement, known_tags: currentTags.map(uuidToBytes) } } }),
+            ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+          },
+        });
+      })();
+    } else {
+      this.transport.send({
+        Op: {
+          crdt_id: this.crdtId,
+          op_bytes: encode({ ORSet: { Remove: { element, known_tags: currentTags.map(uuidToBytes) } } }),
+          ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+        },
+      });
+    }
   }
 
   /** Returns the raw tag map for snapshot serialization. */

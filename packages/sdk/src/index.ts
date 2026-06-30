@@ -144,6 +144,7 @@ export {
 // Crypto — E2E encryption and BFT op signing
 export {
   encryptJson,
+  encryptJsonDeterministic,
   decryptJson,
   importAesGcmKey,
   generateAesGcmKey,

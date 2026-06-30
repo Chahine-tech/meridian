@@ -50,17 +50,21 @@ export class TreeHandle {
   private opCounter = 0;
   /** Tracks parent, position, updatedAt, and value per node for undo support. */
   private readonly nodeMetaMap = new Map<string, TreeNodeMeta>();
+  private readonly encryptFn: ((v: unknown) => Promise<unknown>) | null;
 
   constructor(opts: {
     crdtId: string;
     clientId: number;
     transport: WsTransport;
     validator?: CrdtValidator;
+    /** AES-GCM encrypt function. Node values are encrypted before sending; structure (IDs, positions) stays plaintext. */
+    encryptFn?: (v: unknown) => Promise<unknown>;
   }) {
     this.crdtId = opts.crdtId;
     this.clientId = opts.clientId;
     this.transport = opts.transport;
     this.validator = opts.validator;
+    this.encryptFn = opts.encryptFn ?? null;
   }
 
   /** The CRDT key this handle is bound to. */
@@ -111,24 +115,28 @@ export class TreeHandle {
     this.roots = this.buildRoots();
     this.emit();
 
-    const op = encode({
-      Tree: {
-        AddNode: {
-          id,
-          parent_id: parentId !== null ? this.parseHlc(parentId) : null,
-          position,
-          value,
+    const parentHlc = parentId !== null ? this.parseHlc(parentId) : null;
+    if (this.encryptFn !== null) {
+      const encFn = this.encryptFn;
+      void (async () => {
+        const wireValue = JSON.stringify(await encFn(value));
+        this.transport.send({
+          Op: {
+            crdt_id: this.crdtId,
+            op_bytes: encode({ Tree: { AddNode: { id, parent_id: parentHlc, position, value: wireValue } } }),
+            ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+          },
+        });
+      })();
+    } else {
+      this.transport.send({
+        Op: {
+          crdt_id: this.crdtId,
+          op_bytes: encode({ Tree: { AddNode: { id, parent_id: parentHlc, position, value } } }),
+          ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
         },
-      },
-    });
-
-    this.transport.send({
-      Op: {
-        crdt_id: this.crdtId,
-        op_bytes: op,
-        ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
-      },
-    });
+      });
+    }
 
     return idStr;
   }
@@ -209,23 +217,28 @@ export class TreeHandle {
       this.emit();
     }
 
-    const op = encode({
-      Tree: {
-        UpdateNode: {
-          id: this.parseHlc(nodeId),
-          value,
-          updated_at: updatedAt,
+    const nodeHlc = this.parseHlc(nodeId);
+    if (this.encryptFn !== null) {
+      const encFn = this.encryptFn;
+      void (async () => {
+        const wireValue = JSON.stringify(await encFn(value));
+        this.transport.send({
+          Op: {
+            crdt_id: this.crdtId,
+            op_bytes: encode({ Tree: { UpdateNode: { id: nodeHlc, value: wireValue, updated_at: updatedAt } } }),
+            ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+          },
+        });
+      })();
+    } else {
+      this.transport.send({
+        Op: {
+          crdt_id: this.crdtId,
+          op_bytes: encode({ Tree: { UpdateNode: { id: nodeHlc, value, updated_at: updatedAt } } }),
+          ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
         },
-      },
-    });
-
-    this.transport.send({
-      Op: {
-        crdt_id: this.crdtId,
-        op_bytes: op,
-        ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
-      },
-    });
+      });
+    }
   }
 
   /**

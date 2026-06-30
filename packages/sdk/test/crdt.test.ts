@@ -11,6 +11,9 @@ import { ORSetHandle } from "../src/crdt/orset.js";
 import { LwwRegisterHandle } from "../src/crdt/lwwregister.js";
 import { PresenceHandle } from "../src/crdt/presence.js";
 import { CRDTMapHandle } from "../src/crdt/crdtmap.js";
+import { TreeHandle } from "../src/crdt/tree.js";
+import { generateAesGcmKey, encryptJsonDeterministic, encryptJson, isEncryptedValue } from "../src/crypto/aes-gcm.js";
+import { decode } from "../src/codec.js";
 import type { WsTransport } from "../src/transport/websocket.js";
 
 function stubTransport(): WsTransport & { sent: unknown[] } {
@@ -331,5 +334,135 @@ describe("ttl_ms forwarding", () => {
     const h = new CRDTMapHandle({ ...BASE_OPTS, crdtId: "m", transport: t });
     h.incrementCounter("views", 1, 7_000);
     expect((t.sent[0] as { Op: { ttl_ms?: number } }).Op.ttl_ms).toBe(7_000);
+  });
+});
+
+
+describe("ORSet encryption", () => {
+  const flush = () => new Promise<void>(r => setTimeout(r, 20));
+
+  it("add() optimistic update uses plaintext element", async () => {
+    const { key } = await generateAesGcmKey();
+    const t = stubTransport();
+    const h = new ORSetHandle({
+      ...BASE_OPTS, crdtId: "or:s", transport: t,
+      encryptFn: (v) => encryptJsonDeterministic(key, v),
+    });
+    h.add("apple");
+    expect(h.elements()).toEqual(["apple"]);
+    await flush();
+    expect(t.sent).toHaveLength(1);
+  });
+
+  it("add() wire payload contains an EncryptedValue element", async () => {
+    const { key } = await generateAesGcmKey();
+    const t = stubTransport();
+    const h = new ORSetHandle({
+      ...BASE_OPTS, crdtId: "or:s", transport: t,
+      encryptFn: (v) => encryptJsonDeterministic(key, v),
+    });
+    h.add("apple");
+    await flush();
+    const opMsg = t.sent[0] as { Op: { op_bytes: Uint8Array } };
+    const decoded = decode(opMsg.Op.op_bytes) as { ORSet: { Add: { element: unknown } } };
+    expect(isEncryptedValue(decoded.ORSet.Add.element)).toBe(true);
+  });
+
+  it("same element encrypts to same ciphertext (deterministic)", async () => {
+    const { key } = await generateAesGcmKey();
+    const t = stubTransport();
+    const h = new ORSetHandle({
+      ...BASE_OPTS, crdtId: "or:s", transport: t,
+      encryptFn: (v) => encryptJsonDeterministic(key, v),
+    });
+    h.add("apple");
+    h.add("apple");
+    await flush();
+    const decode1 = decode((t.sent[0] as { Op: { op_bytes: Uint8Array } }).Op.op_bytes) as { ORSet: { Add: { element: { d: string } } } };
+    const decode2 = decode((t.sent[1] as { Op: { op_bytes: Uint8Array } }).Op.op_bytes) as { ORSet: { Add: { element: { d: string } } } };
+    expect(decode1.ORSet.Add.element.d).toBe(decode2.ORSet.Add.element.d);
+  });
+
+  it("removeByTag() sends encrypted element", async () => {
+    const { key } = await generateAesGcmKey();
+    const t = stubTransport();
+    const h = new ORSetHandle({
+      ...BASE_OPTS, crdtId: "or:s", transport: t,
+      encryptFn: (v) => encryptJsonDeterministic(key, v),
+    });
+    const tag = h.add("apple");
+    await flush();
+    t.sent.length = 0;
+    h.removeByTag("apple", tag);
+    await flush();
+    const opMsg = t.sent[0] as { Op: { op_bytes: Uint8Array } };
+    const decoded = decode(opMsg.Op.op_bytes) as { ORSet: { Remove: { element: unknown } } };
+    expect(isEncryptedValue(decoded.ORSet.Remove.element)).toBe(true);
+  });
+
+  it("without encryptFn sends plaintext element", async () => {
+    const t = stubTransport();
+    const h = new ORSetHandle({ ...BASE_OPTS, crdtId: "or:s", transport: t });
+    h.add("apple");
+    const decoded = decode((t.sent[0] as { Op: { op_bytes: Uint8Array } }).Op.op_bytes) as { ORSet: { Add: { element: unknown } } };
+    expect(decoded.ORSet.Add.element).toBe("apple");
+  });
+});
+
+
+describe("TreeHandle encryption", () => {
+  const flush = () => new Promise<void>(r => setTimeout(r, 20));
+
+  it("addNode() optimistic update uses plaintext value", async () => {
+    const { key } = await generateAesGcmKey();
+    const t = stubTransport();
+    const h = new TreeHandle({
+      crdtId: "tr:s", clientId: 1, transport: t,
+      encryptFn: (v) => encryptJson(key, v),
+    });
+    h.addNode(null, "a0", "Secret content");
+    expect(h.value().roots[0]?.value).toBe("Secret content");
+    await flush();
+    expect(t.sent).toHaveLength(1);
+  });
+
+  it("addNode() wire payload contains JSON-encoded EncryptedValue", async () => {
+    const { key } = await generateAesGcmKey();
+    const t = stubTransport();
+    const h = new TreeHandle({
+      crdtId: "tr:s", clientId: 1, transport: t,
+      encryptFn: (v) => encryptJson(key, v),
+    });
+    h.addNode(null, "a0", "Secret");
+    await flush();
+    const opMsg = t.sent[0] as { Op: { op_bytes: Uint8Array } };
+    const decoded = decode(opMsg.Op.op_bytes) as { Tree: { AddNode: { value: string } } };
+    const wireValue: unknown = JSON.parse(decoded.Tree.AddNode.value);
+    expect(isEncryptedValue(wireValue)).toBe(true);
+  });
+
+  it("updateNode() wire payload encrypts value", async () => {
+    const { key } = await generateAesGcmKey();
+    const t = stubTransport();
+    const h = new TreeHandle({
+      crdtId: "tr:s", clientId: 1, transport: t,
+      encryptFn: (v) => encryptJson(key, v),
+    });
+    const id = h.addNode(null, "a0", "Initial");
+    await flush();
+    t.sent.length = 0;
+    h.updateNode(id, "Updated secret");
+    await flush();
+    const opMsg = t.sent[0] as { Op: { op_bytes: Uint8Array } };
+    const decoded = decode(opMsg.Op.op_bytes) as { Tree: { UpdateNode: { value: string } } };
+    expect(isEncryptedValue(JSON.parse(decoded.Tree.UpdateNode.value))).toBe(true);
+  });
+
+  it("without encryptFn sends plaintext value", () => {
+    const t = stubTransport();
+    const h = new TreeHandle({ crdtId: "tr:s", clientId: 1, transport: t });
+    h.addNode(null, "a0", "Hello");
+    const decoded = decode((t.sent[0] as { Op: { op_bytes: Uint8Array } }).Op.op_bytes) as { Tree: { AddNode: { value: string } } };
+    expect(decoded.Tree.AddNode.value).toBe("Hello");
   });
 });

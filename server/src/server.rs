@@ -263,6 +263,7 @@ where
     let _ = &subscriptions; // suppress unused warning in single-node builds
 
     let client_registry = Arc::new(ClientRegistry::new());
+    let session_registry = Arc::new(crate::api::ws::SessionRegistry::new());
 
     let state = AppState {
         store: Arc::clone(&store),
@@ -270,6 +271,7 @@ where
         subscriptions: Arc::clone(&subscriptions),
         signer: Arc::clone(&signer),
         client_registry: Arc::clone(&client_registry),
+        session_registry,
         webhooks,
         #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
         cluster,
