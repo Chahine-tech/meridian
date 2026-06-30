@@ -19,6 +19,10 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
 </p>
 
+<p align="center">
+  <a href="https://b3a3dbb6.meridian-demo-4ay.pages.dev/"><strong>→ Live demo</strong></a>
+</p>
+
 ---
 
 ## What is Meridian?
