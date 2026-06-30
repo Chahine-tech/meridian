@@ -31,6 +31,7 @@
             "group": "Self-hosting",
             "pages": [
               "self-hosting/docker",
+              "self-hosting/linux",
               "self-hosting/configuration",
               "self-hosting/tokens",
               "self-hosting/storage",

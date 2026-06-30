@@ -1,0 +1,140 @@
+---
+title: Linux / VPS
+description: Deploy Meridian as a systemd service behind a reverse proxy.
+---
+
+## Download the binary
+
+Pre-built static binaries are attached to every [GitHub Release](https://github.com/Chahine-tech/meridian/releases):
+
+| Platform | Binary |
+|----------|--------|
+| Linux x86_64 | `meridian-linux-x86_64` |
+| Linux ARM64 (Graviton, Oracle, Pi) | `meridian-linux-aarch64` |
+| macOS ARM64 | `meridian-macos-aarch64` |
+
+```bash
+# Linux x86_64 — replace v0.1.0 with the latest release
+curl -fL https://github.com/Chahine-tech/meridian/releases/download/v0.1.0/meridian-linux-x86_64 \
+  -o /usr/local/bin/meridian
+
+# Linux ARM64 (AWS Graviton, Oracle Cloud, Raspberry Pi 4)
+curl -fL https://github.com/Chahine-tech/meridian/releases/download/v0.1.0/meridian-linux-aarch64 \
+  -o /usr/local/bin/meridian
+chmod +x /usr/local/bin/meridian
+meridian --version
+```
+
+## Create a system user
+
+```bash
+useradd --system --no-create-home --shell /usr/sbin/nologin meridian
+mkdir -p /var/lib/meridian /etc/meridian
+chown meridian:meridian /var/lib/meridian
+```
+
+## Configure
+
+```bash
+cp /path/to/contrib/env.example /etc/meridian/env
+# Fill in MERIDIAN_SIGNING_KEY
+openssl rand -hex 32   # paste output into /etc/meridian/env
+chmod 600 /etc/meridian/env
+```
+
+`/etc/meridian/env`:
+
+```bash
+MERIDIAN_SIGNING_KEY=<your-32-byte-hex-key>
+MERIDIAN_BIND=0.0.0.0:3000
+MERIDIAN_DATA_DIR=/var/lib/meridian
+```
+
+## Install the systemd service
+
+```bash
+cp /path/to/contrib/meridian.service /etc/systemd/system/meridian.service
+systemctl daemon-reload
+systemctl enable --now meridian
+systemctl status meridian
+```
+
+Check logs:
+
+```bash
+journalctl -u meridian -f
+```
+
+## Reverse proxy (Caddy)
+
+Caddy handles HTTPS automatically via Let's Encrypt. Install Caddy, then create `/etc/caddy/Caddyfile`:
+
+```
+your-domain.com {
+    reverse_proxy localhost:3000
+}
+```
+
+```bash
+systemctl reload caddy
+```
+
+Your server is now reachable at `https://your-domain.com`.
+
+## Reverse proxy (Nginx)
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name your-domain.com;
+
+    # TLS — use certbot or your own certs
+    ssl_certificate     /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+
+        # Required for WebSocket upgrade
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        # Keep WebSocket connections alive
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+```
+
+<Warning>
+  The `Upgrade` and `Connection` headers are required for WebSocket connections. Without them, clients will connect over HTTP but the WebSocket upgrade will fail.
+</Warning>
+
+## Health checks
+
+The server exposes two unauthenticated endpoints:
+
+```bash
+curl http://localhost:3000/health/live   # always 200 if the process is running
+curl http://localhost:3000/health/ready  # 200 when storage is operational
+```
+
+Use `/health/ready` for load balancer readiness probes and `/health/live` for liveness.
+
+## Updates
+
+```bash
+# Download new binary
+curl -fL https://github.com/Chahine-tech/meridian/releases/download/vX.Y.Z/meridian-linux-x86_64 \
+  -o /usr/local/bin/meridian.new
+chmod +x /usr/local/bin/meridian.new
+
+# Atomic swap + restart
+mv /usr/local/bin/meridian.new /usr/local/bin/meridian
+systemctl restart meridian
+```
+
+Meridian's sled storage is forward-compatible — no migration needed between patch releases.
