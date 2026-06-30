@@ -27,10 +27,10 @@ COPY crates/meridian-storage/Cargo.toml         crates/meridian-storage/Cargo.to
 COPY crates/meridian-cluster/Cargo.toml         crates/meridian-cluster/Cargo.toml
 COPY crates/meridian-edge/Cargo.toml            crates/meridian-edge/Cargo.toml
 COPY crates/meridian-client/Cargo.toml          crates/meridian-client/Cargo.toml
-COPY examples/ratatui-game/Cargo.toml           examples/ratatui-game/Cargo.toml
 
 # Stub sources — only what cargo needs to resolve and cache dependencies.
 # We stub all crates as empty libs; the bench stub avoids "file not found" errors.
+# ratatui-game is a workspace member but excluded from .dockerignore — stub it inline.
 RUN mkdir -p \
     server/src \
     server/benches \
@@ -48,6 +48,8 @@ RUN mkdir -p \
     && echo ''              > crates/meridian-cluster/src/lib.rs \
     && echo ''              > crates/meridian-edge/src/lib.rs \
     && echo ''              > crates/meridian-client/src/lib.rs \
+    && printf '[package]\nname = "ratatui-game"\nversion = "0.1.0"\nedition = "2021"\n' \
+       > examples/ratatui-game/Cargo.toml \
     && echo 'fn main() {}' > examples/ratatui-game/src/main.rs
 
 # Cache deps only — ignore errors from stub sources
