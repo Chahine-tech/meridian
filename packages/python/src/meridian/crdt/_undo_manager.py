@@ -51,7 +51,7 @@ class UndoManager:
 
     def pn_increment(
         self,
-        counter: "PNCounter",
+        counter: PNCounter,
         amount: int = 1,
         *,
         ttl_ms: int | None = None,
@@ -62,7 +62,7 @@ class UndoManager:
 
     def pn_decrement(
         self,
-        counter: "PNCounter",
+        counter: PNCounter,
         amount: int = 1,
         *,
         ttl_ms: int | None = None,
