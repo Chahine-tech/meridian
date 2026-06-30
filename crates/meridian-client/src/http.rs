@@ -145,7 +145,6 @@ impl HttpClient {
         self.get_json(&url).await
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
 
     async fn get_json<T: serde::de::DeserializeOwned>(
         &self,

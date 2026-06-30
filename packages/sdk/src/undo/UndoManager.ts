@@ -53,7 +53,6 @@ export class UndoManager<H extends SupportedHandle> {
     this.handle = handle;
   }
 
-  // ─── Stack state ────────────────────────────────────────────────────────────
 
   get canUndo(): boolean {
     return this.undoStack.length > 0;
@@ -72,7 +71,6 @@ export class UndoManager<H extends SupportedHandle> {
     return () => { this.stackListeners.delete(listener); };
   }
 
-  // ─── Manual batching ────────────────────────────────────────────────────────
 
   /** Begin accumulating entries into a single undo step. */
   startBatch(): void {
@@ -94,7 +92,6 @@ export class UndoManager<H extends SupportedHandle> {
     this.openBatch = null;
   }
 
-  // ─── Undo / Redo ────────────────────────────────────────────────────────────
 
   undo(): void {
     const batch = this.undoStack.pop();
@@ -132,7 +129,6 @@ export class UndoManager<H extends SupportedHandle> {
     this.notifyStackChange();
   }
 
-  // ─── RGA handle proxy methods ────────────────────────────────────────────────
 
   /**
    * Insert text at visible position. Records undo entry with HLC node IDs.
@@ -171,7 +167,6 @@ export class UndoManager<H extends SupportedHandle> {
     this.clearRedo();
   }
 
-  // ─── Tree handle proxy methods ───────────────────────────────────────────────
 
   addNode(parentId: string | null, position: string, value: string, ttlMs?: number): string {
     const handle = this.asTree();
@@ -239,7 +234,6 @@ export class UndoManager<H extends SupportedHandle> {
     this.clearRedo();
   }
 
-  // ─── ORSet handle proxy methods ──────────────────────────────────────────────
 
   /**
    * Add an element to the OR-Set and record the undo entry.
@@ -271,7 +265,6 @@ export class UndoManager<H extends SupportedHandle> {
     this.clearRedo();
   }
 
-  // ─── PNCounter handle proxy methods ─────────────────────────────────────────
 
   /** Increment the counter and record an undo entry (inverse = decrement). */
   pnIncrement(amount: number = 1, ttlMs?: number): void {
@@ -299,7 +292,6 @@ export class UndoManager<H extends SupportedHandle> {
     this.clearRedo();
   }
 
-  // ─── Internal ────────────────────────────────────────────────────────────────
 
   private applyInverse(entry: UndoEntry): UndoEntry | null {
     switch (entry.kind) {

@@ -11,7 +11,6 @@ import {
   signOp,
 } from "../src/crypto/ed25519.js";
 
-// ── AES-GCM ──────────────────────────────────────────────────────────────────
 
 describe("AES-GCM", () => {
   it("encrypts and decrypts a string value", async () => {
@@ -72,7 +71,6 @@ describe("AES-GCM", () => {
   });
 });
 
-// ── isEncryptedValue ──────────────────────────────────────────────────────────
 
 describe("isEncryptedValue", () => {
   it("recognises a valid envelope", async () => {
@@ -90,7 +88,6 @@ describe("isEncryptedValue", () => {
   });
 });
 
-// ── Ed25519 ───────────────────────────────────────────────────────────────────
 
 describe("Ed25519", () => {
   it("signs and verifies op bytes", async () => {

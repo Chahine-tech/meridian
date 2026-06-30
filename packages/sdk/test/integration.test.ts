@@ -273,7 +273,6 @@ describe("Meridian integration", () => {
     client2.close();
   });
 
-  // ── RGA convergence ────────────────────────────────────────────────────────
 
   skip("RGA: concurrent inserts from two clients converge", async () => {
     const key = `rga:concurrent:${Date.now()}`;
@@ -382,7 +381,6 @@ describe("Meridian integration", () => {
     client2.close();
   });
 
-  // ── Tree convergence ───────────────────────────────────────────────────────
 
   skip("Tree: addNode propagates to remote client", async () => {
     const key = `tree:add:${Date.now()}`;
@@ -515,7 +513,6 @@ describe("Meridian integration", () => {
     client2.close();
   });
 
-  // ── Offline queue ──────────────────────────────────────────────────────────
 
   skip("offline queue: close() drains pending ops immediately", async () => {
     const client1 = await Effect.runPromise(
@@ -553,7 +550,6 @@ describe("Meridian integration", () => {
     client.close();
   });
 
-  // ── Presence ───────────────────────────────────────────────────────────────
 
   skip("Presence: heartbeat from client1 seen by client2", async () => {
 
@@ -586,7 +582,6 @@ describe("Meridian integration", () => {
     client2.close();
   });
 
-  // ── Delta sync (Sync message) ──────────────────────────────────────────────
 
   skip("late-joining client receives full state via Sync", async () => {
     const key = `gc:sync:${Date.now()}`;

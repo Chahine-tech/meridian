@@ -334,7 +334,6 @@ impl MeridianClient {
         });
     }
 
-    // ── Handle accessors ──────────────────────────────────────────────────────
 
     /// Get or create a GCounterHandle.
     pub fn gcounter(&self, crdt_id: &str) -> GCounterHandle {

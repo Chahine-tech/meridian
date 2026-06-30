@@ -38,7 +38,6 @@ class Transport:
         self._send_task: asyncio.Task | None = None
         self._loop_task: asyncio.Task | None = None
 
-    # ── lifecycle ────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
         self._loop_task = asyncio.create_task(self._connect_loop(), name="meridian-transport")
@@ -59,7 +58,6 @@ class Transport:
         async with asyncio.timeout(deadline):
             await self._connected.wait()
 
-    # ── send ─────────────────────────────────────────────────────────────────
 
     def send(self, msg: dict) -> None:
         """Enqueue a message for sending. Drops silently if queue is full."""
@@ -69,7 +67,6 @@ class Transport:
         except asyncio.QueueFull:
             log.warning("send queue full, dropping message")
 
-    # ── internal ─────────────────────────────────────────────────────────────
 
     async def _connect_loop(self) -> None:
         backoff = _BACKOFF_INITIAL

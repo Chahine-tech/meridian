@@ -41,13 +41,11 @@ class Presence:
         self._entries: dict[str, PresenceEntry] = {}
         self._listeners: list[asyncio.Queue] = []
 
-    # ── read ─────────────────────────────────────────────────────────────────
 
     def online(self) -> list[PresenceEntry]:
         now = int(time.time() * 1000)
         return [e for e in self._entries.values() if e.expires_at_ms > now]
 
-    # ── write ─────────────────────────────────────────────────────────────────
 
     def join(self, data: Any, *, ttl_ms: int = 30_000) -> None:
         t = asyncio.create_task(self._send_heartbeat(data, ttl_ms))
@@ -64,7 +62,6 @@ class Presence:
         self._entries.pop(str(self._client_id), None)
         self._notify()
 
-    # ── subscribe ─────────────────────────────────────────────────────────────
 
     async def changes(self) -> AsyncIterator[list[PresenceEntry]]:
         q: asyncio.Queue = asyncio.Queue()
@@ -75,7 +72,6 @@ class Presence:
         finally:
             self._listeners.remove(q)
 
-    # ── internal ──────────────────────────────────────────────────────────────
 
     async def _send_heartbeat(self, data: Any, ttl_ms: int) -> None:
         wall_ms = int(time.time() * 1000)

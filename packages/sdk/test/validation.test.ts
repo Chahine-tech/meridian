@@ -23,7 +23,6 @@ function makeRga(validator?: Parameters<typeof RGAHandle.prototype.constructor>[
   return new RGAHandle({ crdtId: "r", clientId: 1, transport: stubTransport(), validator });
 }
 
-// ── fnValidator ──────────────────────────────────────────────────────────────
 
 describe("fnValidator", () => {
   it("accepts when fn returns true", () => {
@@ -59,7 +58,6 @@ describe("fnValidator", () => {
   });
 });
 
-// ── zodValidator ─────────────────────────────────────────────────────────────
 
 describe("zodValidator", () => {
   // Minimal stub matching Zod's safeParse API — no zod dependency needed
@@ -89,7 +87,6 @@ describe("zodValidator", () => {
   });
 });
 
-// ── TreeHandle integration ───────────────────────────────────────────────────
 
 describe("TreeHandle validation", () => {
   it("validates addNode value", () => {
@@ -112,7 +109,6 @@ describe("TreeHandle validation", () => {
   });
 });
 
-// ── RGAHandle integration ────────────────────────────────────────────────────
 
 describe("RGAHandle validation", () => {
   it("validates insert text", () => {

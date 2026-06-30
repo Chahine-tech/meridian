@@ -1011,7 +1011,6 @@ mod tests {
         assert_eq!(records, 0);
     }
 
-    // ── compact_safe tests ──────────────────────────────────────────────────
 
     fn make_floor_vc(node_id: u64, up_to_logical: u16) -> VectorClock {
         let mut vc = VectorClock::new();

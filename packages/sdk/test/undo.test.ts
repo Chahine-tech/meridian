@@ -33,7 +33,6 @@ function decodeOp(msg: unknown): unknown {
 const OPTS = { crdtId: "rg:doc", clientId: 42 };
 const TREE_OPTS = { crdtId: "tr:doc", clientId: 42 };
 
-// ─── RGA ─────────────────────────────────────────────────────────────────────
 
 describe("UndoManager — RGA", () => {
   let t: WsTransport & { sent: unknown[] };
@@ -160,7 +159,6 @@ describe("UndoManager — RGA", () => {
   });
 });
 
-// ─── Tree ─────────────────────────────────────────────────────────────────────
 
 describe("UndoManager — Tree", () => {
   let t: WsTransport & { sent: unknown[] };
