@@ -6,10 +6,10 @@ Rust async client SDK for [Meridian](../../README.md) — real-time CRDT sync ov
 
 ```toml
 [dependencies]
-meridian-client = "0.1.2"
+meridian-client = "0.1.3"
 
 # Optional features
-meridian-client = { version = "0.1.2", features = ["crypto", "http"] }
+meridian-client = { version = "0.1.3", features = ["crypto", "http"] }
 ```
 
 | Feature | Enables |
