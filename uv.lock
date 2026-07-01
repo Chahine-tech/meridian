@@ -4,7 +4,7 @@ requires-python = ">=3.12"
 
 [manifest]
 members = [
-    "meridian-sdk",
+    "meridian-crdt",
 ]
 
 [[package]]
@@ -133,7 +133,7 @@ wheels = [
 ]
 
 [[package]]
-name = "meridian-sdk"
+name = "meridian-crdt"
 version = "0.1.0"
 source = { editable = "packages/python" }
 dependencies = [

@@ -105,6 +105,46 @@ pub enum ClientMsg {
 
     /// Cancel a previously registered live query subscription.
     UnsubscribeQuery { query_id: String },
+
+    /// Undo a specific `LwwRegister::Set` op, validated server-side.
+    ///
+    /// The server checks whether `target_hlc` is still the current winning entry
+    /// before applying the restore. If another client has since overwritten the
+    /// register, the undo is skipped and `ServerMsg::UndoSkipped` is returned.
+    ///
+    /// Other CRDT types (ORSet, RGA, Tree, PNCounter) are undone by the client
+    /// sending the corresponding inverse op as a normal `Op` message — no special
+    /// server support is needed because their inverse ops are always CRDT-safe.
+    ///
+    /// `target_hlc`    — msgpack-encoded `HybridLogicalClock` of the Set op to undo.
+    /// `restore_entry` — msgpack-encoded `Option<LwwEntry>`: the entry to restore
+    ///                   (`None` = clear the register to empty).
+    UndoLww {
+        crdt_id: String,
+        target_hlc: ByteBuf,
+        restore_entry: ByteBuf,
+    },
+}
+
+/// Describes why a client op was superseded or structurally rejected.
+/// Carried in [`ServerMsg::Conflict`] and sent only to the originating connection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConflictKind {
+    /// A `LwwRegister::Set` was ignored because a concurrent write from another
+    /// client with a higher timestamp was already applied.
+    LwwOverwritten {
+        /// `client_id` of the write that won.
+        winning_client_id: u64,
+        /// Wall-clock ms of the winning write.
+        winning_ts_ms: u64,
+    },
+    /// A `Tree::MoveNode` was discarded to prevent a cycle.
+    TreeMoveCycle {
+        /// HLC string (`wall_ms:logical:node_id`) of the node that could not move.
+        node_id: String,
+        /// The parent it tried to move under (`None` = root level).
+        attempted_parent_id: Option<String>,
+    },
 }
 
 /// Messages sent by the server over the WebSocket connection.
@@ -164,6 +204,23 @@ pub enum ServerMsg {
         value: serde_json::Value,
         matched: usize,
     },
+
+    /// Sent privately to the connection whose op was superseded by a concurrent
+    /// op or structurally rejected (e.g. cycle prevention in Tree).
+    /// Never broadcast to other clients in the namespace.
+    Conflict {
+        crdt_id: String,
+        kind: ConflictKind,
+    },
+
+    /// Confirms that a `ClientMsg::UndoLww` was successfully applied and the
+    /// restore delta has been broadcast to all subscribers.
+    UndoAck { crdt_id: String },
+
+    /// Reports that a `ClientMsg::UndoLww` was skipped because the target entry
+    /// has already been overwritten by a concurrent write from another client.
+    /// This is not an error — it is the intended CRDT-safe behaviour.
+    UndoSkipped { crdt_id: String, reason: String },
 }
 
 impl ServerMsg {

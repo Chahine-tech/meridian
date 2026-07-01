@@ -108,6 +108,36 @@ export class HttpClient {
     return this.requestJson(QueryResult, "POST", `/v1/namespaces/${ns}/query`, spec);
   }
 
+  /**
+   * Forcefully close a client's WebSocket connection.
+   *
+   * The server sends a `{ code: 4401, message: "session revoked" }` error frame
+   * before closing, giving the client a chance to show a meaningful error message.
+   *
+   * Requires write access to the namespace.
+   *
+   * @param ns       - Namespace the client is connected to.
+   * @param clientId - The numeric client ID to revoke (from `TokenClaims.client_id`).
+   *
+   * @returns `{ revoked: true, client_id }` on success, or an `HttpError` with
+   *          status 404 if the client is not currently connected.
+   *
+   * @example
+   * ```ts
+   * await Effect.runPromise(client.http.revokeSession("my-app", 42));
+   * ```
+   */
+  revokeSession(
+    ns: string,
+    clientId: number,
+  ): Effect.Effect<{ revoked: boolean; client_id: number }, HttpError | NetworkError> {
+    return this.requestJson(
+      Schema.Struct({ revoked: Schema.Boolean, client_id: Schema.Number }),
+      "DELETE",
+      `/v1/namespaces/${ns}/sessions/${clientId}`,
+    );
+  }
+
   private requestJson<A, I>(
     responseSchema: Schema.Schema<A, I>,
     method: string,

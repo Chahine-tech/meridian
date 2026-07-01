@@ -18,6 +18,7 @@ export class ORSetHandle<T> {
   private readonly transport: WsTransport;
   private readonly schema: Schema.Schema<T> | null;
   private readonly listeners = new Set<(elements: T[]) => void>();
+  private readonly encryptFn: ((v: unknown) => Promise<unknown>) | null;
 
   constructor(opts: {
     ns: string;
@@ -25,12 +26,18 @@ export class ORSetHandle<T> {
     clientId: number;
     transport: WsTransport;
     schema?: Schema.Schema<T>;
+    /** Deterministic AES-GCM encrypt function. Same value → same ciphertext (required for remove to match add). */
+    encryptFn?: (v: unknown) => Promise<unknown>;
   }) {
     this.crdtId = opts.crdtId;
     this.clientId = opts.clientId;
     this.transport = opts.transport;
     this.schema = opts.schema ?? null;
+    this.encryptFn = opts.encryptFn ?? null;
   }
+
+  /** The CRDT ID this handle is bound to. */
+  get id(): string { return this.crdtId; }
 
   /** Returns the current set elements as an array, decoded via the optional schema. */
   elements(): T[] {
@@ -71,8 +78,12 @@ export class ORSetHandle<T> {
    *
    * Each call generates a unique tag so concurrent adds of the same value
    * are treated as distinct entries.
+   *
+   * Returns the UUID tag string — pass it to `UndoManager.orsetAdd()` or
+   * to `removeByTag()` to undo exactly this add without affecting concurrent
+   * adds of the same value from other clients.
    */
-  add(element: T, ttlMs?: number): void {
+  add(element: T, ttlMs?: number): string {
     const tag = crypto.randomUUID();
     const key = JSON.stringify(element);
 
@@ -81,13 +92,70 @@ export class ORSetHandle<T> {
     tagSet.add(tag);
     this.emit();
 
-    this.transport.send({
-      Op: {
-        crdt_id: this.crdtId,
-        op_bytes: encode({ ORSet: { Add: { element, tag: uuidToBytes(tag) } } }),
-        ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
-      },
-    });
+    if (this.encryptFn !== null) {
+      const encFn = this.encryptFn;
+      void (async () => {
+        const wireElement = await encFn(element);
+        this.transport.send({
+          Op: {
+            crdt_id: this.crdtId,
+            op_bytes: encode({ ORSet: { Add: { element: wireElement, tag: uuidToBytes(tag) } } }),
+            ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+          },
+        });
+      })();
+    } else {
+      this.transport.send({
+        Op: {
+          crdt_id: this.crdtId,
+          op_bytes: encode({ ORSet: { Add: { element, tag: uuidToBytes(tag) } } }),
+          ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+        },
+      });
+    }
+
+    return tag;
+  }
+
+  /**
+   * Removes a specific add by its tag UUID — the inverse of a single `add()` call.
+   *
+   * Unlike `remove(element)` which removes all locally-observed copies, this
+   * removes only the exact add identified by `tag`. Concurrent adds of the same
+   * value from other clients are left intact — correct OR-Set add-wins semantics.
+   *
+   * Primarily used by `UndoManager` to undo an `add()`.
+   */
+  removeByTag(element: T, tag: string, ttlMs?: number): void {
+    const key = JSON.stringify(element);
+    const tagSet = this.tags.get(key);
+    if (tagSet?.has(tag)) {
+      tagSet.delete(tag);
+      if (tagSet.size === 0) this.tags.delete(key);
+      this.emit();
+    }
+
+    if (this.encryptFn !== null) {
+      const encFn = this.encryptFn;
+      void (async () => {
+        const wireElement = await encFn(element);
+        this.transport.send({
+          Op: {
+            crdt_id: this.crdtId,
+            op_bytes: encode({ ORSet: { Remove: { element: wireElement, known_tags: [uuidToBytes(tag)] } } }),
+            ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+          },
+        });
+      })();
+    } else {
+      this.transport.send({
+        Op: {
+          crdt_id: this.crdtId,
+          op_bytes: encode({ ORSet: { Remove: { element, known_tags: [uuidToBytes(tag)] } } }),
+          ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+        },
+      });
+    }
   }
 
   /**
@@ -104,13 +172,27 @@ export class ORSetHandle<T> {
     this.tags.delete(key);
     this.emit();
 
-    this.transport.send({
-      Op: {
-        crdt_id: this.crdtId,
-        op_bytes: encode({ ORSet: { Remove: { element, known_tags: currentTags.map(uuidToBytes) } } }),
-        ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
-      },
-    });
+    if (this.encryptFn !== null) {
+      const encFn = this.encryptFn;
+      void (async () => {
+        const wireElement = await encFn(element);
+        this.transport.send({
+          Op: {
+            crdt_id: this.crdtId,
+            op_bytes: encode({ ORSet: { Remove: { element: wireElement, known_tags: currentTags.map(uuidToBytes) } } }),
+            ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+          },
+        });
+      })();
+    } else {
+      this.transport.send({
+        Op: {
+          crdt_id: this.crdtId,
+          op_bytes: encode({ ORSet: { Remove: { element, known_tags: currentTags.map(uuidToBytes) } } }),
+          ...(ttlMs !== undefined && { ttl_ms: ttlMs }),
+        },
+      });
+    }
   }
 
   /** Returns the raw tag map for snapshot serialization. */

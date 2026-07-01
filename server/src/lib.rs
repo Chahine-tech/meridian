@@ -16,9 +16,10 @@ use std::sync::Arc;
 use crate::{
     api::{
         handlers::AppStateExt,
-        ws::{SubscriptionManager, WsState},
+        ws::{SessionRegistry, SubscriptionManager, WsState},
     },
     auth::TokenSigner,
+    crdt::ClientRegistry,
     storage::{CrdtStore, WalBackend},
     webhooks::WebhookDispatcher,
 };
@@ -29,6 +30,11 @@ pub struct AppState<S: CrdtStore, W: WalBackend> {
     pub wal: Arc<W>,
     pub subscriptions: Arc<SubscriptionManager>,
     pub signer: Arc<TokenSigner>,
+    /// Per-namespace registry of connected clients' VectorClocks — used by the
+    /// CRDT compactor for DottedDB-inspired precise GC.
+    pub client_registry: Arc<ClientRegistry>,
+    /// Per-session revocation registry — allows `DELETE /sessions/:id` to close WS connections.
+    pub session_registry: Arc<SessionRegistry>,
     /// `None` when `MERIDIAN_WEBHOOK_URL` is not set.
     pub webhooks: Option<WebhookDispatcher>,
     /// `None` when clustering is not enabled or no cluster config found.
@@ -44,6 +50,8 @@ impl<S: CrdtStore, W: WalBackend> Clone for AppState<S, W> {
             wal: Arc::clone(&self.wal),
             subscriptions: Arc::clone(&self.subscriptions),
             signer: Arc::clone(&self.signer),
+            client_registry: Arc::clone(&self.client_registry),
+            session_registry: Arc::clone(&self.session_registry),
             webhooks: self.webhooks.clone(),
             #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
             cluster: self.cluster.clone(),
@@ -71,6 +79,10 @@ impl<S: CrdtStore, W: WalBackend> AppStateExt for AppState<S, W> {
         &self.wal
     }
 
+    fn session_registry(&self) -> &Arc<SessionRegistry> {
+        &self.session_registry
+    }
+
     fn webhooks(&self) -> Option<&WebhookDispatcher> {
         self.webhooks.as_ref()
     }
@@ -90,6 +102,14 @@ impl<S: CrdtStore, W: WalBackend> WsState for AppState<S, W> {
 
     fn subscriptions(&self) -> &Arc<SubscriptionManager> {
         &self.subscriptions
+    }
+
+    fn client_registry(&self) -> &Arc<ClientRegistry> {
+        &self.client_registry
+    }
+
+    fn session_registry(&self) -> &Arc<SessionRegistry> {
+        &self.session_registry
     }
 
     fn webhooks(&self) -> Option<&WebhookDispatcher> {

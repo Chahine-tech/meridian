@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument, warn};
 
+use crate::protocol::ConflictKind;
+
 use super::{
-    Crdt, CrdtError, VectorClock,
+    Crdt, CrdtError, HybridLogicalClock, VectorClock,
     crdtmap::{CRDTMap, CRDTMapOp},
     gcounter::{GCounter, GCounterOp},
     lwwregister::{LwwOp, LwwRegister},
@@ -184,6 +186,32 @@ impl CrdtValue {
             }
             Self::Tree(v) => {
                 let (nodes, records) = v.compact_before(threshold_wall_ms);
+                CompactStats {
+                    tombstones_removed: nodes,
+                    move_records_removed: records,
+                }
+            }
+            _ => CompactStats::default(),
+        }
+    }
+
+    /// DottedDB-inspired precise GC: remove tombstones that every registered client
+    /// has observed AND that are old enough for offline clients to have reconnected.
+    ///
+    /// `floor_vc` is the component-wise minimum VectorClock over all currently
+    /// connected clients (from [`ClientRegistry::floor_vc`]). A tombstone whose
+    /// creator's version is dominated by `floor_vc` is eligible once
+    /// `grace_ms` ms have elapsed since the deletion.
+    ///
+    /// Returns the same `CompactStats` as `compact_before`.
+    pub fn compact_safe(&mut self, floor_vc: &VectorClock, grace_ms: u64) -> CompactStats {
+        match self {
+            Self::RGA(v) => CompactStats {
+                tombstones_removed: v.compact_safe(floor_vc, grace_ms),
+                move_records_removed: 0,
+            },
+            Self::Tree(v) => {
+                let (nodes, records) = v.compact_safe(floor_vc, grace_ms);
                 CompactStats {
                     tombstones_removed: nodes,
                     move_records_removed: records,
@@ -384,35 +412,81 @@ impl VersionedOp {
     }
 }
 
-/// Apply a CrdtOp to a CrdtValue. Returns a serialized delta on success.
+/// Apply a CrdtOp to a CrdtValue.
+///
+/// Returns `(delta_bytes, conflict)`:
+/// - `delta_bytes` — serialised delta to broadcast, or `None` if the op was a no-op.
+/// - `conflict`    — present when the op was superseded or structurally rejected
+///   (LWW write lost, Tree move created cycle). Callers should forward this
+///   privately to the originating connection via [`ServerMsg::Conflict`].
 #[instrument(skip(value, op), fields(crdt_type = value.crdt_type().as_str(), op_type = op.crdt_type().as_str()))]
-pub fn apply_op(value: &mut CrdtValue, op: CrdtOp) -> Result<Option<Vec<u8>>, CrdtError> {
+pub fn apply_op(
+    value: &mut CrdtValue,
+    op: CrdtOp,
+) -> Result<(Option<Vec<u8>>, Option<ConflictKind>), CrdtError> {
     macro_rules! apply_and_serialize {
         ($crdt:expr, $op:expr) => {{
             let delta = $crdt.apply($op)?;
             match delta {
-                None => Ok(None),
-                Some(d) => Ok(Some(rmp_serde::encode::to_vec_named(&d)?)),
+                None => Ok((None, None)),
+                Some(d) => Ok((Some(rmp_serde::encode::to_vec_named(&d)?), None)),
             }
         }};
     }
+
+    let hlc_str = |h: HybridLogicalClock| {
+        format!("{}:{}:{}", h.wall_ms, u32::from(h.logical), h.node_id)
+    };
 
     let result = match (value, op) {
         (CrdtValue::GCounter(v), CrdtOp::GCounter(op)) => apply_and_serialize!(v, op),
         (CrdtValue::PNCounter(v), CrdtOp::PNCounter(op)) => apply_and_serialize!(v, op),
         (CrdtValue::ORSet(v), CrdtOp::ORSet(op)) => apply_and_serialize!(v, op),
-        (CrdtValue::LwwRegister(v), CrdtOp::LwwRegister(op)) => apply_and_serialize!(v, op),
         (CrdtValue::Presence(v), CrdtOp::Presence(op)) => apply_and_serialize!(v, op),
         (CrdtValue::CRDTMap(v), CrdtOp::CRDTMap(op)) => apply_and_serialize!(v, op),
         (CrdtValue::RGA(v), CrdtOp::RGA(op)) => apply_and_serialize!(v, op),
-        (CrdtValue::Tree(v), CrdtOp::Tree(op)) => apply_and_serialize!(v, op),
-        _ => Err(CrdtError::InvalidOp(
-            "op type does not match crdt type".into(),
-        )),
+
+        (CrdtValue::LwwRegister(v), CrdtOp::LwwRegister(op)) => {
+            let op_author = op.author;
+            let delta = v.apply(op)?;
+            if let Some(d) = delta {
+                Ok((Some(rmp_serde::encode::to_vec_named(&d)?), None))
+            } else {
+                // Op was a stale write — conflict if a different client's entry won.
+                let conflict = v.entry.as_ref().and_then(|e| {
+                    if e.author != op_author {
+                        Some(ConflictKind::LwwOverwritten {
+                            winning_client_id: e.author,
+                            winning_ts_ms: e.hlc.wall_ms,
+                        })
+                    } else {
+                        None
+                    }
+                });
+                Ok((None, conflict))
+            }
+        }
+
+        (CrdtValue::Tree(v), CrdtOp::Tree(op)) => {
+            let delta = v.apply(op)?;
+            if let Some(d) = delta {
+                let conflict = d.discarded_moves.first().map(|disc| ConflictKind::TreeMoveCycle {
+                    node_id: hlc_str(disc.node_id),
+                    attempted_parent_id: disc.attempted_parent_id.map(hlc_str),
+                });
+                Ok((Some(rmp_serde::encode::to_vec_named(&d)?), conflict))
+            } else {
+                Ok((None, None))
+            }
+        }
+
+        _ => Err(CrdtError::InvalidOp("op type does not match crdt type".into())),
     };
     match &result {
-        Ok(Some(_)) => debug!("op applied, delta produced"),
-        Ok(None) => debug!("op applied, no-op (already seen)"),
+        Ok((Some(_), None)) => debug!("op applied, delta produced"),
+        Ok((Some(_), Some(_))) => debug!("op applied, delta produced with conflict"),
+        Ok((None, Some(_))) => debug!("op applied, no-op with conflict"),
+        Ok((None, None)) => debug!("op applied, no-op (already seen)"),
         Err(e) => warn!(error = %e, "op rejected"),
     }
     result
@@ -447,8 +521,10 @@ mod tests {
             client_id: 1,
             amount: 5,
         });
-        let delta_bytes = apply_op(&mut v, op).unwrap().unwrap();
-        assert!(!delta_bytes.is_empty());
+        let (delta_bytes, conflict) = apply_op(&mut v, op).unwrap();
+        assert!(delta_bytes.is_some());
+        assert!(!delta_bytes.unwrap().is_empty());
+        assert!(conflict.is_none());
     }
 
     #[test]
@@ -464,7 +540,7 @@ mod tests {
     #[test]
     fn msgpack_roundtrip() {
         let mut v = CrdtValue::new(CrdtType::GCounter);
-        apply_op(
+        let _ = apply_op(
             &mut v,
             CrdtOp::GCounter(GCounterOp {
                 client_id: 42,

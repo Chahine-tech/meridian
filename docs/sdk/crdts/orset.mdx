@@ -38,6 +38,33 @@ cart.onChange(items => {
 
 Incoming deltas are validated against the schema at runtime via `Schema.decodeUnknownSync`. Invalid entries are discarded.
 
+## Encryption
+
+ORSet supports end-to-end encryption. Pass an `encryption` map to `MeridianClient.create()`:
+
+```ts
+import { Effect } from "effect";
+import { MeridianClient, importAesGcmKey } from "meridian-sdk";
+
+const key = await importAesGcmKey(process.env.SECRET_KEY!);
+
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "wss://your-server.com",
+    namespace: "my-app",
+    token,
+    encryption: { "or:secret-*": key },
+  })
+);
+
+const tags = client.orset("or:secret-tags");
+tags.add("confidential");    // wire value is encrypted — server never sees "confidential"
+tags.remove("confidential"); // works correctly across all clients
+console.log(tags.elements()); // ["confidential"] — decrypted locally
+```
+
+The SDK uses **deterministic nonce derivation** (nonce = `SHA-256(plaintext)[0:12]`) so that the same element always produces the same ciphertext. This is required for correctness: the server keys entries by encrypted value, and `remove()` must reconstruct the exact same key. See [Encryption](/sdk/encryption#orset--deterministic-encryption) for the full security analysis.
+
 ## Element depth limit
 
 ORSet elements must be **scalars or single-level objects/arrays** (depth ≤ 1). Nested structures are rejected by the server:

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::{
     Router, middleware,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
@@ -15,6 +15,7 @@ use super::handlers::{
     history::get_history,
     metrics::get_metrics,
     query::post_query,
+    sessions::revoke_session,
     sse::get_sse,
     tokens::{issue_token, token_me},
 };
@@ -25,18 +26,19 @@ use crate::auth::auth_middleware;
 ///
 /// Routes:
 /// ```text
-/// GET  /v1/namespaces/:ns/crdts/:id           -> get_crdt
-/// POST /v1/namespaces/:ns/crdts/:id/ops       -> post_op
-/// GET  /v1/namespaces/:ns/crdts/:id/sync      -> get_sync
-/// GET  /v1/namespaces/:ns/crdts/:id/history   -> get_history
-/// GET  /v1/namespaces/:ns/crdts/:id/events    -> get_sse (SSE stream)
-/// POST /v1/namespaces/:ns/query               -> post_query
-/// POST /v1/namespaces/:ns/tokens              -> issue_token
-/// GET  /v1/namespaces/:ns/tokens/me           -> token_me
-/// GET  /v1/namespaces/:ns/connect             -> ws_upgrade_handler
-/// GET  /metrics                               -> get_metrics (no auth)
-/// GET  /health/live                           -> health_live (no auth, always 200)
-/// GET  /health/ready                          -> health_ready (no auth, checks store+WAL)
+/// GET    /v1/namespaces/:ns/crdts/:id              -> get_crdt
+/// POST   /v1/namespaces/:ns/crdts/:id/ops          -> post_op
+/// GET    /v1/namespaces/:ns/crdts/:id/sync         -> get_sync
+/// GET    /v1/namespaces/:ns/crdts/:id/history      -> get_history
+/// GET    /v1/namespaces/:ns/crdts/:id/events       -> get_sse (SSE stream)
+/// POST   /v1/namespaces/:ns/query                  -> post_query
+/// POST   /v1/namespaces/:ns/tokens                 -> issue_token
+/// GET    /v1/namespaces/:ns/tokens/me              -> token_me
+/// GET    /v1/namespaces/:ns/connect                -> ws_upgrade_handler
+/// DELETE /v1/namespaces/:ns/sessions/:client_id   -> revoke_session
+/// GET    /metrics                                  -> get_metrics (no auth)
+/// GET    /health/live                              -> health_live (no auth, always 200)
+/// GET    /health/ready                             -> health_ready (no auth, checks store+WAL)
 /// ```
 pub fn build_router<S>(state: S, auth_state: Arc<AuthState>) -> Router
 where
@@ -55,6 +57,7 @@ where
         .route("/v1/namespaces/{ns}/tokens", post(issue_token::<S>))
         .route("/v1/namespaces/{ns}/tokens/me", get(token_me::<S>))
         .route("/v1/namespaces/{ns}/connect", get(ws_upgrade_handler::<S>))
+        .route("/v1/namespaces/{ns}/sessions/{client_id}", delete(revoke_session::<S>))
         .layer(middleware::from_fn_with_state(auth_state, auth_middleware))
         .with_state(state.clone());
 

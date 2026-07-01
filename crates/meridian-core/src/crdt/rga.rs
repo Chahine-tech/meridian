@@ -101,6 +101,47 @@ impl Rga {
         before - self.nodes.len()
     }
 
+    /// DottedDB-inspired precise GC: remove tombstones that every known client
+    /// has observed AND that are old enough for offline clients to have reconnected.
+    ///
+    /// A tombstone with `id = HLC(wall_ms, logical, node_id)` is eligible when:
+    /// 1. `floor_vc[node_id] >= logical` — every registered client has seen the insert
+    ///    (same condition as `Rga::delta_since` uses to decide whether to emit it).
+    /// 2. `deleted_at_ms > 0 && deleted_at_ms + grace_ms <= now_ms()` — old enough
+    ///    that an offline client would have exceeded the reconnect grace window.
+    /// 3. No live node references it as an `origin_id` (structural safety).
+    ///
+    /// Returns the number of tombstones removed.
+    pub fn compact_safe(&mut self, floor_vc: &VectorClock, grace_ms: u64) -> usize {
+        let now = now_ms();
+        let live_origin_ids: std::collections::BTreeSet<HybridLogicalClock> = self
+            .nodes
+            .iter()
+            .filter(|n| !n.deleted)
+            .filter_map(|n| n.origin_id)
+            .collect();
+
+        let before = self.nodes.len();
+        self.nodes.retain(|n| {
+            if !n.deleted {
+                return true;
+            }
+            if live_origin_ids.contains(&n.id) {
+                return true; // structurally referenced
+            }
+            if n.deleted_at_ms == 0 {
+                return true; // age unknown — never GC
+            }
+            if n.deleted_at_ms.saturating_add(grace_ms) > now {
+                return true; // not old enough yet
+            }
+            // Only GC if ALL known clients have seen the insert.
+            let all_seen = floor_vc.get(n.id.node_id) >= u32::from(n.id.logical);
+            !all_seen // retain if NOT all clients have seen it
+        });
+        before - self.nodes.len()
+    }
+
     /// Find the insertion index for a node with the given origin_id and id.
     ///
     /// Algorithm:
@@ -548,5 +589,114 @@ mod tests {
         let removed = r.compact_before(u64::MAX);
         assert_eq!(removed, 0);
         assert_eq!(r.nodes.len(), 2);
+    }
+
+
+    fn make_floor_vc(node_id: u64, up_to_logical: u16) -> VectorClock {
+        let mut vc = VectorClock::new();
+        for _ in 0..u32::from(up_to_logical) {
+            vc.increment(node_id);
+        }
+        vc
+    }
+
+    #[test]
+    fn compact_safe_removes_tombstone_all_clients_seen() {
+        let mut r = Rga::default();
+        let id_a = hlc(1, 1, 1); // node_id=1, logical=1
+        insert(&mut r, id_a, None, 'A');
+        delete(&mut r, id_a);
+
+        // Manually backdate deletion so grace period is zero.
+        r.nodes[0].deleted_at_ms = 1; // very old
+
+        // floor_vc: node 1 has seen up to logical 1 → "all seen"
+        let floor = make_floor_vc(1, 1);
+        let removed = r.compact_safe(&floor, 0);
+        assert_eq!(removed, 1, "tombstone should be GC'd when all clients have seen it");
+        assert_eq!(r.nodes.len(), 0);
+    }
+
+    #[test]
+    fn compact_safe_keeps_tombstone_if_client_has_not_seen_insert() {
+        let mut r = Rga::default();
+        let id_a = hlc(1, 1, 1);
+        insert(&mut r, id_a, None, 'A');
+        delete(&mut r, id_a);
+        r.nodes[0].deleted_at_ms = 1;
+
+        // floor_vc does not mention node_id=1 → get(1) returns 0 < logical(1)
+        let floor = VectorClock::new();
+        let removed = r.compact_safe(&floor, 0);
+        assert_eq!(removed, 0, "tombstone must be kept if floor doesn't cover the insert");
+        assert_eq!(r.nodes.len(), 1);
+    }
+
+    #[test]
+    fn compact_safe_keeps_tombstone_within_grace_window() {
+        let mut r = Rga::default();
+        let id_a = hlc(1, 1, 1);
+        insert(&mut r, id_a, None, 'A');
+        delete(&mut r, id_a);
+        // deleted_at_ms is near now — still within the 24h grace window
+        r.nodes[0].deleted_at_ms = now_ms().saturating_sub(1_000); // 1 second ago
+
+        let floor = make_floor_vc(1, 1);
+        let grace_24h = 24 * 60 * 60 * 1_000;
+        let removed = r.compact_safe(&floor, grace_24h);
+        assert_eq!(removed, 0, "tombstone within grace window must not be GC'd");
+    }
+
+    #[test]
+    fn compact_safe_keeps_structurally_referenced_tombstone() {
+        let mut r = Rga::default();
+        let id_a = hlc(1, 1, 1);
+        let id_b = hlc(1, 2, 1);
+        insert(&mut r, id_a, None, 'A');
+        insert(&mut r, id_b, Some(id_a), 'B'); // B is live, references A as origin
+        delete(&mut r, id_a);
+        r.nodes.iter_mut().find(|n| n.id == id_a).unwrap().deleted_at_ms = 1;
+
+        // Even with full floor_vc coverage, A must be kept because B is alive and references it.
+        let floor = make_floor_vc(1, 2);
+        let removed = r.compact_safe(&floor, 0);
+        assert_eq!(removed, 0, "tombstone referenced as origin by live node must be kept");
+    }
+
+    #[test]
+    fn compact_safe_keeps_tombstone_with_zero_deleted_at() {
+        let mut r = Rga::default();
+        let id_a = hlc(1, 1, 1);
+        insert(&mut r, id_a, None, 'A');
+        // Manually mark deleted with deleted_at_ms = 0 (age unknown).
+        r.nodes[0].deleted = true;
+        r.nodes[0].deleted_at_ms = 0;
+
+        let floor = make_floor_vc(1, 1);
+        let removed = r.compact_safe(&floor, 0);
+        assert_eq!(removed, 0, "tombstone with unknown age (deleted_at_ms=0) must never be GC'd");
+    }
+
+    #[test]
+    fn compact_safe_partial_floor_blocks_gc_for_unseen_nodes() {
+        // Two nodes authored by different node_ids. floor_vc covers node_id=1 but
+        // not node_id=2 (second client hasn't synced). Only id_a (node_id=1) should be GC'd.
+        let mut r = Rga::default();
+        let id_a = hlc(1, 1, 1); // node_id=1
+        let id_b = hlc(1, 1, 2); // node_id=2
+        insert(&mut r, id_a, None, 'A');
+        insert(&mut r, id_b, Some(id_a), 'B');
+        delete(&mut r, id_a);
+        delete(&mut r, id_b);
+        for n in &mut r.nodes {
+            n.deleted_at_ms = 1;
+        }
+
+        // floor covers node_id=1 (logical≥1) but not node_id=2 (not mentioned → 0)
+        let floor = make_floor_vc(1, 1);
+        let removed = r.compact_safe(&floor, 0);
+        assert_eq!(removed, 1, "only tombstone seen by all clients should be GC'd");
+        assert_eq!(r.nodes.len(), 1);
+        assert_eq!(r.nodes[0].id, id_b, "id_b (unseen) must remain");
     }
 }

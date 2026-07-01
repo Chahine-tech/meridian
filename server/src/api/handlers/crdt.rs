@@ -91,7 +91,8 @@ pub async fn post_op<S: AppStateExt>(
     }
 
     // HTTP API does not expose TTL — pass None (permanent entry).
-    let delta_bytes = match apply_op_atomic(state.store(), &ns, &id, op, None).await {
+    // Conflict events are not surfaced over HTTP (request-response semantics handle it implicitly).
+    let (delta_bytes, _conflict) = match apply_op_atomic(state.store(), &ns, &id, op, None).await {
         Ok(d) => d,
         Err(ApplyError::Crdt(e)) => {
             return (

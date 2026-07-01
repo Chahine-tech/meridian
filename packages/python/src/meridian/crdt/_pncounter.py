@@ -19,12 +19,8 @@ class PNCounter:
         self._neg: dict[str, int] = {}
         self._listeners: list[asyncio.Queue[int]] = []
 
-    # ── read ─────────────────────────────────────────────────────────────────
-
     def value(self) -> int:
         return sum(self._pos.values()) - sum(self._neg.values())
-
-    # ── write ─────────────────────────────────────────────────────────────────
 
     def increment(self, amount: int = 1, *, ttl_ms: int | None = None) -> None:
         if amount <= 0:
@@ -42,8 +38,6 @@ class PNCounter:
         self._notify()
         self._send({"Decrement": {"client_id": self._client_id, "amount": amount}}, ttl_ms)
 
-    # ── subscribe ─────────────────────────────────────────────────────────────
-
     async def changes(self) -> AsyncIterator[int]:
         q: asyncio.Queue[int] = asyncio.Queue()
         self._listeners.append(q)
@@ -52,8 +46,6 @@ class PNCounter:
                 yield await q.get()
         finally:
             self._listeners.remove(q)
-
-    # ── internal ──────────────────────────────────────────────────────────────
 
     def _apply_delta(self, delta: dict) -> None:
         changed = False

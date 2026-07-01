@@ -57,8 +57,6 @@ class MeridianClient:
 
         self._transport = Transport(url, token, self._on_message)
 
-    # ── lifecycle ─────────────────────────────────────────────────────────────
-
     @classmethod
     async def connect(
         cls,
@@ -86,8 +84,6 @@ class MeridianClient:
 
     async def __aexit__(self, *_: object) -> None:
         await self.close()
-
-    # ── CRDT handles ─────────────────────────────────────────────────────────
 
     def gcounter(self, crdt_id: str) -> GCounter:
         if crdt_id not in self._gcounters:
@@ -141,8 +137,6 @@ class MeridianClient:
             self._subscribe(crdt_id)
         return self._presences[crdt_id]
 
-    # ── live queries ──────────────────────────────────────────────────────────
-
     async def live_query(
         self,
         from_: str,
@@ -178,19 +172,13 @@ class MeridianClient:
             if q in listeners:
                 listeners.remove(q)
 
-    # ── awareness (low-level) ─────────────────────────────────────────────────
-
     def send_awareness(self, key: str, data: bytes) -> None:
         self._transport.send({"AwarenessUpdate": {"key": key, "data": data}})
-
-    # ── sync ─────────────────────────────────────────────────────────────────
 
     def sync(self, crdt_id: str, since: dict[str, int] | None = None) -> None:
         """Request a delta sync from the server for a given CRDT."""
         vc_bytes = encode_vector_clock(since or {})
         self._transport.send({"Sync": {"crdt_id": crdt_id, "since_vc": vc_bytes}})
-
-    # ── internal ──────────────────────────────────────────────────────────────
 
     def _subscribe(self, crdt_id: str) -> None:
         self._transport.send({"Subscribe": {"crdt_id": crdt_id}})
@@ -201,6 +189,23 @@ class MeridianClient:
 
         if "Delta" in msg:
             self._handle_delta(msg["Delta"])
+        elif "UndoAck" in msg:
+            crdt_id = msg["UndoAck"].get("crdt_id", "")
+            if crdt_id in self._lwws:
+                self._lwws[crdt_id]._apply_undo_ack()
+        elif "UndoSkipped" in msg:
+            payload = msg["UndoSkipped"]
+            crdt_id = payload.get("crdt_id", "")
+            reason = payload.get("reason", "")
+            if crdt_id in self._lwws:
+                self._lwws[crdt_id]._apply_undo_skipped(reason)
+        elif "Conflict" in msg:
+            import logging
+
+            c = msg["Conflict"]
+            logging.getLogger(__name__).info(
+                "conflict on %s: %s", c.get("crdt_id"), c.get("description")
+            )
         elif "QueryResult" in msg:
             qr = msg["QueryResult"]
             for q in self._query_queues.get(qr.get("query_id", ""), []):

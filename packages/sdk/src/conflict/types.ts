@@ -54,7 +54,21 @@ export interface LwwOverwriteEvent {
   readonly at: number;
 }
 
+/**
+ * A LwwRegister write was silently ignored because a concurrent write from
+ * another client with a higher timestamp was already applied. The server
+ * sends this only to the connection that submitted the losing write.
+ */
+export interface LwwRegisterConflictEvent {
+  readonly kind: "lww_overwritten";
+  /** The client_id whose write won. */
+  readonly winningClientId: number;
+  /** Wall-clock ms of the winning write. */
+  readonly winningTsMs: number;
+}
+
 export type ConflictEvent =
   | MoveDiscardedEvent
   | MoveReorderedEvent
-  | LwwOverwriteEvent;
+  | LwwOverwriteEvent
+  | LwwRegisterConflictEvent;

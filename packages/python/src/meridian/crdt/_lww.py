@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from .._transport import Transport
 
 _UNSET = object()
+_MAX_UNDO_STACK = 50
 
 
 class LwwRegister:
@@ -16,6 +17,10 @@ class LwwRegister:
 
     The winning entry is chosen by (wall_ms DESC, logical DESC, author DESC).
     Encryption is supported via an optional async ``encrypt_fn``/``decrypt_fn`` pair.
+
+    Undo is server-validated (Kleppmann & Stewen PaPoC 2024): ``undo()`` sends an
+    ``UndoLww`` request; the server only applies it when the target entry is still
+    current, preventing concurrent-write stomping.
     """
 
     def __init__(
@@ -35,8 +40,8 @@ class LwwRegister:
 
         self._entry: dict | None = None  # {"value", "hlc", "author"}
         self._listeners: list[asyncio.Queue] = []
-
-    # ── read ─────────────────────────────────────────────────────────────────
+        self._undo_stack: list[dict] = []  # [{"target_hlc_bytes", "prev_entry"}]
+        self._undo_result_listeners: list[asyncio.Queue] = []
 
     def value(self) -> Any:
         return self._entry["value"] if self._entry else None
@@ -50,15 +55,15 @@ class LwwRegister:
             "author": int(self._entry["author"]),
         }
 
-    # ── write ─────────────────────────────────────────────────────────────────
-
     def set(self, value: Any, *, ttl_ms: int | None = None) -> None:
         wall_ms = int(time.time() * 1000)
         hlc = {"wall_ms": wall_ms, "logical": 0, "node_id": self._client_id}
         new_entry = {"value": value, "hlc": hlc, "author": self._client_id}
+        prev_entry = self._entry
         if self._wins(new_entry, self._entry):
             self._entry = new_entry
             self._notify()
+        self._push_undo(hlc, prev_entry)
         if self._encrypt_fn is None:
             # No encryption — send synchronously.
             op = encode({"LwwRegister": {"value": value, "hlc": hlc, "author": self._client_id}})
@@ -75,12 +80,49 @@ class LwwRegister:
         wall_ms = int(time.time() * 1000)
         hlc = {"wall_ms": wall_ms, "logical": 0, "node_id": self._client_id}
         new_entry = {"value": value, "hlc": hlc, "author": self._client_id}
+        prev_entry = self._entry
         if self._wins(new_entry, self._entry):
             self._entry = new_entry
             self._notify()
+        self._push_undo(hlc, prev_entry)
         await self._send_set(value, hlc, ttl_ms)
 
-    # ── subscribe ─────────────────────────────────────────────────────────────
+    @property
+    def can_undo(self) -> bool:
+        return bool(self._undo_stack)
+
+    def undo(self) -> None:
+        """Send a server-validated undo request for the most recent local set().
+
+        The server applies the undo only if the target entry is still current
+        (i.e. no concurrent remote write has overwritten it since). The result
+        arrives via ``undo_results()``.
+        """
+        if not self._undo_stack:
+            return
+        entry = self._undo_stack.pop()
+        prev_entry = entry["prev_entry"]
+        restore_value = prev_entry["value"] if prev_entry is not None else None
+        self._transport.send(
+            {
+                "UndoLww": {
+                    "crdt_id": self._id,
+                    "target_hlc": entry["target_hlc_bytes"],
+                    "restore_entry": encode(restore_value),
+                }
+            }
+        )
+
+    async def undo_results(self) -> AsyncIterator[dict]:
+        """Yields ``{"ok": True}`` on UndoAck or ``{"ok": False, "reason": str}``
+        on UndoSkipped."""
+        q: asyncio.Queue[dict] = asyncio.Queue()
+        self._undo_result_listeners.append(q)
+        try:
+            while True:
+                yield await q.get()
+        finally:
+            self._undo_result_listeners.remove(q)
 
     async def changes(self) -> AsyncIterator[Any]:
         q: asyncio.Queue = asyncio.Queue()
@@ -91,7 +133,23 @@ class LwwRegister:
         finally:
             self._listeners.remove(q)
 
-    # ── internal ──────────────────────────────────────────────────────────────
+    def _push_undo(self, hlc: dict, prev_entry: dict | None) -> None:
+        if len(self._undo_stack) >= _MAX_UNDO_STACK:
+            self._undo_stack.pop(0)
+        self._undo_stack.append({"target_hlc_bytes": encode(hlc), "prev_entry": prev_entry})
+
+    def _apply_undo_ack(self) -> None:
+        self._notify_undo_result({"ok": True})
+
+    def _apply_undo_skipped(self, reason: str) -> None:
+        self._notify_undo_result({"ok": False, "reason": reason})
+
+    def _notify_undo_result(self, result: dict) -> None:
+        for q in self._undo_result_listeners:
+            try:
+                q.put_nowait(result)
+            except asyncio.QueueFull:
+                pass
 
     async def _send_set(
         self,

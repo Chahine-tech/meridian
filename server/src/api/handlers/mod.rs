@@ -3,6 +3,7 @@ pub mod health;
 pub mod history;
 pub mod metrics;
 pub mod query;
+pub mod sessions;
 pub mod sse;
 pub mod tokens;
 
@@ -12,7 +13,7 @@ pub use query::ExecuteQueryError;
 use std::sync::Arc;
 
 use crate::{
-    api::ws::SubscriptionManager,
+    api::ws::{SessionRegistry, SubscriptionManager},
     auth::TokenSigner,
     storage::{CrdtStore, WalBackend},
     webhooks::WebhookDispatcher,
@@ -27,6 +28,7 @@ pub trait AppStateExt: Clone + Send + Sync + 'static {
     fn subscriptions(&self) -> &Arc<SubscriptionManager>;
     fn signer(&self) -> &Arc<TokenSigner>;
     fn wal(&self) -> &Arc<Self::W>;
+    fn session_registry(&self) -> &Arc<SessionRegistry>;
     fn webhooks(&self) -> Option<&WebhookDispatcher>;
 
     /// Returns the cluster handle if clustering is enabled.

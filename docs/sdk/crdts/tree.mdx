@@ -105,6 +105,33 @@ Siblings are ordered lexicographically by their `position` string, with ties bro
 - **Tombstones**: deleted nodes are never GC'd — children are preserved and restored if a concurrent move targets a deleted parent
 - **Value updates**: last-write-wins via the `updated_at` HLC timestamp
 
+## Encryption
+
+Tree node values support end-to-end encryption. Pass an `encryption` map to `MeridianClient.create()`:
+
+```ts
+import { Effect } from "effect";
+import { MeridianClient, importAesGcmKey } from "meridian-sdk";
+
+const key = await importAesGcmKey(process.env.DOC_KEY!);
+
+const client = await Effect.runPromise(
+  MeridianClient.create({
+    url: "wss://your-server.com",
+    namespace: "my-app",
+    token,
+    encryption: { "tr:private-*": key },
+  })
+);
+
+const outline = client.tree("tr:private-doc");
+const id = outline.addNode(null, "a0", "My secret note");
+outline.updateNode(id, "Updated content");
+console.log(outline.value().roots[0].value); // "Updated content" — decrypted locally
+```
+
+`addNode` and `updateNode` encrypt the `value` argument before sending. `deleteNode` and `moveNode` do not involve a value and are unaffected. The decrypted value is transparent via `value()`, `onChange()`, and `stream()`. See [Encryption](/sdk/encryption) for key generation and distribution patterns.
+
 ## CRDT key prefix
 
 Use the `tr:` prefix by convention:

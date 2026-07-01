@@ -105,8 +105,33 @@ export const ClientMsg = Schema.Union(
   Schema.Struct({
     UnsubscribeQuery: Schema.Struct({ query_id: Schema.String }),
   }),
+  Schema.Struct({
+    UndoLww: Schema.Struct({
+      crdt_id: Schema.String,
+      /** msgpack-encoded HybridLogicalClock of the Set op to undo. */
+      target_hlc: Schema.Uint8ArrayFromSelf,
+      /** msgpack-encoded Option<serde_json::Value> — the previous value (null = register was empty). */
+      restore_entry: Schema.Uint8ArrayFromSelf,
+    }),
+  }),
 );
 export type ClientMsg = typeof ClientMsg.Type;
+
+export const ConflictKind = Schema.Union(
+  Schema.Struct({
+    LwwOverwritten: Schema.Struct({
+      winning_client_id: ClientId,
+      winning_ts_ms: TimestampMs,
+    }),
+  }),
+  Schema.Struct({
+    TreeMoveCycle: Schema.Struct({
+      node_id: Schema.String,
+      attempted_parent_id: Schema.NullOr(Schema.String),
+    }),
+  }),
+);
+export type ConflictKind = typeof ConflictKind.Type;
 
 export const ServerMsg = Schema.Union(
   Schema.Struct({
@@ -133,6 +158,16 @@ export const ServerMsg = Schema.Union(
       value: Schema.Unknown,
       matched: Schema.Number,
     }),
+  }),
+  Schema.Struct({
+    Conflict: Schema.Struct({
+      crdt_id: Schema.String,
+      kind: ConflictKind,
+    }),
+  }),
+  Schema.Struct({ UndoAck: Schema.Struct({ crdt_id: Schema.String }) }),
+  Schema.Struct({
+    UndoSkipped: Schema.Struct({ crdt_id: Schema.String, reason: Schema.String }),
   }),
 );
 export type ServerMsg = typeof ServerMsg.Type;

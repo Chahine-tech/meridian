@@ -18,15 +18,11 @@ class GCounter:
         self._counts: dict[str, int] = {}
         self._listeners: list[asyncio.Queue[int]] = []
 
-    # ── read ─────────────────────────────────────────────────────────────────
-
     def value(self) -> int:
         return sum(self._counts.values())
 
     def counts(self) -> dict[str, int]:
         return dict(self._counts)
-
-    # ── write ─────────────────────────────────────────────────────────────────
 
     def increment(self, amount: int = 1, *, ttl_ms: int | None = None) -> None:
         if amount <= 0:
@@ -40,8 +36,6 @@ class GCounter:
             msg["Op"]["ttl_ms"] = ttl_ms
         self._transport.send(msg)
 
-    # ── subscribe ─────────────────────────────────────────────────────────────
-
     async def changes(self) -> AsyncIterator[int]:
         """Yields the counter value every time it changes."""
         q: asyncio.Queue[int] = asyncio.Queue()
@@ -51,8 +45,6 @@ class GCounter:
                 yield await q.get()
         finally:
             self._listeners.remove(q)
-
-    # ── internal ──────────────────────────────────────────────────────────────
 
     def _apply_delta(self, delta: dict) -> None:
         changed = False

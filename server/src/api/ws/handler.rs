@@ -18,8 +18,9 @@ use crate::{
     api::handlers::{ExecuteQueryError, query::execute_query},
     auth::ClaimsExt,
     crdt::{
+        HybridLogicalClock,
         clock::now_ms,
-        ops::{ApplyError, apply_op_atomic},
+        ops::{ApplyError, UndoLwwResult, apply_op_atomic, apply_undo_lww_atomic},
         registry::{CrdtOp, validate_clock_drift},
     },
     metrics,
@@ -30,6 +31,7 @@ use crate::{
 use super::{
     protocol::{ClientMsg, ServerMsg},
     query_registry::QueryRegistry,
+    session_registry::SessionRegistry,
     subscription::SubscriptionManager,
 };
 
@@ -58,6 +60,8 @@ pub trait WsState: Clone + Send + Sync + 'static {
     type S: CrdtStore;
     fn store(&self) -> &Self::S;
     fn subscriptions(&self) -> &Arc<SubscriptionManager>;
+    fn client_registry(&self) -> &Arc<crate::crdt::ClientRegistry>;
+    fn session_registry(&self) -> &Arc<SessionRegistry>;
     fn webhooks(&self) -> Option<&WebhookDispatcher>;
 
     #[cfg(any(feature = "cluster", feature = "cluster-http", feature = "pg-sync"))]
@@ -109,11 +113,33 @@ async fn handle_socket<S: WsState>(
     // Subscribe to namespace broadcast channel.
     let mut broadcast_rx = state.subscriptions().subscribe(&ns);
 
+    // Register with the session registry so this connection can be revoked via HTTP.
+    let mut revoke_rx = state.session_registry().register(&ns, client_id);
+
+    // The client starts unregistered from the ClientRegistry — it will be added
+    // on its first Sync, once we know what it has seen. This prevents new
+    // connections that never sync from blocking GC indefinitely.
+
     let mut op_seq: u64 = 0;
     let mut query_registry = QueryRegistry::default();
 
     loop {
         tokio::select! {
+            // Session revocation from DELETE /v1/namespaces/:ns/sessions/:client_id
+            _ = revoke_rx.changed() => {
+                if *revoke_rx.borrow_and_update() {
+                    info!(ns, client_id, "session revoked by admin — closing WebSocket");
+                    let err = ServerMsg::Error {
+                        code: 4401,
+                        message: "session revoked".to_owned(),
+                    };
+                    if let Ok(bytes) = err.to_msgpack() {
+                        let _ = socket.send(Message::Binary(bytes.into())).await;
+                    }
+                    break;
+                }
+            }
+
             // Incoming message from this client
             maybe_msg = socket.recv() => {
                 match maybe_msg {
@@ -186,6 +212,10 @@ async fn handle_socket<S: WsState>(
             }
         }
     }
+
+    // Remove this client from the GC registry and session registry.
+    state.client_registry().unregister(&ns, client_id);
+    state.session_registry().deregister(&ns, client_id);
 
     metrics::ws_disconnected();
     debug!(ns, client_id, "WebSocket handler exiting");
@@ -329,7 +359,7 @@ async fn handle_client_message<S: WsState>(
             }
 
             match apply_op_atomic(state.store(), ns, &crdt_id, op, ttl_ms).await {
-                Ok(Some(delta_bytes)) => {
+                Ok((Some(delta_bytes), conflict)) => {
                     *seq += 1;
                     metrics::record_op(ns, &crdt_id, "ws");
 
@@ -357,20 +387,29 @@ async fn handle_client_message<S: WsState>(
                             .await;
                     }
 
-                    let ack = ServerMsg::Ack {
-                        seq: *seq,
-                        client_seq,
-                    };
+                    // Privately notify the sender if their op produced a conflict
+                    // (e.g. Tree move cycle detected alongside the delta).
+                    if let Some(kind) = conflict {
+                        let msg = ServerMsg::Conflict { crdt_id: crdt_id.clone(), kind };
+                        if let Ok(b) = msg.to_msgpack() {
+                            let _ = socket.send(Message::Binary(b.into())).await;
+                        }
+                    }
+
+                    let ack = ServerMsg::Ack { seq: *seq, client_seq };
                     if let Ok(b) = ack.to_msgpack() {
                         let _ = socket.send(Message::Binary(b.into())).await;
                     }
                 }
-                Ok(None) => {
-                    // Op was a no-op (stale / idempotent) — still ack.
-                    let ack = ServerMsg::Ack {
-                        seq: *seq,
-                        client_seq,
-                    };
+                Ok((None, conflict)) => {
+                    // Op was a no-op (stale / idempotent) — ack and optionally notify conflict.
+                    if let Some(kind) = conflict {
+                        let msg = ServerMsg::Conflict { crdt_id: crdt_id.clone(), kind };
+                        if let Ok(b) = msg.to_msgpack() {
+                            let _ = socket.send(Message::Binary(b.into())).await;
+                        }
+                    }
+                    let ack = ServerMsg::Ack { seq: *seq, client_seq };
                     if let Ok(b) = ack.to_msgpack() {
                         let _ = socket.send(Message::Binary(b.into())).await;
                     }
@@ -470,10 +509,12 @@ async fn handle_client_message<S: WsState>(
             #[cfg(any(feature = "cluster", feature = "cluster-http"))]
             let mut cluster_deltas: Vec<(String, bytes::Bytes)> = Vec::new();
 
+            let mut conflict_msgs: Vec<ServerMsg> = Vec::new();
+
             for item in parsed {
                 match apply_op_atomic(state.store(), ns, &item.crdt_id, item.op, item.ttl_ms).await
                 {
-                    Ok(Some(delta_bytes)) => {
+                    Ok((Some(delta_bytes), conflict)) => {
                         *seq += 1;
                         delta_count += 1;
                         metrics::record_op(ns, &item.crdt_id, "ws_batch");
@@ -494,11 +535,20 @@ async fn handle_client_message<S: WsState>(
                         ));
 
                         broadcast_msgs.push(Arc::new(ServerMsg::Delta {
-                            crdt_id: item.crdt_id,
+                            crdt_id: item.crdt_id.clone(),
                             delta_bytes: delta_bytes.into(),
                         }));
+
+                        if let Some(kind) = conflict {
+                            conflict_msgs.push(ServerMsg::Conflict { crdt_id: item.crdt_id, kind });
+                        }
                     }
-                    Ok(None) => {} // no-op — stale/idempotent
+                    Ok((None, conflict)) => {
+                        // no-op — still record conflict if present
+                        if let Some(kind) = conflict {
+                            conflict_msgs.push(ServerMsg::Conflict { crdt_id: item.crdt_id, kind });
+                        }
+                    }
                     Err(ApplyError::Crdt(e)) => {
                         warn!(error = %e, crdt_id = item.crdt_id, "batch: crdt op rejected");
                         send_error(socket, 400, &e.to_string()).await;
@@ -520,6 +570,13 @@ async fn handle_client_message<S: WsState>(
             if let Some(cluster) = state.cluster() {
                 for (crdt_id, delta) in cluster_deltas {
                     cluster.on_delta(ns, &crdt_id, delta).await;
+                }
+            }
+
+            // Send conflict notifications privately to this client.
+            for msg in conflict_msgs {
+                if let Ok(b) = msg.to_msgpack() {
+                    let _ = socket.send(Message::Binary(b.into())).await;
                 }
             }
 
@@ -549,13 +606,17 @@ async fn handle_client_message<S: WsState>(
                 return true;
             }
 
-            let vc = match rmp_serde::decode::from_slice(&since_vc) {
+            let vc: crate::crdt::VectorClock = match rmp_serde::decode::from_slice(&since_vc) {
                 Ok(v) => v,
                 Err(_) => {
                     send_error(socket, 400, "malformed vector clock").await;
                     return true;
                 }
             };
+
+            // Register (or advance) this client's observed VC in the GC registry.
+            // We do this on every Sync so the floor_vc stays accurate.
+            state.client_registry().update_vc(ns, client_id, &vc);
 
             match state.store().get(ns, &crdt_id).await {
                 Ok(Some(crdt)) => {
@@ -596,6 +657,81 @@ async fn handle_client_message<S: WsState>(
         ClientMsg::UnsubscribeQuery { query_id } => {
             debug!(ns, client_id, query_id, "live query unsubscribe");
             query_registry.remove(&query_id);
+        }
+
+        ClientMsg::UndoLww {
+            crdt_id,
+            target_hlc,
+            restore_entry,
+        } => {
+            // Undo a LwwRegister Set requires the same write permission as a normal Set.
+            if !claims.can_write_key_op(
+                &crdt_id,
+                meridian_core::auth::claims::op_masks::LWW_SET,
+            ) {
+                send_error(socket, 403, "insufficient permissions for key").await;
+                return true;
+            }
+
+            let target_hlc_val: HybridLogicalClock = match rmp_serde::decode::from_slice(&target_hlc) {
+                Ok(h) => h,
+                Err(_) => {
+                    send_error(socket, 400, "malformed target_hlc").await;
+                    return true;
+                }
+            };
+
+            // restore_entry is msgpack-encoded `Option<serde_json::Value>`:
+            // `null` (None) means the register was empty before the undone write.
+            let restore_value: Option<serde_json::Value> = match rmp_serde::decode::from_slice(&restore_entry) {
+                Ok(v) => v,
+                Err(_) => {
+                    send_error(socket, 400, "malformed restore_entry").await;
+                    return true;
+                }
+            };
+
+            match apply_undo_lww_atomic(
+                state.store(),
+                ns,
+                &crdt_id,
+                target_hlc_val,
+                restore_value,
+                client_id,
+            )
+            .await
+            {
+                Ok(UndoLwwResult::Applied(delta_bytes)) => {
+                    metrics::record_op(ns, &crdt_id, "ws_undo_lww");
+
+                    // Broadcast the restore delta to all namespace subscribers.
+                    let delta_msg = Arc::new(ServerMsg::Delta {
+                        crdt_id: crdt_id.clone(),
+                        delta_bytes: delta_bytes.into(),
+                    });
+                    state.subscriptions().publish(ns, delta_msg);
+
+                    let ack = ServerMsg::UndoAck { crdt_id };
+                    if let Ok(b) = ack.to_msgpack() {
+                        let _ = socket.send(Message::Binary(b.into())).await;
+                    }
+                }
+                Ok(UndoLwwResult::Skipped(reason)) => {
+                    debug!(ns, client_id, crdt_id, reason, "UndoLww skipped");
+                    let msg = ServerMsg::UndoSkipped { crdt_id, reason };
+                    if let Ok(b) = msg.to_msgpack() {
+                        let _ = socket.send(Message::Binary(b.into())).await;
+                    }
+                }
+                Err(ApplyError::Crdt(e)) => {
+                    warn!(error = %e, "undo_lww crdt error");
+                    send_error(socket, 400, &e.to_string()).await;
+                }
+                Err(ApplyError::Storage(e)) => {
+                    warn!(error = %e, "undo_lww store error");
+                    send_error(socket, 500, "internal error").await;
+                }
+            }
         }
     }
 

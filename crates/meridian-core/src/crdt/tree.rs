@@ -246,6 +246,66 @@ impl TreeCrdt {
         (nodes_removed, records_removed)
     }
 
+    /// DottedDB-inspired precise GC: like `compact_before` but gates tombstone
+    /// removal on `floor_vc` rather than purely on wall-clock age.
+    ///
+    /// A tombstone with `id = HLC(wall_ms, logical, node_id)` is eligible when:
+    /// 1. `floor_vc[node_id] >= logical` — every registered client has seen the add.
+    /// 2. `deleted_at_ms > 0 && deleted_at_ms + grace_ms <= now_ms()`.
+    /// 3. No live node references it as its parent.
+    ///
+    /// Move-log compaction (keep latest record per node) is always safe and
+    /// unchanged from `compact_before`.
+    ///
+    /// Returns `(nodes_removed, move_records_removed)`.
+    pub fn compact_safe(&mut self, floor_vc: &VectorClock, grace_ms: u64) -> (usize, usize) {
+        let now = now_ms();
+        let live_parent_ids: std::collections::BTreeSet<Option<HybridLogicalClock>> = self
+            .nodes
+            .iter()
+            .filter(|n| !n.deleted)
+            .map(|n| n.parent_id)
+            .collect();
+
+        let nodes_before = self.nodes.len();
+        self.nodes.retain(|n| {
+            if !n.deleted {
+                return true;
+            }
+            if live_parent_ids.contains(&Some(n.id)) {
+                return true;
+            }
+            if n.deleted_at_ms == 0 {
+                return true;
+            }
+            if n.deleted_at_ms.saturating_add(grace_ms) > now {
+                return true;
+            }
+            let all_seen = floor_vc.get(n.id.node_id) >= u32::from(n.id.logical);
+            !all_seen
+        });
+        let nodes_removed = nodes_before - self.nodes.len();
+
+        // Move-log compaction: retain only the latest record per node (unchanged).
+        let mut seen_nodes = std::collections::BTreeSet::new();
+        let mut to_keep = std::collections::BTreeSet::new();
+        for (i, record) in self.move_log.iter().enumerate().rev() {
+            if seen_nodes.insert(record.node_id) {
+                to_keep.insert(i);
+            }
+        }
+        let records_before = self.move_log.len();
+        let mut idx = 0;
+        self.move_log.retain(|_| {
+            let keep = to_keep.contains(&idx);
+            idx += 1;
+            keep
+        });
+        let records_removed = records_before - self.move_log.len();
+
+        (nodes_removed, records_removed)
+    }
+
     /// Insert a MoveRecord into move_log, keeping it sorted by op_id ascending.
     fn insert_move_record(&mut self, record: MoveRecord) {
         let idx = self.move_log.partition_point(|r| r.op_id < record.op_id);
@@ -949,5 +1009,98 @@ mod tests {
         let (nodes, records) = t.compact_before(u64::MAX);
         assert_eq!(nodes, 0);
         assert_eq!(records, 0);
+    }
+
+
+    fn make_floor_vc(node_id: u64, up_to_logical: u16) -> VectorClock {
+        let mut vc = VectorClock::new();
+        for _ in 0..u32::from(up_to_logical) {
+            vc.increment(node_id);
+        }
+        vc
+    }
+
+    fn backdate_deleted(t: &mut TreeCrdt, id: HybridLogicalClock) {
+        if let Some(n) = t.nodes.iter_mut().find(|n| n.id == id) {
+            n.deleted_at_ms = 1; // very old
+        }
+    }
+
+    #[test]
+    fn compact_safe_removes_isolated_tombstone_all_clients_seen() {
+        let mut t = TreeCrdt::default();
+        let root = hlc(1, 1, 1); // node_id=1, logical=1
+        add(&mut t, root, None, "a0", "Root");
+        t.apply(TreeOp::DeleteNode { id: root }).unwrap();
+        backdate_deleted(&mut t, root);
+
+        // floor_vc covers node_id=1 up to logical=1 → all clients have seen the insert
+        let floor = make_floor_vc(1, 1);
+        let (nodes_removed, _) = t.compact_safe(&floor, 0);
+        assert_eq!(nodes_removed, 1, "isolated tombstone seen by all should be GC'd");
+        assert_eq!(t.nodes.len(), 0);
+    }
+
+    #[test]
+    fn compact_safe_keeps_tombstone_if_client_has_not_seen_insert() {
+        let mut t = TreeCrdt::default();
+        let root = hlc(1, 1, 1);
+        add(&mut t, root, None, "a0", "Root");
+        t.apply(TreeOp::DeleteNode { id: root }).unwrap();
+        backdate_deleted(&mut t, root);
+
+        // floor_vc is empty → no client has seen anything
+        let floor = VectorClock::new();
+        let (nodes_removed, _) = t.compact_safe(&floor, 0);
+        assert_eq!(nodes_removed, 0, "tombstone must be kept when floor doesn't cover its insert");
+    }
+
+    #[test]
+    fn compact_safe_keeps_tombstone_with_live_children() {
+        let mut t = TreeCrdt::default();
+        let root = hlc(1, 1, 1);
+        let child = hlc(1, 2, 1);
+        add(&mut t, root, None, "a0", "Root");
+        add(&mut t, child, Some(root), "a0", "Child");
+        t.apply(TreeOp::DeleteNode { id: root }).unwrap();
+        backdate_deleted(&mut t, root);
+
+        // floor covers both nodes
+        let floor = make_floor_vc(1, 2);
+        let (nodes_removed, _) = t.compact_safe(&floor, 0);
+        assert_eq!(nodes_removed, 0, "parent tombstone with live children must not be GC'd");
+    }
+
+    #[test]
+    fn compact_safe_keeps_tombstone_within_grace_window() {
+        let mut t = TreeCrdt::default();
+        let root = hlc(1, 1, 1);
+        add(&mut t, root, None, "a0", "Root");
+        t.apply(TreeOp::DeleteNode { id: root }).unwrap();
+        // Set deleted_at_ms to 1 second ago — within any reasonable grace window.
+        if let Some(n) = t.nodes.iter_mut().find(|n| n.id == root) {
+            n.deleted_at_ms = now_ms().saturating_sub(1_000);
+        }
+
+        let floor = make_floor_vc(1, 1);
+        let grace_24h = 24 * 60 * 60 * 1_000;
+        let (nodes_removed, _) = t.compact_safe(&floor, grace_24h);
+        assert_eq!(nodes_removed, 0, "tombstone within grace window must not be GC'd");
+    }
+
+    #[test]
+    fn compact_safe_keeps_tombstone_with_zero_deleted_at() {
+        let mut t = TreeCrdt::default();
+        let root = hlc(1, 1, 1);
+        add(&mut t, root, None, "a0", "Root");
+        t.apply(TreeOp::DeleteNode { id: root }).unwrap();
+        // Force deleted_at_ms to 0 (simulates a tombstone from before we tracked deletion time).
+        if let Some(n) = t.nodes.iter_mut().find(|n| n.id == root) {
+            n.deleted_at_ms = 0;
+        }
+
+        let floor = make_floor_vc(1, 1);
+        let (nodes_removed, _) = t.compact_safe(&floor, 0);
+        assert_eq!(nodes_removed, 0, "tombstone with unknown age must never be GC'd");
     }
 }

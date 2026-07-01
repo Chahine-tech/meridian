@@ -36,6 +36,9 @@ export class PNCounterHandle {
     this.state = opts.initial ?? { p: {}, n: {} };
   }
 
+  /** The CRDT ID this handle is bound to. */
+  get id(): string { return this.crdtId; }
+
   /** Returns the raw internal state for snapshot serialization. */
   rawState(): Readonly<{ p: Record<string, number>; n: Record<string, number> }> {
     return { p: { ...this.state.p }, n: { ...this.state.n } };
