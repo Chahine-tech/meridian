@@ -74,6 +74,28 @@ Op masks are combined with `|` to allow multiple operations.
 | `OpMasks.TREE_DELETE` | `0x08` | Tree |
 | `OpMasks.MAP_WRITE` | `0x01` | CRDTMap |
 
+## Session revocation
+
+An admin token can forcefully close any active WebSocket connection:
+
+```ts
+import { Effect } from "effect";
+
+// Requires an admin token
+await Effect.runPromise(
+  client.http.revokeSession("my-app", 42)
+);
+// → { revoked: true, client_id: 42 }
+```
+
+The server sends the target client a `{ code: 4401, message: "session revoked" }` error frame before closing, giving the client an opportunity to surface a meaningful error.
+
+Returns `HttpError` with status `404` if the client is not currently connected, or `403` if the caller's token is not admin.
+
+<Note>
+Revocation takes effect immediately regardless of ops the target client has in flight — the connection is closed before the next message is processed. This is a hard close, not a graceful drain.
+</Note>
+
 ## How it works
 
 The logic mirrors the server's `PermEntry::matches` exactly:

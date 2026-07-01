@@ -86,6 +86,7 @@ await Effect.runPromise(
 | `offline` | `boolean?` | Start without connecting — operate from cache, call `client.connect()` later |
 | `persistence` | `PersistenceConfig?` | Persist CRDT snapshots and the pending op queue across page loads |
 | `tabSync` | `boolean?` | Broadcast deltas to other tabs in the same namespace via `BroadcastChannel` |
+| `encryption` | `Record<string, CryptoKey>?` | Map from CRDT ID glob to AES-256-GCM key. Matching handles encrypt values before sending and decrypt on receive. Supports `LwwRegister`, `Presence`, `ORSet` (deterministic nonce), and `Tree`. |
 
 ### CRDT handles
 
@@ -344,7 +345,10 @@ client.http.postOp(ns, id, op)           // → Effect<CrdtOpResponse, ...>
 client.http.syncCrdt(ns, id, sinceVc?)   // → Effect<CrdtGetResponse, ...>
 client.http.issueToken(ns, opts)         // → Effect<TokenIssueResponse, ...>
 client.http.tokenMe(ns)                  // → Effect<TokenClaims, ...>
+client.http.revokeSession(ns, clientId)  // → Effect<{ revoked: boolean; client_id: number }, ...>
 ```
+
+`revokeSession` forcefully closes a client's WebSocket connection (requires admin token). The server sends the target a `{ code: 4401, message: "session revoked" }` error frame before closing. Returns `HttpError` with status `404` if the client is not connected.
 
 `issueToken` accepts both V1 (glob lists) and V2 (fine-grained rules):
 

@@ -26,10 +26,11 @@ The server treats this as an opaque JSON value — it stores, merges, and broadc
 |------|-----------|
 | `LwwRegister` | ✅ value field |
 | `Presence` | ✅ data field |
+| `ORSet` | ✅ element values (deterministic AES-GCM) |
+| `Tree` | ✅ node value field |
 | `GCounter` | ❌ numeric merge requires plaintext |
 | `PNCounter` | ❌ numeric merge requires plaintext |
 | `RGA` | ❌ character-level merge requires plaintext |
-| `ORSet` | ❌ see [limitations](#orset-limitation) |
 | `CRDTMap` | ❌ delegates to inner CRDTs |
 
 ## Quick start
@@ -73,7 +74,7 @@ const client = await Effect.runPromise(
 
 ### 3. Use handles normally
 
-No API change — `set()`, `value()`, `heartbeat()`, `online()` all work identically. Encryption is transparent.
+No API change — `set()`, `value()`, `heartbeat()`, `online()`, `add()`, `remove()`, `addNode()`, `updateNode()` all work identically. Encryption is transparent.
 
 ```ts
 // LwwRegister — value is encrypted on the wire
@@ -85,6 +86,18 @@ console.log(profile.value()); // { name: "Alice", email: "…" } — already dec
 const room = client.presence("pr:room-1");
 room.heartbeat({ cursor: { x: 42, y: 100 }, status: "active" }, 30_000);
 console.log(room.online()); // entries with decrypted data
+
+// ORSet — element values are encrypted before being sent
+const tags = client.orset("or:secret-tags");
+tags.add("confidential");          // local state stays plaintext
+tags.remove("confidential");       // works correctly — deterministic encryption matches the server key
+console.log(tags.elements());      // ["confidential"] — decrypted
+
+// Tree — node values are encrypted
+const outline = client.tree("tr:private-doc");
+const id = outline.addNode(null, "a0", "My secret note");
+outline.updateNode(id, "Updated content");
+console.log(outline.value().roots[0].value); // "Updated content" — decrypted
 ```
 
 ## Key distribution
@@ -109,11 +122,28 @@ encryption: {
 
 Pattern evaluation is first-match-wins in iteration order. Unmatched CRDT IDs are not encrypted.
 
-## ORSet limitation
+## ORSet — deterministic encryption
 
-ORSet cannot be encrypted with AES-GCM because it is **non-deterministic**: encrypting the same element twice (with different random nonces) produces different ciphertexts. Since the server uses the element value as a map key internally, two clients encrypting `"alice"` would create two separate server-side entries — Remove operations could only remove one of them, breaking convergence.
+Standard AES-GCM uses a random nonce for every encryption, which means encrypting the same element twice produces different ciphertexts. This would break ORSet: the server uses the element value as a map key, so two clients encrypting `"alice"` would create two unrelated server-side entries and `remove()` would only remove one of them.
 
-A future release will add ORSet encryption using **deterministic authenticated encryption** (AES-SIV or HMAC-based pseudonymization), which preserves element identity while hiding plaintext from the server.
+Meridian solves this with **deterministic nonce derivation**: the nonce is the first 12 bytes of `SHA-256(plaintext)`. Same element → same nonce → same ciphertext → same server key. Remove operations work correctly across all clients.
+
+Security properties are preserved: different plaintext values produce different SHA-256 digests and thus different nonces, so there is no cross-value nonce reuse. The only information leaked is element equality (two clients that add the same value produce the same ciphertext), which is already implied by ORSet semantics.
+
+Use `encryptJsonDeterministic` directly if you need this primitive outside of ORSet:
+
+```ts
+import { encryptJsonDeterministic, generateAesGcmKey } from "meridian-sdk";
+
+const { key } = await generateAesGcmKey();
+
+const enc1 = await encryptJsonDeterministic(key, "alice");
+const enc2 = await encryptJsonDeterministic(key, "alice");
+enc1.n === enc2.n; // true — same nonce, same ciphertext
+
+const enc3 = await encryptJsonDeterministic(key, "bob");
+enc1.n === enc3.n; // false — different plaintext → different nonce
+```
 
 ## What the server can still see
 
@@ -138,4 +168,8 @@ importAesGcmKey(raw: Uint8Array | string): Promise<CryptoKey>
 encryptJson(key: CryptoKey, value: unknown): Promise<EncryptedValue>
 decryptJson(key: CryptoKey, enc: EncryptedValue): Promise<unknown>
 isEncryptedValue(v: unknown): v is EncryptedValue
+
+// Deterministic encryption — nonce = SHA-256(plaintext)[0:12]
+// Required for ORSet; safe to use elsewhere when element equality must be preserved.
+encryptJsonDeterministic(key: CryptoKey, value: unknown): Promise<EncryptedValue>
 ```
